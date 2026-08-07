@@ -1,19 +1,17 @@
 # Multi-account support — design spec
 
-Status: **implemented in 0.3.0** (glint). The multi-account
-credential/token layer, calendar `account` field, and `docket --auth
-<provider>:<account>` CLI syntax described below are all still live in
-docket. **Phase 4 and the "What the setup wizard does / doesn't do"
-section describe the interactive setup wizard, which docket removed**
-(see `README.md` → Origins, `CHANGELOG.md` → `[0.1.0]`) — those parts
-are kept below only as a historical record of what was built, not as
-current behavior. Without a wizard, manually-added `[[providers]]`
-blocks in `calendar.toml` are never rebuilt out from under you by
-anything — the round-trip-preservation problem Phase 4 solved doesn't
-exist anymore.
-
-User-facing setup lives in INSTRUCTIONS.md → *Multiple calendar
-accounts*; this doc is the design rationale.
+Status: **historical**. This spec was written for glint's OAuth-backed
+Google/Microsoft calendar and email providers, which docket has since
+removed entirely (see `README.md` → Origins, `CHANGELOG.md`) — along
+with the `docket --auth <provider>:<account>` CLI syntax and the
+per-provider OAuth token/client credential layer this doc describes.
+The calendar `account` field on `[[providers]]` entries survives and
+still works exactly as described below, but its only remaining
+practical use is ICS's `[[feeds]]` multi-account mechanism (CalDAV is
+currently single-account) — see INSTRUCTIONS.md → *ICS / webcal feeds*
+for the current, user-facing version. Everything below involving
+Google, Outlook, or `--auth` is kept only as a historical record of
+what glint built, not as current behavior.
 
 ## Motivation
 

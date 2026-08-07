@@ -1,21 +1,25 @@
 # Profiles — functional & technical spec
 
-Status: **implemented — 0.4.0** (glint). Profile resolution, the
-global/per-profile layering, migration, and the CLI surface described
-below are all still live in docket. **The interactive setup wizard
-this spec was written against — including the "Profile Manager" wizard
-page and `.wizard_state.toml` — was removed** (see `README.md` →
-Origins, `CHANGELOG.md` → `[0.1.0]`). Every profile-management
+Status: **implemented — 0.4.0** (glint). Profile resolution, migration,
+and the CLI surface described below are all still live in docket.
+Two things this spec describes as still-global have since changed:
+**the interactive setup wizard** this spec was written against —
+including the "Profile Manager" wizard page and `.wizard_state.toml` —
+**was removed**, and **OAuth client registrations no longer exist at
+all** (docket dropped Google/Microsoft OAuth entirely — see
+`README.md` → Origins, `CHANGELOG.md`). Every profile-management
 operation the wizard's Profile Manager offered (create / clone /
 rename / delete / list) already had a non-interactive CLI equivalent
 (`--new-profile`, `--rename-profile`, `--delete-profile`,
-`--list-profiles`) and those are what's live today — see the sections
-below marked *(historical)* for what the wizard used to do.
+`--list-profiles`) and those are what's live today. The colorscheme
+library is now the *only* global-layer file — see the sections below
+marked *(historical)* for what the wizard/OAuth layer used to do.
 
 Revised after an adversarial review and dogfooding: migration is
 **opt-in and non-destructive** (a flat config is read in place; a stray
-run can't wipe it), profile resolution has a hard set-once invariant,
-clone is config-only, and OAuth client registrations are global-only.
+run can't wipe it), and profile resolution has a hard set-once
+invariant. (The "clone is config-only, OAuth client registrations are
+global-only" note below is historical — there's no OAuth layer left.)
 
 > Version note: shipped as **0.4.0** — it touches the CLI surface, the
 > on-disk layout, and a one-time migration, so it's a minor

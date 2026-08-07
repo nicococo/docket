@@ -77,7 +77,6 @@ Plus three small additions outside the widget module:
         kind: super::hello::KIND,
         factory: super::hello::build,
         default_in_first_run: false,
-        auth_requirements: &[],
     },
     ```
 
@@ -392,9 +391,9 @@ let up = uptime_label(secs);  // u64
 
 ### Credentials storage (`docket::credentials`)
 
-**When to use:** any time you need to persist a secret to disk — OAuth tokens, API keys, session cookies, paste-captured tokens, anything sensitive enough that "world-readable" would be a real problem.
+**When to use:** any time you need to *read* a secret from disk — API keys, app passwords, anything sensitive enough that "world-readable" would be a real problem.
 
-Use the shared helpers instead of writing the atomic-write + `chmod 0600` dance yourself. Skipping a step here is a security regression and the kind of bug that easily lands silently.
+Every credential file in docket is hand-edited by the user (there's no OAuth flow, so nothing in-process ever writes a fresh secret to disk) — `credentials` is a read-only module. If a future widget genuinely needs to persist a secret at runtime, that's new ground: don't roll your own atomic-write + `chmod 0600` dance, open an issue to discuss adding a `save` path back to this module first.
 
 #### API
 
@@ -406,40 +405,31 @@ use crate::credentials;
 // is created with mode 0700 on first use (idempotent).
 
 // Resolve a basename to its absolute path. Does NOT create the file.
-let path = credentials::path("my_widget_token.toml")?;
+let path = credentials::path("my_widget_secret.toml")?;
 
 // Load a TOML-serialised value. Returns Ok(None) if the file is
 // absent — caller decides whether that's expected or fatal.
-let token: Option<MyToken> = credentials::load("my_widget_token.toml")?;
-
-// Save with atomic write + chmod 0600 (Unix). Temp file is created
-// alongside the destination, perms tightened *before* the rename,
-// so the final inode is never visible at a wider mode — even if
-// docket crashes mid-write.
-let path = credentials::save("my_widget_token.toml", &token)?;
+let secret: Option<MySecret> = credentials::load("my_widget_secret.toml")?;
 ```
 
-A brand-new credential file (e.g. an OAuth client registration) that
-needs a placeholder starter template seeded on first run belongs
-alongside the existing ones in `config::seed_global_layer` /
+A brand-new credential file that needs a placeholder starter template
+seeded on first run belongs alongside the existing ones in
 `config::seed_profile_dir` (`src/config/mod.rs`) — that's what
-`docket --init` calls, and it's the single place all default-seeded
-files (config TOML *and* credentials templates) come from.
+`docket --init` calls, and it's the place all default-seeded
+per-profile files (config TOML *and* credentials templates) come from.
 
 #### Behavior notes
 
-- **Atomic + chmod-before-rename**: writes go through `<name>.tmp`, get `chmod 0600`, then rename onto the final path. A crash mid-write leaves either the old file intact or no file — never a half-written secret at default perms.
-- **Filename, not path**: the API takes basenames so the credentials-dir convention is enforced. You can't accidentally write a token to the wrong place.
-- **`Ok(None)` for missing files**: `load` treats absence as "not yet captured" rather than an error. Surface a user-visible message yourself when that matters.
-- **Unix-only perm tightening**: `chmod 0600` is a no-op on non-Unix targets. The atomic-write path still runs.
+- **Filename, not path**: the API takes basenames so the credentials-dir convention is enforced. You can't accidentally read a secret from the wrong place.
+- **`Ok(None)` for missing files**: `load` treats absence as "not yet configured" rather than an error. Surface a user-visible message yourself when that matters.
+- **0700 dir, hand-edited files**: the credentials directory itself is created mode `0700`; individual files are whatever mode the user's editor left them at (docket never chmods a file it didn't write).
 
 #### When *not* to use
 
 - **Non-secret config**: widget TOMLs (`calendar.toml`, `news.toml`, etc.) belong in the config dir, not credentials. They're meant to be world-readable; users edit them.
-- **System keyring integration**: this module writes plaintext-on-disk (chmod 0600). Future work to back specific files with macOS Keychain / Windows Credential Manager / `libsecret` would land as a `CredentialBackend` trait sitting on top of this module; see the [credential-storage roadmap](https://github.com/nicococo/docket/issues) once it's filed.
-- **Outside the credentials dir**: if you genuinely need to write a chmod-0600 file somewhere else (logs with secrets?), that's a different problem — talk through the use case in an issue first.
+- **System keyring integration**: out of scope for this module today. Future work to back specific files with macOS Keychain / Windows Credential Manager / `libsecret` would land as a new module, not an extension of this one.
 
-**Reference example:** [`src/auth/google/store.rs`](../src/auth/google/store.rs) — `GoogleToken::{path, load, save}` are thin wrappers over `credentials::{path, load, save}`. Microsoft's token store follows the same shape.
+**Reference example:** [`src/widgets/calendar/caldav.rs`](../src/widgets/calendar/caldav.rs) — `CalDavCredentials::load` is a thin wrapper over `credentials::load`. IMAP and ICS follow the same shape.
 
 ---
 
@@ -496,7 +486,7 @@ The most common shape is `Option<TimedFeedback<String>>` for footer messages, bu
 
 #### When *not* to use
 
-- **Persistent status** (e.g., "OAuth required" while a token is missing). Those aren't transient — they're a function of state, not time.
+- **Persistent status** (e.g., "credentials missing" while a widget can't connect). Those aren't transient — they're a function of state, not time.
 - **Animations** with multiple frames or per-tick updates. `TimedFeedback` is set-once-and-forget. For pulsing / progress bars, manage the time yourself.
 
 **Reference example:** `Option<TimedFeedback<String>>` for footer messages — [`src/widgets/feeds/mod.rs`](../src/widgets/feeds/mod.rs).
@@ -725,7 +715,7 @@ These conventions emerged from building docket's widgets (both the six shipped t
 ### Persistence of runtime mutations
 
 - If your widget mutates a list at runtime, write back to the widget's TOML yourself — there's no shared helper for this today (the one that existed, `config::rewrite_widget_top_level_string_array`, was removed along with its only callers). See `config::load_widget_toml_for_instance` for the read side.
-- Credentials go in `~/.config/docket/credentials/<widget>_<thing>.toml`, chmod `0600`. See [`auth/google/store.rs`](../src/auth/google/store.rs).
+- Credentials go in `~/.config/docket/credentials/<widget>_<thing>.toml`; the containing dir is chmod `0700`. See [`widgets/calendar/caldav.rs`](../src/widgets/calendar/caldav.rs).
 
 ### Don't fight the trait
 
@@ -746,7 +736,7 @@ When you want to copy a pattern, these are the canonical references:
 | RSS feed aggregation | [`news`](../src/widgets/news/mod.rs), [`feeds`](../src/widgets/feeds/mod.rs) |
 | LLM summarization w/ length toggle | [`feeds`](../src/widgets/feeds/mod.rs) |
 | Inline image rendering | [`feeds`](../src/widgets/feeds/mod.rs) (article thumbnails) |
-| OAuth token storage | [`auth/google/store.rs`](../src/auth/google/store.rs) |
+| Credential-file loading | [`widgets/calendar/caldav.rs`](../src/widgets/calendar/caldav.rs) |
 | Confirm-removal modal | [`notes`](../src/widgets/notes/mod.rs) |
 | Mouse hit-testing with wrapped rows | [`feeds`](../src/widgets/feeds/mod.rs) |
 | Adaptive horizontal/vertical layout | [`feeds`](../src/widgets/feeds/mod.rs) |

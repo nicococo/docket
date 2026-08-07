@@ -2,15 +2,16 @@
 // Copyright (C) 2026 ntrospect0
 // Copyright (C) 2026 nicococo
 
-//! Local "seen via docket" persistence. Docket never writes read-state back to
-//! the server (Gmail / Graph), so we maintain a tiny on-disk set so messages
-//! the user has expanded inside the dashboard stop showing the `●` indicator
-//! even if they remain unread on the provider. It also holds the reverse
-//! override — messages the user explicitly pressed `u` on to flag back as
-//! unread even though the server (or a prior "seen") says otherwise.
+//! Local "seen via docket" persistence. This is a fast local overlay on
+//! top of the IMAP server's `\Seen` flag — toggling read state (`u`) writes
+//! through to the server too (best-effort, see `EmailWidget::spawn_set_seen`),
+//! but the local set lets the `●` indicator react instantly without waiting
+//! on a round-trip, and holds the reverse override — messages the user
+//! explicitly pressed `u` on to flag back as unread even though the server
+//! (or a prior "seen") says otherwise.
 //!
 //! One file per (provider, account) pair, e.g.
-//! `~/.config/docket/email_seen_outlook_alice_at_example.com.json`.
+//! `~/.config/docket/email_seen_imap_alice_at_example.com.json`.
 //! Contents: `{ "seen": ["id_1"], "unread": ["id_2"], "last_pruned": "<iso>" }`.
 //! An id is never in both sets — marking one side clears the other.
 

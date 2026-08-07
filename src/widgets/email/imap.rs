@@ -2,10 +2,9 @@
 // Copyright (C) 2026 ntrospect0
 // Copyright (C) 2026 nicococo
 
-//! IMAP-backed email provider. Sits alongside [`gmail::GmailProvider`]
-//! and [`outlook::OutlookEmailProvider`]; users who don't want to deal
-//! with OAuth (or whose provider isn't Google/Microsoft) point docket
-//! at any IMAP server with an app-specific password.
+//! IMAP-backed email provider — docket's only email backend. No OAuth,
+//! no app registration: point docket at any IMAP server with an
+//! app-specific password.
 //!
 //! The `imap` crate is synchronous; we wrap every call in
 //! [`tokio::task::spawn_blocking`] so the wider async runtime keeps
@@ -115,9 +114,8 @@ impl ImapProvider {
             .clone()
     }
 
-    /// Mirror of the OAuth providers' seed method. For IMAP this is
-    /// largely a no-op — `new` already seeds from `username` — but
-    /// the EmailProviderHandle dispatcher calls it uniformly.
+    /// Largely a no-op — `new` already seeds from `username` — but
+    /// `EmailProviderHandle` calls it uniformly regardless of provider.
     pub fn seed_account_cache(&self, address: &str) {
         let mut guard = self.account.lock().expect("imap account cache poisoned");
         if guard.is_none() {

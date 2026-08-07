@@ -15,8 +15,6 @@
 //! No edits to `app.rs` or `main.rs` required.
 //! Registration and first-run defaults all walk `WIDGETS`.
 
-use crate::auth::registry::AuthRequirement;
-
 use super::{Widget, WidgetCtx, WidgetFactory};
 
 /// Static description of a widget kind.
@@ -32,12 +30,6 @@ pub struct WidgetDescriptor {
     /// to `false` for auxiliary widgets that the user should opt into by
     /// editing `config.toml`.
     pub default_in_first_run: bool,
-
-    /// OAuth providers this widget may call. Widgets with multiple backends
-    /// (calendar's google / microsoft / caldav / local) list every provider
-    /// they could need. Fully offline widgets leave this empty.
-    #[allow(dead_code)] // reserved for a future auth-setup prompt.
-    pub auth_requirements: &'static [AuthRequirement],
 }
 
 /// The full set of widgets compiled into this build. Order is significant
@@ -48,60 +40,36 @@ pub const WIDGETS: &[WidgetDescriptor] = &[
         kind: super::calendar::KIND,
         factory: super::calendar::build,
         default_in_first_run: true,
-        auth_requirements: &[
-            AuthRequirement {
-                provider: "google",
-                scope_hints: &["calendar.readonly"],
-            },
-            AuthRequirement {
-                provider: "microsoft",
-                scope_hints: &["Calendars.Read"],
-            },
-        ],
     },
     #[cfg(feature = "widget-news")]
     WidgetDescriptor {
         kind: super::news::KIND,
         factory: super::news::build,
         default_in_first_run: true,
-        auth_requirements: &[],
     },
     #[cfg(feature = "widget-email")]
     WidgetDescriptor {
         kind: super::email::KIND,
         factory: super::email::build,
         default_in_first_run: false,
-        auth_requirements: &[
-            AuthRequirement {
-                provider: "google",
-                scope_hints: &["gmail.readonly"],
-            },
-            AuthRequirement {
-                provider: "microsoft",
-                scope_hints: &["Mail.Read"],
-            },
-        ],
     },
     #[cfg(feature = "widget-resources")]
     WidgetDescriptor {
         kind: super::resources::KIND,
         factory: super::resources::build,
         default_in_first_run: false,
-        auth_requirements: &[],
     },
     #[cfg(feature = "widget-notes")]
     WidgetDescriptor {
         kind: super::notes::KIND,
         factory: super::notes::build,
         default_in_first_run: false,
-        auth_requirements: &[],
     },
     #[cfg(feature = "widget-feeds")]
     WidgetDescriptor {
         kind: super::feeds::KIND,
         factory: super::feeds::build,
         default_in_first_run: false,
-        auth_requirements: &[],
     },
 ];
 

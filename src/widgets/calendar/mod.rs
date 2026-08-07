@@ -5,11 +5,9 @@
 pub mod caldav;
 mod colors;
 mod config;
-pub mod google;
 pub mod ics;
 pub mod local;
 mod nav;
-pub mod outlook;
 pub mod provider;
 mod state;
 mod wiring;
@@ -21,9 +19,8 @@ pub use config::{
 use colors::CalendarColors;
 use config::VIEW_TABS;
 use nav::{
-    advance_month, bottom_action_at, content_rect_for, google_calendar_url, month_long,
-    outlook_calendar_url, rotated_weekday_labels, start_of_week, weekday_short, BottomAction,
-    WebTarget,
+    advance_month, bottom_action_at, content_rect_for, month_long, rotated_weekday_labels,
+    start_of_week, weekday_short, BottomAction,
 };
 use state::{CalendarState, CACHE_KEY_EVENTS};
 use wiring::build_provider;
@@ -53,10 +50,6 @@ use crate::cache::ScopedCache;
 use crate::theme::{ColorScheme, Theme};
 use crate::ui::{apply_title_row, big_digits, MetadataEmphasis};
 
-/// TTL for transient title-bar status messages (e.g. open-failed
-/// reasons, "no web-viewable calendar configured" notices).
-const STATUS_TTL: Duration = Duration::from_millis(2500);
-
 /// How long a *focused* calendar must sit without key/mouse activity
 /// before the day-rollover auto-advance is allowed to fire. Keeps the
 /// view from jumping out from under someone actively reading or
@@ -76,12 +69,12 @@ pub struct CalendarWidget {
     /// For Week, the week containing it. For Month, the month containing it.
     anchor: NaiveDate,
     provider: Arc<dyn CalendarProvider>,
-    /// Source label surfaced in the cell title, e.g. `google`, `local`,
-    /// `google+outlook`. Generated when the provider stack is built.
+    /// Source label surfaced in the cell title, e.g. `caldav`, `local`,
+    /// `caldav+ics`. Generated when the provider stack is built.
     source_label: String,
-    /// When Google was requested but failed to initialize (no client config or
-    /// no token), we keep the user-visible explanation so the widget can show
-    /// "Run `docket --auth google`" instead of silently using the local seed.
+    /// When a configured provider failed to initialize (missing/invalid
+    /// credentials), we keep the user-visible explanation so the widget can
+    /// show what to fix instead of silently falling back to the local seed.
     auth_hint: Option<String>,
     colors: CalendarColors,
     state: Arc<Mutex<CalendarState>>,
@@ -116,17 +109,6 @@ pub struct CalendarWidget {
     /// view's column order and the Month view's grid + header. Cached
     /// as a chrono `Weekday` so the per-render math stays cheap.
     first_day_of_week: Weekday,
-    /// Provider kinds configured at construction time — used by `o`
-    /// to derive the list of web-viewable open targets. Stored
-    /// separately from `provider` (which composes the runtime fetch
-    /// stack) so the `o` handler doesn't have to inspect the live
-    /// provider tree to know whether Google / Outlook were enabled.
-    configured_provider_kinds: Vec<ProviderKind>,
-    /// Atomic gate over the per-tick status-TTL drain. `true` whenever
-    /// a `TimedFeedback` is set; flips back to false the next time
-    /// `update()` finds the slot drained. Lets idle ticks skip the
-    /// state lock entirely. See the same field on `StocksWidget`.
-    feedback_pending: AtomicBool,
     /// Local date the anchor was last positioned as-of — set on
     /// construction, advanced by the auto-roll, and resynced whenever
     /// the user repositions the anchor. `maybe_auto_roll` compares it
@@ -211,8 +193,6 @@ impl CalendarWidget {
             last_horizontal_scroll: None,
             last_vertical_scroll: None,
             first_day_of_week: config.first_day_of_week.as_weekday(),
-            configured_provider_kinds: config.providers.iter().map(|p| p.kind).collect(),
-            feedback_pending: AtomicBool::new(false),
             rollover_date: today,
             last_activity: Instant::now(),
             is_focused: AtomicBool::new(false),
@@ -221,122 +201,10 @@ impl CalendarWidget {
     }
 
 
-    /// Web-viewable open targets derived from the configured
-    /// `[[providers]]`. Google and Outlook entries map to their
-    /// canonical web calendars; CalDAV and Local entries have no
-    /// canonical browser surface and are silently skipped. Duplicate
-    /// URLs (e.g. two Google entries for different calendar IDs)
-    /// collapse to a single target so the picker doesn't list the
-    /// same URL twice.
-    fn web_targets(&self) -> Vec<WebTarget> {
-        let mut out: Vec<WebTarget> = Vec::new();
-        let view = self.view;
-        let date = self.anchor;
-        for kind in &self.configured_provider_kinds {
-            let target = match kind {
-                ProviderKind::Google => Some(WebTarget {
-                    label: "Google Calendar",
-                    url: google_calendar_url(view, date),
-                }),
-                // Microsoft 365 surface — covers the majority of OAuth-
-                // Microsoft callers. Consumer Outlook.com users get
-                // redirected from this URL after signing in, so the
-                // single default works for both. View is deep-linked;
-                // date is left implicit (the provider lands on today).
-                ProviderKind::Outlook => Some(WebTarget {
-                    label: "Outlook Calendar",
-                    url: outlook_calendar_url(view).to_string(),
-                }),
-                // CalDAV servers (iCloud, FastMail, Nextcloud, …) each
-                // have their own web UI with no canonical URL we can
-                // derive from the credentials.
-                ProviderKind::Caldav => None,
-                // A plain ICS feed URL isn't a browsable calendar page —
-                // no canonical web surface to derive it from either.
-                ProviderKind::Ics => None,
-                // Local-only calendars have no web surface.
-                ProviderKind::Local => None,
-            };
-            if let Some(target) = target {
-                if !out.iter().any(|t| t.url == target.url) {
-                    out.push(target);
-                }
-            }
-        }
-        out
-    }
-
-    /// `o` — open one of the configured web calendars in the browser.
-    /// Behavior depends on how many web-viewable providers are
-    /// configured:
-    /// * 0 → status toast `"No web-viewable calendar configured"`.
-    /// * 1 → open directly via `open::that`.
-    /// * 2+ → store the targets in `state.open_picker`; render shows
-    ///   a numbered modal, and `handle_key` consumes the next 1-N
-    ///   keypress to open the chosen URL.
-    fn jump_to_external(&mut self) {
-        let targets = self.web_targets();
-        match targets.len() {
-            0 => {
-                self.set_status("No web-viewable calendar configured");
-            }
-            1 => {
-                let url = targets[0].url.clone();
-                if let Err(err) = open::that(&url) {
-                    tracing::warn!(error = %err, url = %url, "calendar: failed to open URL");
-                    self.set_status(format!("Failed to open browser: {err}"));
-                }
-            }
-            _ => {
-                {
-                    let mut st = self.state.lock().expect("calendar state poisoned");
-                    st.open_picker = Some(targets);
-                    st.dirty = true;
-                }
-            }
-        }
-    }
-
-    /// Resolve a picker keypress. Returns `true` if the press
-    /// consumed the picker (selection made or cancelled), `false` if
-    /// the picker isn't open. Called at the top of `handle_key` so
-    /// the picker takes priority over normal calendar bindings while
-    /// open.
-    fn handle_open_picker_key(&mut self, key: KeyEvent) -> bool {
-        // Snapshot targets without holding the lock across `open::that`.
-        let targets = {
-            let st = self.state.lock().expect("calendar state poisoned");
-            st.open_picker.clone()
-        };
-        let Some(targets) = targets else {
-            return false;
-        };
-        let dismiss = |this: &Self| {
-            let mut st = this.state.lock().expect("calendar state poisoned");
-            st.open_picker = None;
-            st.dirty = true;
-        };
-        match key.code {
-            KeyCode::Char(c) if c.is_ascii_digit() => {
-                let idx = c.to_digit(10).unwrap() as usize;
-                if idx >= 1 && idx <= targets.len() {
-                    let url = targets[idx - 1].url.clone();
-                    dismiss(self);
-                    if let Err(err) = open::that(&url) {
-                        tracing::warn!(error = %err, url = %url, "calendar: failed to open URL");
-                        self.set_status(format!("Failed to open browser: {err}"));
-                    }
-                } else {
-                    // Out-of-range digit — cancel the picker.
-                    dismiss(self);
-                }
-            }
-            // Esc / q cancel; any other key also dismisses without action
-            // (matches the ConfirmModal "any other key cancels" convention).
-            _ => dismiss(self),
-        }
-        true
-    }
+    // The `o` "open in browser" feature was removed along with the
+    // Google/Outlook OAuth calendar backends — it only ever produced a
+    // target for those two providers, and CalDAV/ICS/Local calendars have
+    // no canonical browser URL to deep-link to.
 
     /// In week view the inner area is split into 7 equal-ratio columns, with
     /// the bottom row reserved for the hint. Maps a click to the date in the
@@ -875,19 +743,10 @@ impl CalendarWidget {
         }
     }
 
-    /// Dynamic metadata appended after the title (e.g. `[google+outlook]
+    /// Dynamic metadata appended after the title (e.g. `[caldav+ics]
     /// Sat May 23, 2026`). Rendered via the shared `title_row` helper
     /// so the styling matches every other widget's title bar.
-    ///
-    /// When a transient status message is live (set by
-    /// [`Self::set_status`]) it overrides the normal metadata until
-    /// its `STATUS_TTL` elapses, so the user sees "open" feedback
-    /// (e.g. "No web-viewable calendar configured") right where their
-    /// eye goes for chrome.
     fn title_metadata_string(&self) -> String {
-        if let Some(msg) = self.live_status() {
-            return msg;
-        }
         let source = self.source_label.as_str();
         match self.view {
             CalendarView::Day => format!(
@@ -2313,89 +2172,6 @@ impl CalendarWidget {
             col_area,
         );
     }
-
-    /// Numbered open-target picker. Drawn over the calendar's outer
-    /// `area` (not the inner content area) so the modal can extend
-    /// to the borders if needed; we still hold to a small centred
-    /// box. Looks similar to `ConfirmModal` but lists numbered
-    /// choices instead of a y/N pair, so it lives here rather than
-    /// in `ui::modal` until a second widget needs the same shape.
-    fn render_open_picker(&self, frame: &mut Frame, area: Rect, targets: &[WebTarget]) {
-        if targets.is_empty() {
-            return;
-        }
-        let widest_label = targets
-            .iter()
-            .map(|t| t.label.chars().count())
-            .max()
-            .unwrap_or(0);
-        // Inner width: digit + ") " + label, plus 2-col left/right padding.
-        let inner_w = (widest_label + 4 + 4).max(28) as u16;
-        // Height: title row + blank + N target rows + blank + hint row.
-        let inner_h = (targets.len() as u16) + 4;
-        let modal_w = (inner_w + 2).min(area.width.saturating_sub(2));
-        let modal_h = (inner_h + 2).min(area.height.saturating_sub(2));
-        if modal_w < 6 || modal_h < 5 {
-            return;
-        }
-        let modal_area = Rect {
-            x: area.x + (area.width.saturating_sub(modal_w)) / 2,
-            y: area.y + (area.height.saturating_sub(modal_h)) / 2,
-            width: modal_w,
-            height: modal_h,
-        };
-        // Clear the cells the modal will paint so the calendar
-        // chrome behind it doesn't bleed through.
-        frame.render_widget(ratatui::widgets::Clear, modal_area);
-
-        // Modal title surfaces the view + anchor so the user sees
-        // what's about to open before picking a source. For Google
-        // both view and date round-trip; for Outlook the view does
-        // and the date is implicit (see `outlook_calendar_url`).
-        let view_label = match self.view {
-            CalendarView::Day => "day",
-            CalendarView::Week => "week",
-            CalendarView::Month => "month",
-        };
-        let title = format!(
-            " Open · {} · {} ",
-            view_label,
-            self.anchor.format("%b %-d, %Y"),
-        );
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .border_type(BorderType::Rounded)
-            .border_style(self.theme.border_style(true))
-            .title(Span::styled(title, self.theme.text_selected));
-        let inner = block.inner(modal_area);
-        frame.render_widget(block, modal_area);
-
-        let mut lines: Vec<Line> = Vec::with_capacity(targets.len() + 2);
-        for (i, target) in targets.iter().enumerate() {
-            let key = Span::styled(
-                format!("  {})", i + 1),
-                self.theme.text_focused,
-            );
-            let label = Span::styled(
-                format!(" {}", target.label),
-                self.theme.text_plain,
-            );
-            lines.push(Line::from(vec![key, label]));
-        }
-        lines.push(Line::from(""));
-        lines.push(Line::from(Span::styled(
-            "  Any other key cancels.",
-            self.theme.text_dim,
-        )));
-
-        let body_area = Rect {
-            x: inner.x,
-            y: inner.y + 1,
-            width: inner.width,
-            height: inner.height.saturating_sub(1),
-        };
-        frame.render_widget(Paragraph::new(lines), body_area);
-    }
 }
 
 /// Greedy word-wrap for event titles in week view. Splits on whitespace and
@@ -2478,19 +2254,6 @@ impl Widget for CalendarWidget {
         self.maybe_auto_roll();
         if self.is_due() {
             self.spawn_refresh();
-        }
-        // Drive the dirty flag when a transient status crosses its
-        // TTL so the title-bar metadata reverts on the next frame.
-        // Atomic-gated so an idle dashboard (no pending status) skips
-        // the state lock entirely.
-        if self.feedback_pending.load(Ordering::Relaxed) {
-            let mut st = self.state.lock().expect("calendar state poisoned");
-            if crate::ui::status::drain_if_expired(&mut st.status) {
-                st.dirty = true;
-            }
-            if st.status.is_none() {
-                self.feedback_pending.store(false, Ordering::Relaxed);
-            }
         }
         Ok(())
     }
@@ -2592,29 +2355,12 @@ impl Widget for CalendarWidget {
             frame.render_widget(Paragraph::new(Line::from(spans)), hint_area);
         }
 
-        // Open-picker modal overlays the calendar when active. Drawn
-        // last so it sits on top of every other paint.
-        let picker_targets = self
-            .state
-            .lock()
-            .expect("calendar state poisoned")
-            .open_picker
-            .clone();
-        if let Some(targets) = picker_targets {
-            self.render_open_picker(frame, area, &targets);
-        }
     }
 
     fn handle_key(&mut self, key: KeyEvent) -> EventResult {
         self.last_activity = Instant::now();
         if key.modifiers != KeyModifiers::NONE && key.modifiers != KeyModifiers::SHIFT {
             return EventResult::Ignored;
-        }
-        // Open-picker takes priority over normal bindings when shown,
-        // so digit keys route to it rather than (e.g.) Day/Week/Month
-        // view shortcuts.
-        if self.handle_open_picker_key(key) {
-            return EventResult::Handled;
         }
         // Uppercase ASCII letters are reserved for the app-wide
         // `Shift+<letter>` focus-jump dispatcher — never consume them here.
@@ -2715,13 +2461,6 @@ impl Widget for CalendarWidget {
                 st.gradient = st.gradient.next();
                 EventResult::Handled
             }
-            // `o` — open one of the configured web calendars in the
-            // browser. See `jump_to_external` for the 0 / 1 / 2+
-            // provider routing.
-            KeyCode::Char('o') => {
-                self.jump_to_external();
-                EventResult::Handled
-            }
             _ => EventResult::Ignored,
         };
         // A user reposition re-bases the auto-roll: future day-rollovers
@@ -2756,7 +2495,6 @@ impl Widget for CalendarWidget {
             ("PgUp / PgDn", "scroll agenda ±10 lines"),
             ("wheel", "scroll the day's agenda"),
             ("t", "jump to today"),
-            ("o", "open calendar in browser (picker when multiple configured)"),
             ("g", "cycle digit gradient style (today's date)"),
             (
                 "click day",

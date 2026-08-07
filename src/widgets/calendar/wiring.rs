@@ -6,12 +6,12 @@
 //! `[[providers]]` list into a single `Arc<dyn CalendarProvider>`
 //! (a CompositeProvider when more than one) plus a short
 //! `source_label` for the title row and an optional `auth_hint`
-//! when one or more entries failed to authorize.
+//! when one or more entries failed to connect.
 //!
 //! Per-provider HTTP / credential code lives in the sibling files
-//! (`local.rs`, `google.rs`, `outlook.rs`, `caldav.rs`); this module
-//! is the assembly layer that picks the right backend for each
-//! `ProviderEntry` and merges them at the trait boundary.
+//! (`local.rs`, `caldav.rs`, `ics.rs`); this module is the assembly
+//! layer that picks the right backend for each `ProviderEntry` and
+//! merges them at the trait boundary.
 
 use std::sync::Arc;
 
@@ -21,19 +21,14 @@ use chrono::{DateTime, Local};
 
 use super::caldav::{CalDavCredentials, CalDavProvider};
 use super::config::{CalendarConfig, ProviderEntry, ProviderKind};
-use super::google::GoogleCalendarProvider;
 use super::ics::{IcsCredentials, IcsProvider};
 use super::local::{LocalCalendarFile, LocalCalendarProvider};
-use super::outlook::OutlookCalendarProvider;
 use super::provider::{CalendarProvider, Event};
 
-use crate::auth::google::{store::GoogleToken, OAuthClientConfig as GoogleClientConfig};
-use crate::auth::microsoft::{store::MicrosoftToken, OAuthClientConfig as MicrosoftClientConfig};
-
 /// Returns `(provider, source_label, auth_hint)`. The provider is either a
-/// single backend (Local / Google / Outlook / CalDAV) or a CompositeProvider
-/// fanning out to multiple. `source_label` becomes the `[label]` shown in the
-/// cell title (`google`, `local`, `google+outlook`, etc.).
+/// single backend (Local / CalDAV / ICS) or a CompositeProvider fanning out
+/// to multiple. `source_label` becomes the `[label]` shown in the cell title
+/// (`caldav`, `local`, `caldav+ics`, etc.).
 pub(super) fn build_provider(
     config: &CalendarConfig,
 ) -> (Arc<dyn CalendarProvider>, String, Option<String>) {
@@ -108,8 +103,6 @@ fn build_entry(
                 LocalCalendarProvider::from_file(file).map_err(|e| format!("local events: {e}"))?;
             Ok((Arc::new(p), source))
         }
-        ProviderKind::Google => build_google_entry(entry, &source).map(|p| (p, source)),
-        ProviderKind::Outlook => build_outlook_entry(entry, &source).map(|p| (p, source)),
         ProviderKind::Caldav => {
             let urls = if entry.calendar_ids.is_empty() {
                 config.caldav.calendars.clone()
@@ -120,85 +113,6 @@ fn build_entry(
         }
         ProviderKind::Ics => build_ics_entry(entry).map(|p| (p, source)),
     }
-}
-
-/// The `docket … --auth …` command to suggest for a provider + account.
-///
-/// The `--auth` target is `microsoft` for the default account, `microsoft:work`
-/// for a named one. Crucially, when a non-default profile is active the command
-/// includes `--profile <name>` — otherwise the token would be written to the
-/// *default* profile's credentials, and this profile's calendar would keep
-/// asking to authorize.
-fn auth_command(provider: &str, account: &str) -> String {
-    let target = if account == crate::auth::DEFAULT_ACCOUNT {
-        provider.to_string()
-    } else {
-        format!("{provider}:{account}")
-    };
-    let profile = crate::config::active_profile();
-    if profile == crate::config::DEFAULT_PROFILE {
-        format!("docket --auth {target}")
-    } else {
-        format!("docket --profile {profile} --auth {target}")
-    }
-}
-
-fn build_outlook_entry(
-    entry: &ProviderEntry,
-    source: &str,
-) -> Result<Arc<dyn CalendarProvider>, String> {
-    let client = MicrosoftClientConfig::load().map_err(|err| {
-        tracing::warn!(error = %err, "microsoft_oauth_client.toml missing or invalid");
-        "Drop microsoft_oauth_client.toml in ~/.config/docket/credentials/".to_string()
-    })?;
-    let account = entry.account_label();
-    let token = MicrosoftToken::load_account(account)
-        .map_err(|err| format!("Outlook token unreadable: {err}"))?
-        .ok_or_else(|| {
-            format!(
-                "Run `{}` to connect Microsoft Outlook",
-                auth_command("microsoft", account)
-            )
-        })?;
-    OutlookCalendarProvider::new(
-        client,
-        token,
-        entry.calendar_ids.clone(),
-        source.to_string(),
-        account.to_string(),
-    )
-    .map(|p| Arc::new(p) as Arc<dyn CalendarProvider>)
-    .map_err(|err| format!("Outlook init failed: {err}"))
-}
-
-fn build_google_entry(
-    entry: &ProviderEntry,
-    source: &str,
-) -> Result<Arc<dyn CalendarProvider>, String> {
-    let client = GoogleClientConfig::load().map_err(|err| {
-        tracing::warn!(error = %err, "google_oauth_client.toml missing or invalid");
-        "Drop google_oauth_client.toml in ~/.config/docket/credentials/".to_string()
-    })?;
-    let account = entry.account_label();
-    let token = match GoogleToken::load_account(account) {
-        Ok(Some(t)) => t,
-        Ok(None) => {
-            return Err(format!(
-                "Run `{}` to connect Google Calendar",
-                auth_command("google", account)
-            ));
-        }
-        Err(err) => return Err(format!("Google token unreadable: {err}")),
-    };
-    GoogleCalendarProvider::new(
-        client,
-        token,
-        entry.calendar_ids.clone(),
-        source.to_string(),
-        account.to_string(),
-    )
-    .map(|p| Arc::new(p) as Arc<dyn CalendarProvider>)
-    .map_err(|err| format!("Google init failed: {err}"))
 }
 
 fn build_caldav_entry(urls: Vec<String>) -> Result<Arc<dyn CalendarProvider>, String> {

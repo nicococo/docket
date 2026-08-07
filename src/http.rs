@@ -9,16 +9,11 @@
 //!
 //! ## When to share, when to bespoke
 //!
-//! Use [`shared`] for plain JSON over HTTPS with a docket user-agent —
-//! news, weather, calendar (Google + Outlook), email (Gmail + Outlook),
-//! LLM providers, geolocation, OAuth flows.
+//! Use [`shared`] for plain JSON/RSS/ICS over HTTPS with a docket
+//! user-agent — news, feeds, calendar (CalDAV, ICS), LLM providers.
 //!
 //! Keep a bespoke client for callers needing client-scoped state the
 //! shared instance can't carry:
-//! - **Cookie store** (`cookie_store(true)`): Yahoo's stocks / forex
-//!   endpoints set CSRF cookies on the chart API that the next request
-//!   must echo back. A shared cookie store would bleed those cookies
-//!   into unrelated widgets.
 //! - **Default headers**: CalDAV uses HTTP Basic on every request via
 //!   `default_headers(Authorization: …)` — that header would leak into
 //!   every other caller if applied on the shared client.
@@ -34,8 +29,8 @@ static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
 /// Carries a 30-second timeout — generous enough for slow LLM
 /// completions (Anthropic + OpenAI both can take >20s under load), tight
 /// enough that a wedged TCP connection won't hang a widget refresh
-/// forever. Callers needing a shorter bound (geolocation, weather) apply
-/// it per-request via `RequestBuilder::timeout`.
+/// forever. Callers needing a shorter bound apply it per-request via
+/// `RequestBuilder::timeout`.
 pub fn shared() -> reqwest::Client {
     CLIENT
         .get_or_init(|| {

@@ -227,7 +227,7 @@ pub trait Widget: Send + Sync {
     }
 
     /// Dynamic suffix that the widget would normally append to its
-    /// own title (e.g. "47 articles", "[outlook] alice@example.com").
+    /// own title (e.g. "47 articles", "[imap] alice@example.com").
     /// Returns `None` when the widget has no metadata to surface.
     ///
     /// Used by stack widgets to render `<tab> <tab> — <active metadata>`

@@ -184,10 +184,6 @@ pub const DEFAULT_ANTHROPIC_KEY_TEMPLATE: &str = include_str!("defaults/credenti
 
 pub const DEFAULT_OPENAI_KEY_TEMPLATE: &str = include_str!("defaults/credentials/openai.toml");
 
-pub const DEFAULT_GOOGLE_CLIENT_TEMPLATE: &str = include_str!("defaults/credentials/google_client.toml");
-
-pub const DEFAULT_MICROSOFT_CLIENT_TEMPLATE: &str = include_str!("defaults/credentials/microsoft_client.toml");
-
 pub const DEFAULT_CALDAV_TEMPLATE: &str = include_str!("defaults/credentials/caldav.toml");
 
 pub const DEFAULT_ICS_TEMPLATE: &str = include_str!("defaults/credentials/ics.toml");
@@ -204,21 +200,12 @@ pub fn init_default_config() -> Result<PathBuf> {
 }
 
 /// Seed the shared **global layer** at the docket root: the colorscheme
-/// library and the OAuth client-registration templates. Idempotent.
+/// library. Idempotent.
 pub(crate) fn seed_global_layer() -> Result<()> {
     let root = docket_root()?;
     std::fs::create_dir_all(&root)
         .with_context(|| format!("failed to create docket root at {}", root.display()))?;
     seed(&root.join("colorschemes.toml"), DEFAULT_COLORSCHEMES_TOML)?;
-    let global_creds = crate::credentials::global_dir()?;
-    seed_credentials(
-        &global_creds.join("google_oauth_client.toml"),
-        DEFAULT_GOOGLE_CLIENT_TEMPLATE,
-    )?;
-    seed_credentials(
-        &global_creds.join("microsoft_oauth_client.toml"),
-        DEFAULT_MICROSOFT_CLIENT_TEMPLATE,
-    )?;
     Ok(())
 }
 

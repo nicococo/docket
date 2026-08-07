@@ -9,9 +9,9 @@ use std::sync::Arc;
 use crate::widgets::test_support::buffer_text;
 
 #[test]
-fn default_config_has_outlook_and_inbox() {
+fn default_config_has_imap_and_inbox() {
     let c = EmailConfig::default();
-    assert_eq!(c.provider, "outlook");
+    assert_eq!(c.provider, "imap");
     assert_eq!(c.folders, vec!["INBOX".to_string()]);
     assert_eq!(c.latest_days, 7);
     assert!(!c.summarize_with_llm);

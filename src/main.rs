@@ -11,7 +11,6 @@ use clap::Parser;
 use crate::widgets::parse_widget_ref;
 
 mod app;
-mod auth;
 mod cache;
 mod clipboard;
 mod config;
@@ -37,12 +36,6 @@ struct Cli {
     /// right thing to run after upgrading to pick up any new default files.
     #[arg(long)]
     init: bool,
-
-    /// Run an authentication flow for the given provider, then exit.
-    /// Registered names: see `auth::registry::PROVIDERS`. Unknown names
-    /// print the available list as an error.
-    #[arg(long, value_name = "PROVIDER")]
-    auth: Option<String>,
 
     /// Clear cached data before launching. With no value, wipes
     /// `$XDG_CACHE_HOME/docket/` entirely. Pass a widget kind (`news`) or
@@ -165,7 +158,7 @@ fn main() -> Result<()> {
         if let Some(name) = cli.new_profile.as_deref() {
             config::profiles::create(name, cli.from.as_deref())?;
             match cli.from.as_deref() {
-                Some(src) => println!("Created profile {name:?} (cloned config from {src:?}). Re-authorize its accounts with `docket --profile {name} --auth <provider>`."),
+                Some(src) => println!("Created profile {name:?} (cloned config from {src:?}). Credentials are not copied — fill them in under ~/.config/docket/profiles/{name}/credentials/."),
                 None => println!("Created profile {name:?}. Edit ~/.config/docket/profiles/{name}/config.toml to configure it."),
             }
             return Ok(());
@@ -224,10 +217,6 @@ fn main() -> Result<()> {
         if let Some(target) = cli.clear_cache_forced.as_deref() {
             run_clear_cache(target, false)?;
         }
-        if let Some(target) = cli.auth.as_deref() {
-            return run_auth(target).await;
-        }
-
         // A non-default profile must already exist to launch into — don't
         // silently first-run-create it. `--profile X --new-profile` (or
         // `--init` after setting DOCKET_PROFILE) creates it.
@@ -345,22 +334,6 @@ fn prompt_yes_no(question: &str) -> Result<bool> {
         buf.trim().to_ascii_lowercase().as_str(),
         "y" | "yes"
     ))
-}
-
-async fn run_auth(target: &str) -> Result<()> {
-    // `provider:account` selects a named account; a bare `provider` means
-    // the default account — e.g. `--auth outlook:work` vs `--auth outlook`.
-    let (name, account) = match target.split_once(':') {
-        Some((name, account)) => (name, account),
-        None => (target, auth::DEFAULT_ACCOUNT),
-    };
-    match auth::registry::find(name) {
-        Some(provider) => (provider.run)(account).await,
-        None => Err(anyhow!(
-            "unknown auth provider {name:?}. Known providers: {}",
-            auth::registry::names_csv()
-        )),
-    }
 }
 
 fn init_tracing() {

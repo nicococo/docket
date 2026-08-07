@@ -4,6 +4,38 @@ All notable changes to docket are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions track
 the `Cargo.toml` `version` field.
 
+## [Unreleased]
+
+### Removed
+
+- **Google and Microsoft OAuth support**, entirely: `src/auth/`
+  (`google/`, `microsoft/`, `loopback.rs`, `registry.rs`), the
+  OAuth-backed Calendar providers (`calendar/google.rs`,
+  `calendar/outlook.rs`) and Email providers (`email/gmail.rs`,
+  `email/outlook.rs`), the `--auth <provider>` CLI flag, and the
+  seeded `google_oauth_client.toml` / `microsoft_oauth_client.toml`
+  credential templates. docket's Calendar backends are now CalDAV,
+  ICS/webcal, and local TOML events; Email is IMAP-only. No app
+  registration, consent screen, or browser handshake required for
+  any supported backend — every credential is a hand-edited TOML
+  file under `~/.config/docket/credentials/`.
+- The Calendar widget's `o` "open in browser" picker, which only ever
+  produced a target for the two removed OAuth providers (CalDAV/ICS/
+  Local calendars have no canonical web URL to deep-link to).
+- `credentials::save`/the credentials-dir global/per-profile tiering —
+  both existed solely to support OAuth token writes and client
+  registrations; every remaining credential file is user-written and
+  per-profile, so `credentials::load` is now the module's only entry
+  point.
+
+### Changed
+
+- ICS gained a proper setup walkthrough in `INSTRUCTIONS.md`
+  (including multi-account via `[[feeds]]`), since it's now the
+  documented way to add multiple calendar accounts (CalDAV is
+  single-account; the old multi-account docs covered Google/Outlook
+  OAuth specifically).
+
 ## [0.1.0] — docket fork
 
 docket is a hard fork of [glint](https://github.com/ntrospect0/glint)

@@ -19,14 +19,11 @@ use ratatui::layout::Rect;
 use super::config::CalendarView;
 use super::nav::{
     content_rect_for, first_of_next_month, local_midnight, start_of_month, start_of_week,
-    WebTarget,
 };
 use super::provider::Event;
 use super::CalendarWidget;
 use super::AUTO_ROLL_FOCUSED_IDLE;
-use super::STATUS_TTL;
 use crate::ui::big_digits;
-use crate::ui::status::{live_value, TimedFeedback};
 
 pub(super) const CACHE_KEY_EVENTS: &str = "events";
 
@@ -117,14 +114,6 @@ pub(super) struct CalendarState {
     /// every async-task / tick-time mutation site so the main loop's
     /// dirty-flag gate triggers a redraw.
     pub(super) dirty: bool,
-    /// Transient title-bar status (e.g. open-failed warning, "no
-    /// web-viewable calendar" notice). Cleared after `STATUS_TTL`.
-    pub(super) status: Option<TimedFeedback<String>>,
-    /// Open-in-browser picker. `Some(targets)` when the user pressed
-    /// `o` and more than one provider is configured — render shows a
-    /// numbered modal; the next 1–N keypress opens the chosen URL,
-    /// any other key cancels.
-    pub(super) open_picker: Option<Vec<WebTarget>>,
 }
 
 impl CalendarWidget {
@@ -410,16 +399,4 @@ impl CalendarWidget {
         st.events.clone()
     }
 
-    pub(super) fn set_status(&self, msg: impl Into<String>) {
-        let mut st = self.state.lock().expect("calendar state poisoned");
-        st.status = Some(TimedFeedback::new(msg.into(), STATUS_TTL));
-        st.dirty = true;
-        drop(st);
-        self.feedback_pending.store(true, Ordering::Relaxed);
-    }
-
-    pub(super) fn live_status(&self) -> Option<String> {
-        let mut st = self.state.lock().expect("calendar state poisoned");
-        live_value(&mut st.status).cloned()
-    }
 }

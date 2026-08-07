@@ -2,63 +2,16 @@
 // Copyright (C) 2026 ntrospect0
 // Copyright (C) 2026 nicococo
 
-//! Navigation primitives for the calendar widget: web deep-links (Google,
-//! Outlook), the bottom-row hint hit-test, month/week arithmetic, and the
-//! weekday/month name helpers. Per-view rendering lives in `view_day.rs`,
-//! `view_week.rs`, and `view_month.rs`; this module owns the
-//! widget-agnostic shapes those renderers compose.
+//! Navigation primitives for the calendar widget: the bottom-row hint
+//! hit-test, month/week arithmetic, and the weekday/month name helpers.
+//! Per-view rendering lives in `view_day.rs`, `view_week.rs`, and
+//! `view_month.rs`; this module owns the widget-agnostic shapes those
+//! renderers compose.
 
 use chrono::{DateTime, Datelike, Duration as ChronoDuration, Local, NaiveDate, TimeZone, Weekday};
 use ratatui::layout::Rect;
 
 use super::config::{CalendarView, VIEW_TABS};
-
-/// One choice surfaced by the `o` open-picker. `label` shows in the
-/// modal; `url` is what we hand to `open::that`. URLs are computed
-/// at picker-open time so they carry the calendar's current view +
-/// anchor date as deep-link parameters where the provider supports
-/// them.
-#[derive(Debug, Clone)]
-pub(super) struct WebTarget {
-    pub(super) label: &'static str,
-    pub(super) url: String,
-}
-
-/// Google Calendar deep-link URL for `view` on `date`. The `/r/`
-/// prefix is the post-redirect canonical route; the trailing
-/// `/{year}/{month}/{day}` segment is documented and stable —
-/// Google honors it across day, week, and month views.
-pub(super) fn google_calendar_url(view: CalendarView, date: NaiveDate) -> String {
-    let segment = match view {
-        CalendarView::Day => "day",
-        CalendarView::Week => "week",
-        CalendarView::Month => "month",
-    };
-    format!(
-        "https://calendar.google.com/calendar/u/0/r/{}/{}/{}/{}",
-        segment,
-        date.year(),
-        date.month(),
-        date.day(),
-    )
-}
-
-/// Outlook (Microsoft 365) deep-link URL for `view`. Uses the
-/// `outlook.cloud.microsoft` surface Microsoft has been consolidating
-/// M365 routes onto, with **lowercase** view segments — an earlier
-/// draft used `outlook.office.com` with capitalized segments, and
-/// those silently redirected to the user's saved default view
-/// instead of honoring the requested one. The cloud.microsoft host
-/// and lowercase segments both matter here. Date deep-link via the
-/// URL is intentionally omitted — Outlook lands on today in the
-/// requested view and the user navigates from there.
-pub(super) fn outlook_calendar_url(view: CalendarView) -> &'static str {
-    match view {
-        CalendarView::Day => "https://outlook.cloud.microsoft/calendar/view/day",
-        CalendarView::Week => "https://outlook.cloud.microsoft/calendar/view/week",
-        CalendarView::Month => "https://outlook.cloud.microsoft/calendar/view/month",
-    }
-}
 
 /// Distinct interactions exposed in the bottom hint row.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

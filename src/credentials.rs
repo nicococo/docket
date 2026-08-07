@@ -2,46 +2,30 @@
 // Copyright (C) 2026 ntrospect0
 // Copyright (C) 2026 nicococo
 
-//! On-disk credentials store — one home for every "load a TOML file
-//! holding a secret" / "write one with chmod 0600" pattern.
+//! On-disk credentials store — one home for "load a TOML file holding a
+//! secret" across every widget backend (IMAP, CalDAV, ICS, LLM API keys).
 //!
-//! Before this module the dance was open-coded across
-//! `auth/google/store.rs`, `auth/microsoft/store.rs`, and
-//! `auth/registry.rs`. Each re-implemented atomic write +
-//! `chmod 0600` independently, which is exactly the kind of
-//! security-relevant duplication that eventually ships a 0644
-//! token file by accident.
+//! All files live under `~/.config/docket/credentials/`, created with mode
+//! `0700` on first use. Every credential file here is hand-edited by the
+//! user (none of docket's own code writes to this directory), so this
+//! module only needs to load, not save.
 //!
-//! All files live under `~/.config/docket/credentials/`. The
-//! directory is created with mode `0700` on first use. Save paths
-//! atomic-write to a sibling `<name>.tmp`, `chmod 0600` the tmp,
-//! then rename — so even a crash mid-write can't leak a partially-
-//! written secret at world-readable permissions.
-//!
-//! Callers identify files by basename (`"google_oauth_token.toml"`)
-//! rather than full path so the credentials-dir convention is
-//! enforced — you can't accidentally write a token to `~/Desktop/`.
+//! Callers identify files by basename (`"imap.toml"`) rather than full path
+//! so the credentials-dir convention is enforced — you can't accidentally
+//! read a secret from `~/Desktop/`.
 //!
 //! See `docs/widget-sdk.md` § Credentials storage.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use anyhow::{Context, Result};
 use serde::de::DeserializeOwned;
-use serde::Serialize;
 
-/// The **per-profile** credentials dir — `<config_dir>/credentials/`,
-/// created mode `0700` on first use. Holds account-level secrets (tokens,
-/// CalDAV, IMAP, LLM keys). Idempotent.
+/// The credentials dir — `<config_dir>/credentials/`, created mode `0700`
+/// on first use. Holds account-level secrets (CalDAV, IMAP, LLM keys).
+/// Per-profile: each profile has its own. Idempotent.
 pub fn dir() -> Result<PathBuf> {
     ensure_0700(crate::config::config_dir()?.join("credentials"))
-}
-
-/// The **global** credentials dir — `<docket_root>/credentials/`, shared
-/// across profiles. Holds app-level OAuth *client registrations* (the
-/// Azure / Google app, not any account). Created mode `0700`.
-pub fn global_dir() -> Result<PathBuf> {
-    ensure_0700(crate::config::docket_root()?.join("credentials"))
 }
 
 fn ensure_0700(path: PathBuf) -> Result<PathBuf> {
@@ -57,24 +41,11 @@ fn ensure_0700(path: PathBuf) -> Result<PathBuf> {
     Ok(path)
 }
 
-/// True for files that live in the **global** credentials dir (shared across
-/// profiles): the OAuth client registrations. Everything else — tokens,
-/// CalDAV, IMAP, LLM keys — is per-profile.
-fn is_global(filename: &str) -> bool {
-    filename.ends_with("_oauth_client.toml")
-}
-
-/// Resolve a credentials basename to its tier-correct absolute path: the
-/// global dir for client registrations, the per-profile dir otherwise. Does
-/// *not* create the file. Every load/save/template call funnels through here,
-/// so tiering is enforced in one place rather than at each call site.
+/// Resolve a credentials basename to its absolute path. Does *not* create
+/// the file. Every load call funnels through here so callers can't
+/// accidentally read from outside the credentials dir.
 pub fn path(filename: &str) -> Result<PathBuf> {
-    let base = if is_global(filename) {
-        global_dir()?
-    } else {
-        dir()?
-    };
-    Ok(base.join(filename))
+    Ok(dir()?.join(filename))
 }
 
 /// Load a TOML-serialised credentials value by basename. Returns:
@@ -98,44 +69,6 @@ where
     let value: T =
         toml::from_str(&body).with_context(|| format!("failed to parse {}", path.display()))?;
     Ok(Some(value))
-}
-
-/// Save a TOML-serialisable credentials value to the credentials
-/// directory under `filename`. Atomic via `<name>.tmp` + rename,
-/// with `chmod 0600` applied to the temp file *before* rename so
-/// the final inode is never visible to the world at a wider
-/// permission. Returns the final absolute path.
-pub fn save<T>(filename: &str, value: &T) -> Result<PathBuf>
-where
-    T: Serialize,
-{
-    let path = path(filename)?;
-    let body =
-        toml::to_string_pretty(value).with_context(|| format!("failed to serialize {filename}"))?;
-    atomic_write_locked(&path, body.as_bytes())?;
-    Ok(path)
-}
-
-/// Atomic write with `chmod 0600` (Unix). The temp file is created
-/// alongside the destination so the rename is on the same
-/// filesystem; perms are tightened on the tmp before rename so the
-/// final path is never observable at a more-permissive mode.
-fn atomic_write_locked(path: &Path, body: &[u8]) -> Result<()> {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
-            .with_context(|| format!("failed to create {}", parent.display()))?;
-    }
-    let tmp = path.with_extension("toml.tmp");
-    std::fs::write(&tmp, body).with_context(|| format!("failed to write {}", tmp.display()))?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o600))
-            .with_context(|| format!("failed to chmod 0600 {}", tmp.display()))?;
-    }
-    std::fs::rename(&tmp, path)
-        .with_context(|| format!("failed to rename {} -> {}", tmp.display(), path.display()))?;
-    Ok(())
 }
 
 #[cfg(test)]
@@ -167,45 +100,10 @@ mod tests {
 
     #[test]
     #[ignore = "mutates the process-wide XDG_CONFIG_HOME — opt in with --ignored"]
-    fn save_then_load_round_trips() {
-        let tmp = isolated_dir();
-        let val = Sample {
-            api_key: "abc".into(),
-            nonce: 42,
-        };
-        let path = save("sample.toml", &val).unwrap();
-        assert!(path.exists());
-        let loaded: Option<Sample> = load("sample.toml").unwrap();
-        assert_eq!(loaded, Some(val));
-        std::fs::remove_dir_all(&tmp).ok();
-    }
-
-    #[test]
-    #[ignore = "mutates the process-wide XDG_CONFIG_HOME — opt in with --ignored"]
     fn load_returns_none_for_missing_file() {
         let tmp = isolated_dir();
         let loaded: Option<Sample> = load("nonexistent.toml").unwrap();
         assert!(loaded.is_none());
-        std::fs::remove_dir_all(&tmp).ok();
-    }
-
-    #[test]
-    #[ignore = "mutates the process-wide XDG_CONFIG_HOME — opt in with --ignored"]
-    fn save_sets_0600_on_unix() {
-        let tmp = isolated_dir();
-        let val = Sample {
-            api_key: "secret".into(),
-            nonce: 0,
-        };
-        let path = save("perms_check.toml", &val).unwrap();
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let mode = std::fs::metadata(&path).unwrap().permissions().mode();
-            // We only care about the low 9 bits — top bits encode
-            // the file-type, which differs between platforms.
-            assert_eq!(mode & 0o777, 0o600, "{:o}", mode);
-        }
         std::fs::remove_dir_all(&tmp).ok();
     }
 

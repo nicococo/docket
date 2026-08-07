@@ -8,10 +8,9 @@
 //! for my calendars" → "Integrate calendar"), but works for any calendar
 //! that publishes a public or secret iCalendar export.
 //!
-//! Trade-off vs. the OAuth `google` provider: this is read-only and Google
-//! only regenerates the feed every few hours server-side, so it's not
-//! real-time. In exchange, there's no Google Cloud project, no OAuth
-//! consent screen, and no per-app registration — just a URL.
+//! Trade-off: read-only, and providers typically only regenerate the feed
+//! every few hours server-side, so it's not real-time. In exchange there's
+//! no OAuth consent screen and no per-app registration — just a URL.
 //!
 //! VEVENT parsing is shared with the CalDAV provider (`super::caldav`) —
 //! a `.ics` HTTP response and a CalDAV `calendar-data` payload are both

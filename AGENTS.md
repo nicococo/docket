@@ -17,9 +17,9 @@ For user-facing setup, see `README.md` and `INSTRUCTIONS.md`.
 
 - **Rust 2021 edition** with Tokio async runtime
 - **Ratatui 0.28+** for TUI rendering (crossterm backend)
-- **reqwest** for HTTP (Google APIs, Microsoft Graph, RSS feeds, IMAP
-  via `imap` crate, Anthropic + OpenAI APIs). A single process-wide
-  client lives in `src/http.rs::shared()`.
+- **reqwest** for HTTP (RSS feeds, CalDAV, ICS feeds, Anthropic +
+  OpenAI APIs; IMAP itself goes over the `imap` crate, not HTTP). A
+  single process-wide client lives in `src/http.rs::shared()`.
 - **serde + toml** for config; **serde_json** for API responses
 - **chrono + chrono-tz** for timezone-aware date/time
 - **strsim** for fuzzy command matching
@@ -48,13 +48,6 @@ src/
 │   ├── layout.rs            # Grid layout parsing and resolution
 │   ├── types.rs             # Top-level Config struct
 │   └── watcher.rs           # `notify`-based config file watcher
-├── auth/
-│   ├── mod.rs               # credentials_dir helper
-│   ├── registry.rs          # AuthProvider registry — self-describing entries
-│   │                        #   carry display_name + an optional post_auth_refresh
-│   ├── loopback.rs          # localhost OAuth redirect listener
-│   ├── google/              # Google OAuth client + token store
-│   └── microsoft/           # Microsoft OAuth client + token store (PKCE)
 ├── widgets/
 │   ├── mod.rs               # Widget trait, WidgetCtx, WidgetManager
 │   ├── registry.rs          # WIDGETS table — add a descriptor to register
@@ -152,24 +145,6 @@ pub const PROVIDERS: &[LlmProviderDef] = &[ /* anthropic, openai */ ];
 
 Add a new LLM provider by appending one entry to `PROVIDERS`.
 
-### AuthProvider registry (src/auth/registry.rs)
-Self-describing OAuth + credential providers. Entries carry their
-`run` flow and an optional post-auth refresh callback that populates
-downstream pickers (e.g. Gmail labels, Outlook folders, IMAP folders).
-Credentials templates themselves are seeded by
-`config::init_default_config`, not by this registry.
-
-```rust
-pub struct AuthProvider {
-    pub name: &'static str,
-    pub display_name: &'static str,
-    pub run: AuthFlow,
-}
-```
-
-`--auth <name>` looks up by `name`. Widgets declare an `AuthRequirement`
-on their `WidgetDescriptor` documenting which provider + scopes they need.
-
 ### WidgetDescriptor + registry (src/widgets/registry.rs)
 The single registration point for widget kinds:
 
@@ -206,9 +181,10 @@ Layer** below) and `crate::http::shared()` for the HTTP client unless
 you need bespoke session state (CalDAV's basic-auth headers — those
 construct their own `reqwest::Client`).
 
-If it needs OAuth, declare an `AuthRequirement` on the descriptor and
-register the provider in `src/auth/registry.rs` (or extend an existing
-entry's `post_auth_refresh` if you need to populate a picker).
+If it needs a credential (app password, API key), read it via
+`crate::credentials::load(filename)` (see `src/credentials.rs`) — every
+credential is a hand-edited TOML file under
+`~/.config/docket/credentials/`; there's no OAuth flow in this codebase.
 
 If it talks to an LLM, accept the optional `ctx.llm` and gate on a
 per-widget TOML flag (`summarize_with_llm = true`).
@@ -228,7 +204,7 @@ resources.toml        — poll cadence, top-N processes
 notes.toml            — per-instance shortcut + colour overrides
 llm.toml              — [provider] name (anthropic / openai), model, [limits]
 notes/<instance>/     — one .md per note; mtime sorts the list
-credentials/          — OAuth tokens, API keys, IMAP/CalDAV passwords (0600)
+credentials/          — API keys, IMAP/CalDAV passwords (0600)
 ```
 
 Cells in `config.toml` reference widgets as `kind` (single) or
@@ -323,10 +299,9 @@ widgets don't reinvent them.
 ### Shared HTTP client (src/http.rs)
 
 `crate::http::shared()` returns a process-wide `reqwest::Client` (docket
-UA, 30s timeout, no cookies). Callers include news, calendar (Google +
-Outlook), email (Gmail + Outlook), LLM providers, OAuth flows.
-Per-request timeout overrides via `RequestBuilder::timeout` where a
-shorter bound matters.
+UA, 30s timeout, no cookies). Callers include news, feeds, calendar
+(CalDAV, ICS), LLM providers. Per-request timeout overrides via
+`RequestBuilder::timeout` where a shorter bound matters.
 
 Bespoke clients deliberately kept for callers needing client-scoped state:
 - **calendar/caldav**: per-request Basic auth header pushed via
@@ -384,7 +359,6 @@ collector.
 cargo build --features widgets-all          # debug build, all widgets
 cargo run                                    # debug binary with default config
 cargo run -- --init                          # seed ~/.config/docket/
-cargo run -- --auth <provider>               # OAuth / credential flow
 cargo test --features widgets-all            # full suite (~540 tests)
 cargo clippy --features widgets-all          # lint
 cargo fmt                                    # format

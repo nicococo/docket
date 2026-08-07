@@ -211,7 +211,7 @@ pub fn sanitize_html(raw: &str) -> String {
 /// `\` → `\\`, `"` → `\"`, and C0 control characters (U+0000–U+001F)
 /// as `\uXXXX` escape sequences. Suitable for writing TOML values that
 /// must survive a round-trip through the parser (timezone names, feed
-/// labels, OAuth fields, etc.).
+/// labels, etc.).
 pub fn toml_quote(s: &str) -> String {
     let mut out = String::with_capacity(s.len() + 2);
     out.push('"');

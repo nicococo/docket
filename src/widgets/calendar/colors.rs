@@ -64,7 +64,7 @@ impl CalendarColors {
             let Some((source, calendar)) = key.split_once(':') else {
                 tracing::warn!(
                     key = %key,
-                    "calendar_colors key missing 'source:' prefix — expected e.g. \"google:primary\""
+                    "calendar_colors key missing 'source:' prefix — expected e.g. \"caldav:primary\""
                 );
                 continue;
             };
@@ -134,8 +134,6 @@ impl CalendarColors {
 pub(super) fn provider_kind_label(kind: ProviderKind) -> &'static str {
     match kind {
         ProviderKind::Local => "local",
-        ProviderKind::Google => "google",
-        ProviderKind::Outlook => "outlook",
         ProviderKind::Caldav => "caldav",
         ProviderKind::Ics => "ics",
     }

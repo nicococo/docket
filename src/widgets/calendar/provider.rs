@@ -16,12 +16,11 @@ pub struct Event {
     pub end: DateTime<Local>,
     pub all_day: bool,
     /// Identity of the provider entry that produced this event. The default
-    /// account reads as the provider kind ("google", "outlook", "caldav",
-    /// "local"); a named multi-account entry reads as its `account` label
-    /// ("work"). Used together with `calendar` so the color-assignment map
-    /// can disambiguate accounts that share a calendar id (e.g. both Google
-    /// and Outlook have a calendar named "primary", or work + personal
-    /// Outlook both have "primary").
+    /// account reads as the provider kind ("caldav", "ics", "local"); a
+    /// named multi-account entry reads as its `account` label ("work").
+    /// Used together with `calendar` so the color-assignment map can
+    /// disambiguate accounts that share a calendar id (e.g. work + personal
+    /// CalDAV both have a calendar named "primary").
     pub source: String,
     pub calendar: String,
     pub location: Option<String>,

@@ -71,8 +71,8 @@ through.
 - **Profiles** — `docket --profile work` (or `-p work`) runs an isolated
   config tree: its own layout, widgets, theme, and accounts. Create one
   with `docket --new-profile work`, switch with `--profile work`. The
-  colorscheme library and OAuth app registrations are shared; everything
-  else is per-profile. See [INSTRUCTIONS.md → Profiles](INSTRUCTIONS.md#profiles).
+  colorscheme library is shared; everything else is per-profile. See
+  [INSTRUCTIONS.md → Profiles](INSTRUCTIONS.md#profiles).
 - **Live config reload** — edit any widget's TOML and the dashboard
   picks it up without a restart.
 - **Theming** — nine bundled colour schemes; per-widget colour overrides;
@@ -212,12 +212,11 @@ layout) plus a default TOML for every widget kind. From there:
    full schema and a worked example.
 2. Edit the per-widget TOML (`calendar.toml`, `news.toml`, …) for
    things like RSS feeds, calendar providers, or mailbox folders.
-3. Run an OAuth flow where a widget needs one:
-   `docket --auth google` / `docket --auth microsoft`. Credentials
-   templates are seeded under `~/.config/docket/credentials/` — fill
-   in the client ID/secret first (see
-   [External dependencies](#external-dependencies) for the walkthrough
-   per provider).
+3. Fill in credentials where a widget needs them — CalDAV/ICS for
+   Calendar, IMAP for Email, an API key for LLM summaries. Templates
+   are seeded under `~/.config/docket/credentials/`; no OAuth flow,
+   just edit the TOML (see [INSTRUCTIONS.md](INSTRUCTIONS.md) for the
+   walkthrough per provider).
 
 `docket --init` re-runs the seeding step at any time — it's idempotent,
 so it only writes files that are still missing; existing files and
@@ -231,10 +230,10 @@ Press `?` while running for the live keybinding overlay.
 
 | widget | what it does | external services |
 |---|---|---|
-| **Calendar** | day / week / month views with event agenda | Google Calendar (OAuth), Microsoft Outlook (OAuth), CalDAV (iCloud / Fastmail / Nextcloud), local TOML events |
+| **Calendar** | day / week / month views with event agenda | CalDAV (iCloud / Fastmail / Nextcloud), ICS/webcal feed (incl. Google Calendar's "secret address"), local TOML events |
 | **News** | RSS / Atom aggregator with topic filters, keyword search (`:news <terms>`), optional per-article LLM summaries | any RSS/Atom feed; LLM provider for summaries |
 | **Feeds** | tabbed single-source RSS reader (WSJ, MarketWatch, or any feed you point it at), one tab per source | any RSS/Atom feed; LLM provider for summaries |
-| **Email** | unified inbox preview with optional per-message LLM summaries | Gmail (OAuth), Outlook (OAuth), any IMAP server (app password) |
+| **Email** | unified inbox preview with optional per-message LLM summaries | any IMAP server (app password) |
 | **Resources** | htop-style CPU / memory / top-process view | local `sysinfo` (no FFI) |
 | **Notes** | vim-flavoured multi-note pad with undo/redo, mouse cursor positioning, per-note files | none — plain `.md` files under `~/.config/docket/notes/` |
 
@@ -254,12 +253,12 @@ All files live under `~/.config/docket/`:
 | `colorschemes.toml` | named theme palettes (`default`, `chalktone`, `gruvbox`, `tokyonight`, `rosepine`, `nord`, `bluloco`, `onedark`, `miasma`) |
 | `news.toml` | RSS / Atom feeds, topic filters, LLM summary toggle, fetch-body strategy |
 | `feeds.toml` (or `feeds@<instance>.toml`) | `[[feeds]]` blocks for one tabbed single-source reader instance |
-| `calendar.toml` | Google / Outlook / CalDAV / Local providers + per-provider calendar IDs |
-| `email.toml` | folders / labels to follow, polling cadence, LLM-summary opt-in |
+| `calendar.toml` | CalDAV / ICS / Local providers + per-provider calendar IDs |
+| `email.toml` | folders to follow, polling cadence, LLM-summary opt-in |
 | `resources.toml` | refresh interval, top-N processes, sort key (CPU vs memory) |
 | `notes.toml` | per-widget shortcut + colour overrides (notes themselves live under `notes/`) |
 | `llm.toml` | active LLM provider (`anthropic` or `openai`), model, rate limit, cache size |
-| `credentials/` | OAuth tokens + API keys (`*_oauth_client.toml`, `*_oauth_token.<account>.toml`, `anthropic_key.toml`, `openai_key.toml`, `caldav.toml`, `imap.toml`) — 0600 perms |
+| `credentials/` | API keys + app passwords (`anthropic_key.toml`, `openai_key.toml`, `caldav.toml`, `ics.toml`, `imap.toml`) — 0600 perms |
 | `notes/<instance>/` | one `.md` file per note, `mtime` sorts the list |
 
 Most fields have sensible defaults; you only have to set what you care
@@ -404,7 +403,7 @@ State (selection, scroll, active tab, warm data) is preserved entering
 
 | widget | keys |
 |---|---|
-| **Calendar** | `d` / `w` / `m` day/week/month · `h` / `l` prev/next period · `←↑↓→` move the selected day (month view) · `j` / `k` scroll the day agenda · `t` today · click a day to select it · `o` open in browser |
+| **Calendar** | `d` / `w` / `m` day/week/month · `h` / `l` prev/next period · `←↑↓→` move the selected day (month view) · `j` / `k` scroll the day agenda · `t` today · `g` cycle digit gradient · click a day to select it |
 | **News** | `↑/↓` select · `←/→` filter tabs · `e` expand · `s` LLM summary · `Enter` open · `x` clear search |
 | **Feeds** | `↑/↓` select article · `←/→` switch topic tab · `e`/`Enter` expand · `o` open in browser · `s` LLM summary · `Ctrl+S` cycle summary length · `r` force refresh · `x` clear search |
 | **Email** | `↑/↓` select · `←/→` folder · `e`/`Enter` expand · `o` open in mail client · `s` LLM summary · `u` mark read/unread · `r` refresh |
@@ -421,7 +420,6 @@ assignments and active scheme.
 ```sh
 docket                    # launch the dashboard (seeds defaults first, on first run)
 docket --init             # create/refresh ~/.config/docket/ with default seed files
-docket --auth <provider>  # run an auth flow (google, microsoft, imap, anthropic, openai)
 docket --new-profile <name> [--from <src>]
                          # create a profile, optionally cloning another's config
 docket --profile <name>   # (or -p) run under an isolated profile
@@ -444,19 +442,15 @@ service; nothing routes through a docket-owned backend.
 
 | service | used by | auth |
 |---|---|---|
-| [Google Calendar API](https://developers.google.com/calendar) | Calendar (Google provider) | OAuth, you create the OAuth app |
-| [Gmail API](https://developers.google.com/gmail) | Email (Gmail provider) | OAuth, same app as Calendar |
-| [Microsoft Graph](https://learn.microsoft.com/en-us/graph/) | Calendar (Outlook), Email (Outlook) | OAuth, you register an Azure app |
 | any CalDAV server | Calendar (iCloud, Fastmail, Nextcloud, …) | app password |
-| any IMAP server | Email (IMAP provider) | app password |
+| any ICS/webcal feed | Calendar (incl. Google Calendar's "secret address" export) | none, or a secret URL |
+| any IMAP server | Email | app password |
 | [Anthropic](https://www.anthropic.com/) / [OpenAI](https://openai.com/) | News + Feeds + Email LLM summaries | API key, optional |
 | any RSS / Atom feed | News, Feeds | none |
 
-`docket --auth <provider>` runs the OAuth flow for Google, Outlook, or
-IMAP once you've filled in the seeded credentials template under
-`~/.config/docket/credentials/`. `INSTRUCTIONS.md` in the repo has the
-full step-by-step for each provider, including screenshots of the
-Google Cloud / Azure portals.
+No OAuth anywhere — every credential above is a plain TOML value you
+fill in by hand under `~/.config/docket/credentials/`. `INSTRUCTIONS.md`
+in the repo has the full step-by-step for CalDAV, ICS, and IMAP setup.
 
 ### Rust crate dependencies
 
@@ -474,7 +468,7 @@ extraction for LLM summaries). Full list in `Cargo.toml`.
 | where | what |
 |---|---|
 | `~/.config/docket/*.toml` | your config — fully owned and editable by you |
-| `~/.config/docket/credentials/` (0600) | OAuth tokens, API keys, IMAP passwords |
+| `~/.config/docket/credentials/` (0600) | API keys, IMAP/CalDAV app passwords |
 | `~/.config/docket/notes/` | notes as plain `.md` files |
 | `~/.cache/docket/` | per-widget on-disk caches (news articles, calendar events, email messages, etc.) — regenerable; a startup sweep drops anything > 30 days old |
 | `~/.config/docket/docket.log` | runtime log; `tail -f` it to debug |
@@ -485,7 +479,7 @@ External dependencies table above. There is no telemetry.
 ### Credential storage — what it does and doesn't protect
 
 Today every credential docket stores (IMAP / CalDAV app passwords, LLM
-API keys, OAuth tokens) lives in a TOML file under
+API keys) lives in a TOML file under
 `~/.config/docket/credentials/` with `0600` permissions and an atomic
 write. This mirrors the convention used by `aws`, `gcloud`, `gh`,
 `docker`, `npm`, `ssh`, and similar local-first CLIs.
@@ -495,9 +489,8 @@ What that covers:
 - ✅ Another non-root user on the same Unix host can't read the file.
 - ✅ With full-disk encryption on (FileVault / LUKS / BitLocker) a
   lost laptop's offline disk is unreadable until unlocked.
-- ✅ OAuth tokens (Google, Microsoft) and app passwords (IMAP,
-  CalDAV) are revocable from the provider's account dashboard, and
-  app passwords don't grant master-account access.
+- ✅ App passwords (IMAP, CalDAV) are revocable from the provider's
+  account dashboard, and don't grant master-account access.
 
 What it doesn't cover:
 
@@ -518,8 +511,8 @@ Recommended posture:
 2. Exclude `~/.config/docket/credentials/` from your backup tool.
 3. Exclude it from any dotfile sync — credentials should stay
    per-host.
-4. Prefer OAuth and app passwords (which docket already does) over
-   master passwords.
+4. Prefer app passwords (which docket already does) over master
+   passwords.
 
 **Coming post-v0.2**: a tiered credential backend (OS keychain →
 host-bound encryption → plaintext fallback) selected via
@@ -537,9 +530,6 @@ Deferred for the scope.
   doesn't speak iTerm2 / Kitty / Sixel inline protocols, so docket fell
   back to unicode half-blocks. Switch to iTerm2 (macOS), WezTerm,
   Kitty, or enable sixel mode in your terminal.
-- **OAuth flow won't open a browser** — the auth flow prints the URL
-  too; copy-paste it into any browser, complete the consent, and the
-  flow's localhost listener picks up the redirect.
 - **A layout cell shows nothing / logs "unknown widget kind in layout,
   skipping"** — the `[[layout.cells]]` entry references a widget kind
   that isn't compiled in (e.g. a slim build) or no longer exists. Fix

@@ -35,11 +35,8 @@ pub enum CalendarView {
 pub enum ProviderKind {
     #[default]
     Local,
-    Google,
     #[serde(alias = "apple", alias = "icloud")]
     Caldav,
-    #[serde(alias = "microsoft", alias = "ms365")]
-    Outlook,
     /// Plain `.ics` HTTP(S) feed — no CalDAV discovery, no OAuth. See
     /// `super::ics`.
     #[serde(alias = "ical", alias = "webcal")]
@@ -72,7 +69,7 @@ pub struct CalendarConfig {
     pub color_palette: Vec<String>,
 
     /// Per-calendar overrides keyed by `"<source>:<calendar_id>"`
-    /// (e.g. `"google:primary"`). Wins over the palette sequence.
+    /// (e.g. `"caldav:primary"`). Wins over the palette sequence.
     #[serde(default)]
     pub calendar_colors: HashMap<String, String>,
 
@@ -129,20 +126,22 @@ impl FirstDayOfWeek {
     }
 }
 
+/// Account label used when a `[[providers]]` entry doesn't set one
+/// explicitly.
+pub(super) const DEFAULT_ACCOUNT: &str = "default";
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct ProviderEntry {
     pub kind: ProviderKind,
-    /// Account label for same-provider multi-account (e.g. a work Outlook
-    /// alongside a personal one). Omitted ⇒ the `"default"` account. The
-    /// label names which `…_oauth_token.<account>.toml` to use and, when
-    /// non-default, becomes this entry's `source` so colors don't collide.
-    /// Google and Outlook are OAuth-account-aware; `ics` reuses the same
-    /// field as the feed label matched against `credentials/ics.toml`'s
-    /// `[[feeds]]` entries (omitted ⇒ the feed labeled `"default"`).
+    /// Account label for same-provider multi-account (e.g. a work CalDAV
+    /// server alongside a personal one). Omitted ⇒ the `"default"` account.
+    /// When non-default, becomes this entry's `source` so colors don't
+    /// collide. `ics` reuses the same field as the feed label matched
+    /// against `credentials/ics.toml`'s `[[feeds]]` entries (omitted ⇒ the
+    /// feed labeled `"default"`).
     #[serde(default)]
     pub account: Option<String>,
-    /// Google IDs, Outlook IDs, or CalDAV URLs. Empty = the provider's default
-    /// (Google `"primary"`, Outlook default, every CalDAV calendar).
+    /// CalDAV URLs. Empty = the provider's default (every CalDAV calendar).
     #[serde(default)]
     pub calendar_ids: Vec<String>,
 }
@@ -150,20 +149,20 @@ pub struct ProviderEntry {
 impl ProviderEntry {
     /// Token-storage account label — the explicit `account`, or `"default"`.
     pub(super) fn account_label(&self) -> &str {
-        self.account.as_deref().unwrap_or(crate::auth::DEFAULT_ACCOUNT)
+        self.account.as_deref().unwrap_or(DEFAULT_ACCOUNT)
     }
 
     /// Identity used for the cell title + color keys. The default account
-    /// reads as the provider kind (`"outlook"`) so existing single-account
+    /// reads as the provider kind (`"caldav"`) so existing single-account
     /// configs and `calendar_colors` keys are unaffected; a named account is
-    /// provider-namespaced as `kind/account` (`"outlook/work"`) so it stays
+    /// provider-namespaced as `kind/account` (`"caldav/work"`) so it stays
     /// grouped under its provider and never collides with a same-label
     /// account of a different kind. `/` (not `:`) because `:` already
     /// separates source from calendar in `calendar_colors` keys.
     pub(super) fn source_label(&self) -> String {
         let kind = super::colors::provider_kind_label(self.kind);
         match &self.account {
-            Some(a) if a != crate::auth::DEFAULT_ACCOUNT => format!("{kind}/{a}"),
+            Some(a) if a != DEFAULT_ACCOUNT => format!("{kind}/{a}"),
             _ => kind.to_string(),
         }
     }
@@ -208,38 +207,38 @@ mod tests {
     #[test]
     fn source_label_defaults_to_kind_but_names_account() {
         let default = ProviderEntry {
-            kind: ProviderKind::Outlook,
+            kind: ProviderKind::Caldav,
             account: None,
             calendar_ids: vec![],
         };
-        assert_eq!(default.source_label(), "outlook");
+        assert_eq!(default.source_label(), "caldav");
         assert_eq!(default.account_label(), "default");
 
         // An explicit account = "default" still colors as the kind.
         let explicit_default = ProviderEntry {
-            kind: ProviderKind::Outlook,
+            kind: ProviderKind::Caldav,
             account: Some("default".into()),
             calendar_ids: vec![],
         };
-        assert_eq!(explicit_default.source_label(), "outlook");
+        assert_eq!(explicit_default.source_label(), "caldav");
 
         // A named account is provider-namespaced for its source/color key,
         // but its *token* account label stays the bare string.
         let work = ProviderEntry {
-            kind: ProviderKind::Outlook,
+            kind: ProviderKind::Caldav,
             account: Some("work".into()),
             calendar_ids: vec![],
         };
-        assert_eq!(work.source_label(), "outlook/work");
+        assert_eq!(work.source_label(), "caldav/work");
         assert_eq!(work.account_label(), "work");
 
         // Same label under a different provider gets a distinct source.
-        let g_work = ProviderEntry {
-            kind: ProviderKind::Google,
+        let ics_work = ProviderEntry {
+            kind: ProviderKind::Ics,
             account: Some("work".into()),
             calendar_ids: vec![],
         };
-        assert_eq!(g_work.source_label(), "google/work");
-        assert_ne!(g_work.source_label(), work.source_label());
+        assert_eq!(ics_work.source_label(), "ics/work");
+        assert_ne!(ics_work.source_label(), work.source_label());
     }
 }

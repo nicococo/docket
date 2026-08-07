@@ -10,8 +10,8 @@ use std::collections::HashMap;
 use chrono::TimeZone;
 use crate::theme::parse_color;
 use super::nav::{
-    advance_month, bottom_action_at, content_rect_for, first_of_next_month, google_calendar_url,
-    outlook_calendar_url, rotated_weekday_labels, start_of_week, BottomAction,
+    advance_month, bottom_action_at, content_rect_for, first_of_next_month,
+    rotated_weekday_labels, start_of_week, BottomAction,
 };
 use super::colors::CalendarColors;
 
@@ -22,55 +22,6 @@ use super::colors::CalendarColors;
             Arc::new(Theme::builtin_defaults()),
             ScopedCache::ephemeral(),
         )
-    }
-
-    #[test]
-    fn google_url_carries_view_and_anchor_date() {
-        let date = NaiveDate::from_ymd_opt(2026, 5, 28).unwrap();
-        assert_eq!(
-            google_calendar_url(CalendarView::Day, date),
-            "https://calendar.google.com/calendar/u/0/r/day/2026/5/28"
-        );
-        assert_eq!(
-            google_calendar_url(CalendarView::Week, date),
-            "https://calendar.google.com/calendar/u/0/r/week/2026/5/28"
-        );
-        assert_eq!(
-            google_calendar_url(CalendarView::Month, date),
-            "https://calendar.google.com/calendar/u/0/r/month/2026/5/28"
-        );
-    }
-
-    #[test]
-    fn google_url_does_not_zero_pad_month_or_day() {
-        // Google's `/r/{view}/{Y}/{M}/{D}` deep-link expects unpadded
-        // integers; padding turns the route into a 404. Lock that in.
-        let date = NaiveDate::from_ymd_opt(2026, 1, 5).unwrap();
-        assert_eq!(
-            google_calendar_url(CalendarView::Day, date),
-            "https://calendar.google.com/calendar/u/0/r/day/2026/1/5"
-        );
-    }
-
-    #[test]
-    fn outlook_url_picks_per_view_path() {
-        // Lowercase segments on the `outlook.cloud.microsoft` surface —
-        // verified working against M365 May 2026. An earlier draft used
-        // capitalized segments on `outlook.office.com` which silently
-        // redirected to the user's saved default view instead of the
-        // requested one.
-        assert_eq!(
-            outlook_calendar_url(CalendarView::Day),
-            "https://outlook.cloud.microsoft/calendar/view/day"
-        );
-        assert_eq!(
-            outlook_calendar_url(CalendarView::Week),
-            "https://outlook.cloud.microsoft/calendar/view/week"
-        );
-        assert_eq!(
-            outlook_calendar_url(CalendarView::Month),
-            "https://outlook.cloud.microsoft/calendar/view/month"
-        );
     }
 
     fn mouse_scroll(kind: MouseEventKind) -> MouseEvent {
@@ -302,12 +253,12 @@ use super::colors::CalendarColors;
         let cfg = CalendarConfig {
             providers: vec![
                 ProviderEntry {
-                    kind: ProviderKind::Google,
+                    kind: ProviderKind::Caldav,
                     account: None,
                     calendar_ids: vec!["primary".into()],
                 },
                 ProviderEntry {
-                    kind: ProviderKind::Outlook,
+                    kind: ProviderKind::Ics,
                     account: None,
                     calendar_ids: vec!["primary".into()],
                 },
@@ -315,19 +266,19 @@ use super::colors::CalendarColors;
             ..Default::default()
         };
         let c = CalendarColors::build(&cfg);
-        let g = c.resolve("google", "primary");
-        let o = c.resolve("outlook", "primary");
+        let g = c.resolve("caldav", "primary");
+        let o = c.resolve("ics", "primary");
         assert_ne!(g, o, "same calendar id under different sources must differ");
-        assert_eq!(g, c.resolve("google", "primary"), "must be deterministic");
+        assert_eq!(g, c.resolve("caldav", "primary"), "must be deterministic");
     }
 
     #[test]
     fn explicit_calendar_color_overrides_sequence() {
         let mut overrides = HashMap::new();
-        overrides.insert("google:primary".to_string(), "red".to_string());
+        overrides.insert("caldav:primary".to_string(), "red".to_string());
         let cfg = CalendarConfig {
             providers: vec![ProviderEntry {
-                kind: ProviderKind::Google,
+                kind: ProviderKind::Caldav,
                 account: None,
                 calendar_ids: vec!["primary".into()],
             }],
@@ -335,14 +286,14 @@ use super::colors::CalendarColors;
             ..Default::default()
         };
         let c = CalendarColors::build(&cfg);
-        assert_eq!(c.resolve("google", "primary"), Color::Red);
+        assert_eq!(c.resolve("caldav", "primary"), Color::Red);
     }
 
     #[test]
     fn custom_palette_replaces_default_sequence() {
         let cfg = CalendarConfig {
             providers: vec![ProviderEntry {
-                kind: ProviderKind::Google,
+                kind: ProviderKind::Caldav,
                 account: None,
                 calendar_ids: vec!["a".into(), "b".into()],
             }],
@@ -350,8 +301,8 @@ use super::colors::CalendarColors;
             ..Default::default()
         };
         let c = CalendarColors::build(&cfg);
-        assert_eq!(c.resolve("google", "a"), Color::Red);
-        assert_eq!(c.resolve("google", "b"), Color::Green);
+        assert_eq!(c.resolve("caldav", "a"), Color::Red);
+        assert_eq!(c.resolve("caldav", "b"), Color::Green);
     }
 
     #[test]
@@ -1410,8 +1361,7 @@ use super::colors::CalendarColors;
             .iter()
             .map(|(source, cal)| {
                 let kind = match *source {
-                    "google" => ProviderKind::Google,
-                    "outlook" => ProviderKind::Outlook,
+                    "caldav" => ProviderKind::Caldav,
                     _ => ProviderKind::Local,
                 };
                 ProviderEntry {
@@ -1429,7 +1379,7 @@ use super::colors::CalendarColors;
 
     #[test]
     fn day_dot_specs_empty_day_returns_empty() {
-        let colors = build_colors_with_calendars(&[("google", "primary")]);
+        let colors = build_colors_with_calendars(&[("caldav", "primary")]);
         let date = NaiveDate::from_ymd_opt(2026, 7, 1).unwrap();
         let result = super::day_dot_specs(date, &[], &colors, 5, false);
         assert!(result.is_empty(), "no events → no dots");
@@ -1437,9 +1387,9 @@ use super::colors::CalendarColors;
 
     #[test]
     fn day_dot_specs_single_calendar_color_mode() {
-        let colors = build_colors_with_calendars(&[("google", "primary")]);
+        let colors = build_colors_with_calendars(&[("caldav", "primary")]);
         let date = NaiveDate::from_ymd_opt(2026, 7, 1).unwrap();
-        let events = make_event_cal(date, "google", "primary", 3);
+        let events = make_event_cal(date, "caldav", "primary", 3);
         let result = super::day_dot_specs(date, &events, &colors, 2, false);
         assert_eq!(result.len(), 1, "one calendar → one dot entry");
         assert_eq!(result[0].1, 1, "color-by-calendar mode always returns count=1");
@@ -1449,14 +1399,14 @@ use super::colors::CalendarColors;
     fn day_dot_specs_color_mode_capped_at_cap() {
         // 3 distinct calendars, cap=2.
         let colors = build_colors_with_calendars(&[
-            ("google", "a"),
-            ("google", "b"),
-            ("google", "c"),
+            ("caldav", "a"),
+            ("caldav", "b"),
+            ("caldav", "c"),
         ]);
         let date = NaiveDate::from_ymd_opt(2026, 7, 1).unwrap();
-        let mut events = make_event_cal(date, "google", "a", 5);
-        events.extend(make_event_cal(date, "google", "b", 2));
-        events.extend(make_event_cal(date, "google", "c", 1));
+        let mut events = make_event_cal(date, "caldav", "a", 5);
+        events.extend(make_event_cal(date, "caldav", "b", 2));
+        events.extend(make_event_cal(date, "caldav", "c", 1));
         let result = super::day_dot_specs(date, &events, &colors, 2, false);
         assert_eq!(result.len(), 2, "color mode capped at cap=2");
         // All count=1 in color mode.
@@ -1467,27 +1417,27 @@ use super::colors::CalendarColors;
     fn day_dot_specs_hybrid_worked_example() {
         // Worked example from §7: cap=5, {A:6, B:2, C:1} → [(A,3),(B,1),(C,1)].
         let colors = build_colors_with_calendars(&[
-            ("google", "A"),
-            ("google", "B"),
-            ("google", "C"),
+            ("caldav", "A"),
+            ("caldav", "B"),
+            ("caldav", "C"),
         ]);
         let date = NaiveDate::from_ymd_opt(2026, 7, 1).unwrap();
-        let mut events = make_event_cal(date, "google", "A", 6);
-        events.extend(make_event_cal(date, "google", "B", 2));
-        events.extend(make_event_cal(date, "google", "C", 1));
+        let mut events = make_event_cal(date, "caldav", "A", 6);
+        events.extend(make_event_cal(date, "caldav", "B", 2));
+        events.extend(make_event_cal(date, "caldav", "C", 1));
         let result = super::day_dot_specs(date, &events, &colors, 5, true);
         assert_eq!(result.len(), 3, "three calendars active");
         let total: u8 = result.iter().map(|(_, c)| c).sum();
         assert_eq!(total, 5, "hybrid: total dots == cap");
         // A should have the most dots (6 events → largest share).
-        let a_color = colors.resolve("google", "A");
+        let a_color = colors.resolve("caldav", "A");
         let a_dots = result.iter().find(|(c, _)| *c == a_color).map(|(_, n)| *n).unwrap_or(0);
         assert_eq!(a_dots, 3, "A gets 3 dots (floor(6/9*5)=3)");
         // B and C each get 1 (min-1 floor applied).
-        let b_color = colors.resolve("google", "B");
+        let b_color = colors.resolve("caldav", "B");
         let b_dots = result.iter().find(|(c, _)| *c == b_color).map(|(_, n)| *n).unwrap_or(0);
         assert_eq!(b_dots, 1, "B gets 1 dot (min-1 floor)");
-        let c_color = colors.resolve("google", "C");
+        let c_color = colors.resolve("caldav", "C");
         let c_dots = result.iter().find(|(c, _)| *c == c_color).map(|(_, n)| *n).unwrap_or(0);
         assert_eq!(c_dots, 1, "C gets 1 dot (min-1 floor)");
     }
@@ -1497,10 +1447,10 @@ use super::colors::CalendarColors;
         // A:9, B:1, cap=5. Busyness 10 saturates to n_dots=5. Proportional
         // apportionment floors B's 0.5 share to 0, so the min-1 floor bumps B
         // to 1 and reclaims that dot from A. Result: A=4, B=1, total=5.
-        let colors = build_colors_with_calendars(&[("google", "a"), ("google", "b")]);
+        let colors = build_colors_with_calendars(&[("caldav", "a"), ("caldav", "b")]);
         let date = NaiveDate::from_ymd_opt(2026, 7, 1).unwrap();
-        let mut events = make_event_cal(date, "google", "a", 9);
-        events.extend(make_event_cal(date, "google", "b", 1));
+        let mut events = make_event_cal(date, "caldav", "a", 9);
+        events.extend(make_event_cal(date, "caldav", "b", 1));
         let result = super::day_dot_specs(date, &events, &colors, 5, true);
         assert_eq!(result.len(), 2);
         assert!(result.iter().all(|(_, c)| *c >= 1), "min-1 floor: each calendar ≥ 1 dot");
@@ -1508,7 +1458,7 @@ use super::colors::CalendarColors;
         assert_eq!(total, 5, "busyness 10 saturates to cap 5");
         let b_dots = result
             .iter()
-            .find(|(c, _)| *c == colors.resolve("google", "b"))
+            .find(|(c, _)| *c == colors.resolve("caldav", "b"))
             .map(|(_, n)| *n)
             .unwrap();
         assert_eq!(b_dots, 1, "B floored to 0 then bumped to min-1");
@@ -1519,10 +1469,10 @@ use super::colors::CalendarColors;
         // A single calendar: the dot count equals the event count until it
         // saturates at the cap. This is what makes a quiet day look quiet and
         // a packed day look packed.
-        let colors = build_colors_with_calendars(&[("google", "a")]);
+        let colors = build_colors_with_calendars(&[("caldav", "a")]);
         let date = NaiveDate::from_ymd_opt(2026, 7, 1).unwrap();
         for (events_n, expect) in [(1u32, 1u8), (2, 2), (5, 5), (6, 6), (12, 6)] {
-            let events = make_event_cal(date, "google", "a", events_n);
+            let events = make_event_cal(date, "caldav", "a", events_n);
             let result = super::day_dot_specs(date, &events, &colors, 6, true);
             let total: u8 = result.iter().map(|(_, c)| c).sum();
             assert_eq!(total, expect, "{events_n} events → {expect} dots (cap 6)");
@@ -1534,21 +1484,21 @@ use super::colors::CalendarColors;
         // 5 calendars each with 1 event, cap=4.
         // Over-cap: 5 > 4. Drop alphabetically-last calendar.
         let colors = build_colors_with_calendars(&[
-            ("google", "a"),
-            ("google", "b"),
-            ("google", "c"),
-            ("google", "d"),
-            ("google", "e"),
+            ("caldav", "a"),
+            ("caldav", "b"),
+            ("caldav", "c"),
+            ("caldav", "d"),
+            ("caldav", "e"),
         ]);
         let date = NaiveDate::from_ymd_opt(2026, 7, 1).unwrap();
         let mut events = Vec::new();
         for cal in ["a", "b", "c", "d", "e"] {
-            events.extend(make_event_cal(date, "google", cal, 1));
+            events.extend(make_event_cal(date, "caldav", cal, 1));
         }
         let result = super::day_dot_specs(date, &events, &colors, 4, true);
         // Over-cap: exactly cap calendars kept.
         assert_eq!(result.len(), 4, "over-cap: exactly 4 calendars kept");
-        let e_color = colors.resolve("google", "e");
+        let e_color = colors.resolve("caldav", "e");
         assert!(
             result.iter().all(|(c, _)| *c != e_color),
             "calendar 'e' (lowest alphabetically in tie) must be dropped"
@@ -1557,10 +1507,10 @@ use super::colors::CalendarColors;
 
     #[test]
     fn day_dot_specs_events_on_wrong_day_excluded() {
-        let colors = build_colors_with_calendars(&[("google", "primary")]);
+        let colors = build_colors_with_calendars(&[("caldav", "primary")]);
         let date = NaiveDate::from_ymd_opt(2026, 7, 1).unwrap();
         let other_date = NaiveDate::from_ymd_opt(2026, 7, 2).unwrap();
-        let events = make_event_cal(other_date, "google", "primary", 3);
+        let events = make_event_cal(other_date, "caldav", "primary", 3);
         let result = super::day_dot_specs(date, &events, &colors, 5, false);
         assert!(result.is_empty(), "events on other day must not produce dots");
     }
@@ -1728,7 +1678,7 @@ use super::colors::CalendarColors;
         let mut w = build_widget(CalendarConfig {
             default_view: CalendarView::Day,
             providers: vec![super::config::ProviderEntry {
-                kind: super::config::ProviderKind::Google,
+                kind: super::config::ProviderKind::Caldav,
                 account: None,
                 calendar_ids: vec!["primary".into()],
             }],
@@ -1737,7 +1687,7 @@ use super::colors::CalendarColors;
         w.anchor = NaiveDate::from_ymd_opt(2026, 7, 6).unwrap();
         // Inject synthetic events directly into state.
         let date = NaiveDate::from_ymd_opt(2026, 7, 6).unwrap();
-        let events_to_inject = make_event_cal(date, "google", "primary", 2);
+        let events_to_inject = make_event_cal(date, "caldav", "primary", 2);
         {
             let mut st = w.state.lock().unwrap();
             st.events = events_to_inject;

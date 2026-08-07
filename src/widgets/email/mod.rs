@@ -2,7 +2,7 @@
 // Copyright (C) 2026 ntrospect0
 // Copyright (C) 2026 nicococo
 
-//! Email widget — read-only feed of recent messages across Gmail / Outlook.
+//! Email widget — read-only feed of recent messages over IMAP.
 //!
 //! Closely mirrors the News widget (provider trait, expand/select/open flow,
 //! optional LLM summarization, refresh polling). Key differences:
@@ -11,10 +11,8 @@
 //!     so docket never has to write to the server.
 //!   - Bodies come from the provider's body endpoint, with HTML→text fallback.
 
-pub mod gmail;
 pub mod html_strip;
 pub mod imap;
-pub mod outlook;
 pub mod provider;
 pub mod seen_store;
 
@@ -73,7 +71,7 @@ enum SummaryState {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct EmailConfig {
-    /// `"outlook"` or `"gmail"`. Anything else renders a placeholder.
+    /// Only `"imap"` is supported. Anything else renders a placeholder.
     #[serde(default = "default_provider")]
     pub provider: String,
 
@@ -84,8 +82,8 @@ pub struct EmailConfig {
     #[serde(default = "default_refresh_minutes")]
     pub refresh_minutes: u64,
 
-    /// Gmail label ids (`INBOX`, `SENT`, …) or Outlook well-known names
-    /// (`inbox`, `sentitems`, …). Ignored when `accounts` below is non-empty.
+    /// IMAP folder/mailbox names (`INBOX`, `Sent`, …). Ignored when
+    /// `accounts` below is non-empty.
     #[serde(default = "default_folders")]
     pub folders: Vec<String>,
 
@@ -117,7 +115,7 @@ pub struct EmailConfig {
 }
 
 fn default_provider() -> String {
-    "outlook".into()
+    "imap".into()
 }
 fn default_latest_days() -> u32 {
     7
@@ -218,18 +216,15 @@ struct EmailState {
 const CACHE_KEY_MESSAGES: &str = "messages";
 
 /// Cache key for the resolved account email address. Persisted with a
-/// very long TTL — Gmail / Outlook addresses effectively never change
-/// for a given OAuth token, so re-fetching `/me` on every launch just
-/// blocks the title row on a network round-trip. We invalidate the
-/// cache automatically when the user re-authorizes (token changes,
-/// new account possible) — that path explicitly clears the entry.
+/// very long TTL since the IMAP username effectively never changes for a
+/// configured account.
 const CACHE_KEY_ACCOUNT_ADDRESS: &str = "account_address";
 
 /// Cache-key namespace for LLM-generated message summaries. Each summary is
 /// keyed by `summary-<sha256(id)>`. Provider IDs are filesystem-safe today
-/// (Gmail hex, Outlook alphanumeric) but hashing keeps the namespace bounded
-/// and future-provider-proof. Email bodies don't change post-delivery so a
-/// cached summary is valid until the user explicitly clears the cache.
+/// but hashing keeps the namespace bounded and future-provider-proof. Email
+/// bodies don't change post-delivery so a cached summary is valid until the
+/// user explicitly clears the cache.
 const SUMMARY_CACHE_PREFIX: &str = "summary-";
 
 fn summary_cache_key(id: &str) -> String {
@@ -255,7 +250,7 @@ pub struct EmailWidget {
     latest_days: u32,
     summarize_with_llm: bool,
     llm: Option<Arc<dyn LlmProvider>>,
-    /// "outlook" / "gmail" / "none" — drives the bracketed source tag in the title.
+    /// "imap" / "none" — drives the bracketed source tag in the title.
     provider_label: String,
     /// True when no real provider was configurable (missing token, missing
     /// client config, unknown name). The widget shows a placeholder instead
@@ -285,11 +280,9 @@ struct ImapAccountHandle {
 }
 
 /// Thin wrapper so the widget can fetch a fresh `cached_account()` snapshot
-/// from either provider implementation without having to widen the
+/// from the provider implementation without having to widen the
 /// `EmailProvider` trait.
 enum EmailProviderHandle {
-    Outlook(outlook::OutlookEmailProvider),
-    Gmail(gmail::GmailProvider),
     Imap(imap::ImapProvider),
     /// Placeholder used when no provider could be constructed. Holds nothing;
     /// `fetch_recent` returns an empty list so the widget renders a friendly
@@ -300,8 +293,6 @@ enum EmailProviderHandle {
 impl EmailProviderHandle {
     fn as_provider(&self) -> Option<&dyn EmailProvider> {
         match self {
-            Self::Outlook(p) => Some(p),
-            Self::Gmail(p) => Some(p),
             Self::Imap(p) => Some(p),
             Self::Empty => None,
         }
@@ -309,8 +300,6 @@ impl EmailProviderHandle {
 
     fn cached_account(&self) -> Option<String> {
         match self {
-            Self::Outlook(p) => p.cached_account(),
-            Self::Gmail(p) => p.cached_account(),
             Self::Imap(p) => p.cached_account(),
             Self::Empty => None,
         }
@@ -322,8 +311,6 @@ impl EmailProviderHandle {
     /// paints instantly on launch.
     fn seed_account_cache(&self, address: &str) {
         match self {
-            Self::Outlook(p) => p.seed_account_cache(address),
-            Self::Gmail(p) => p.seed_account_cache(address),
             Self::Imap(p) => p.seed_account_cache(address),
             Self::Empty => {}
         }
@@ -411,9 +398,9 @@ impl EmailWidget {
         // Seed messages from cache so the first render shows the prior
         // session's inbox while the refresh runs in the background.
         // The account address has its own long-lived cache entry — the
-        // address effectively never changes for a given OAuth token, so
-        // caching it lets the title row paint with the user's email
-        // immediately on launch instead of "(loading…)" until /me
+        // configured IMAP username effectively never changes, so caching
+        // it lets the title row paint with the user's email immediately
+        // on launch instead of "(loading…)" until the first connection
         // returns. `account_address` in email.toml still wins so users
         // can override the cached value by hand.
         let cached_address = cache
@@ -753,8 +740,8 @@ impl EmailWidget {
 
     /// Fire-and-forget: push `seen` to the mail server for `msg` over
     /// IMAP. No-op (with a warning) for messages without a known
-    /// `imap_uid` — Gmail/Outlook OAuth messages, or IMAP messages from
-    /// before this field existed in a stale cache. Best-effort: on
+    /// `imap_uid` — messages from before this field existed in a stale
+    /// cache. Best-effort: on
     /// failure the local seen-store override already applied by the
     /// caller stands, so the toggle still "works" from the user's
     /// perspective, just without server-side reflection until the next
@@ -1112,29 +1099,6 @@ impl EmailWidget {
 /// render the placeholder; `hint` is the actionable next step shown to the user.
 fn build_provider(name: &str) -> (EmailProviderHandle, String, bool, Option<String>) {
     match name.to_ascii_lowercase().as_str() {
-        "outlook" => match build_outlook() {
-            Ok(p) => (
-                EmailProviderHandle::Outlook(p),
-                "outlook".into(),
-                true,
-                None,
-            ),
-            Err(hint) => (
-                EmailProviderHandle::Empty,
-                "outlook".into(),
-                false,
-                Some(hint),
-            ),
-        },
-        "gmail" => match build_gmail() {
-            Ok(p) => (EmailProviderHandle::Gmail(p), "gmail".into(), true, None),
-            Err(hint) => (
-                EmailProviderHandle::Empty,
-                "gmail".into(),
-                false,
-                Some(hint),
-            ),
-        },
         "imap" => match build_imap("imap.toml") {
             Ok(p) => (EmailProviderHandle::Imap(p), "imap".into(), true, None),
             Err(hint) => (EmailProviderHandle::Empty, "imap".into(), false, Some(hint)),
@@ -1143,44 +1107,9 @@ fn build_provider(name: &str) -> (EmailProviderHandle, String, bool, Option<Stri
             EmailProviderHandle::Empty,
             other.to_string(),
             false,
-            Some(format!(
-                "unknown provider {other:?} (expected outlook, gmail, or imap)"
-            )),
+            Some(format!("unknown provider {other:?} (expected imap)")),
         ),
     }
-}
-
-fn build_outlook() -> Result<outlook::OutlookEmailProvider, String> {
-    use crate::auth::microsoft::{store::MicrosoftToken, OAuthClientConfig as MsClient};
-    let client = MsClient::load().map_err(|err| {
-        tracing::warn!(error = %err, "microsoft_oauth_client.toml missing or invalid");
-        "Drop microsoft_oauth_client.toml in ~/.config/docket/credentials/".to_string()
-    })?;
-    let token = MicrosoftToken::load()
-        .map_err(|err| format!("Outlook token unreadable: {err}"))?
-        .ok_or_else(|| {
-            "Run `docket --auth microsoft` to connect Microsoft Outlook (the Email widget needs Mail.Read — re-run after upgrading)".to_string()
-        })?;
-    outlook::OutlookEmailProvider::new(client, token)
-        .map_err(|err| format!("Outlook email init failed: {err}"))
-}
-
-fn build_gmail() -> Result<gmail::GmailProvider, String> {
-    use crate::auth::google::{store::GoogleToken, OAuthClientConfig as GClient};
-    let client = GClient::load().map_err(|err| {
-        tracing::warn!(error = %err, "google_oauth_client.toml missing or invalid");
-        "Drop google_oauth_client.toml in ~/.config/docket/credentials/".to_string()
-    })?;
-    let token = match GoogleToken::load() {
-        Ok(Some(t)) => t,
-        Ok(None) => {
-            return Err(
-                "Run `docket --auth google` to connect Gmail (the Email widget needs gmail.readonly — re-run after upgrading)".into(),
-            );
-        }
-        Err(err) => return Err(format!("Google token unreadable: {err}")),
-    };
-    gmail::GmailProvider::new(client, token).map_err(|err| format!("Gmail init failed: {err}"))
 }
 
 fn build_imap(filename: &str) -> Result<imap::ImapProvider, String> {
@@ -1189,7 +1118,7 @@ fn build_imap(filename: &str) -> Result<imap::ImapProvider, String> {
     let path = dir.join(filename);
     if !path.exists() {
         return Err(format!(
-            "IMAP credentials missing at {} — run --setup to capture them",
+            "IMAP credentials missing at {} — fill it in by hand (see README)",
             path.display()
         ));
     }
@@ -1314,9 +1243,8 @@ impl Widget for EmailWidget {
             format!("[{}] {}", self.provider_label, account_label)
         } else {
             // No single resolved address to show — list every account's
-            // username instead (IMAP has no separate `/me` call, so
-            // `cached_account()` is just the configured username and is
-            // available immediately, unlike Gmail/Outlook's OAuth `/me`).
+            // username instead (`cached_account()` is just the configured
+            // IMAP username, available immediately with no round-trip).
             let names: Vec<String> = self
                 .imap_accounts
                 .iter()
@@ -2024,9 +1952,9 @@ impl Widget for EmailWidget {
     }
 
     fn title_metadata(&self) -> Option<String> {
-        // Match the standalone email title's suffix: `[gmail]
+        // Match the standalone email title's suffix: `[imap]
         // alice@example.com` when the account has resolved; just
-        // `[gmail]` until then.
+        // `[imap]` until then.
         let label = self.provider_label.as_str();
         if label.is_empty() {
             return None;
