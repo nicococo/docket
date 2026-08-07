@@ -163,7 +163,7 @@ the live keybinding overlay.
 |---|---|---|
 | **Calendar** | day / week / month views with event agenda | CalDAV (iCloud / Fastmail / Nextcloud), ICS/webcal feed (incl. Google Calendar's "secret address"), local TOML events |
 | **News** | RSS / Atom aggregator with topic filters, keyword search (`:news <terms>`), optional per-article LLM summaries | any RSS/Atom feed; LLM provider for summaries |
-| **Feeds** | tabbed single-source RSS reader (WSJ, MarketWatch, or any feed you point it at), one tab per source | any RSS/Atom feed; LLM provider for summaries |
+| **Feeds** | tabbed single-source RSS reader (WSJ, MarketWatch, AI News, or any feed you point it at), one tab per source | any RSS/Atom feed; LLM provider for summaries |
 | **Email** | unified inbox preview with optional per-message LLM summaries | any IMAP server (app password) |
 | **Resources** | htop-style CPU / memory / top-process view | local `sysinfo` (no FFI) |
 | **Notes** | vim-flavoured multi-note pad with undo/redo, per-note files | none — plain `.md` files under `~/.config/docket/notes/` |
@@ -193,65 +193,6 @@ All files live under `~/.config/docket/`:
 
 Most fields have sensible defaults; hand-edit any file and `:reload`
 (or just save — the config watcher picks it up automatically).
-
-### Layout example
-
-```toml
-# config.toml
-version = 1
-
-[global]
-theme = "nord"
-
-[layout]
-columns = [28, 36, 36]
-rows = [30, 35, 35]
-
-[[layout.cells]]
-widget = "calendar"
-col = 0
-row = 0
-
-[[layout.cells]]
-widget = "email"
-col = 1
-row = 0
-col_span = 2              # span two columns
-
-# Stack pane: three widgets share row 1, cols 1–2; rotate with . / ,
-[[layout.cells]]
-widgets = ["news", "feeds", "notes"]
-col = 1
-row = 1
-col_span = 2
-
-[[layout.cells]]
-widget = "resources"
-col = 0
-row = 2
-col_span = 2
-```
-
-### Multi-instance widgets
-
-Cells can reference a widget as `kind@instance`:
-
-```toml
-[[layout.cells]]
-widget = "feeds@wsj"
-col = 0
-row = 2
-
-[[layout.cells]]
-widget = "feeds@marketwatch"
-col = 1
-row = 2
-```
-
-The first reads `feeds@wsj.toml`, the second `feeds@marketwatch.toml` —
-each instance is fully independent. Same trick works for calendars
-(work + personal), email (two accounts), etc. A bare `widget = "feeds"`
-(no `@instance`) reads the implicit `main` instance's `feeds.toml`.
 
 ### Per-widget colour overrides
 

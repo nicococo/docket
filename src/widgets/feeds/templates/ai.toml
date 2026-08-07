@@ -1,0 +1,76 @@
+# AI News starter template — machine learning / AI industry coverage.
+#
+# Embedded into the binary at build time and surfaced by the feeds
+# widget's --setup wizard. Editing this file requires a rebuild;
+# users who want to add a custom source instead drop a fresh TOML
+# at this same shape under ~/.config/docket/templates/ (planned for
+# a later phase) or write their feeds@<instance>.toml by hand.
+
+id = "ai"
+display_name = "AI News"
+
+# Preferred Shift+<letter> shortcut keys. The wizard seeds this into
+# the generated instance TOML's `shortcuts = [...]` line; the
+# runtime's first-fit dispatcher walks the list and claims the
+# first letter not already taken by another widget.
+default_shortcut_prefs = ["A", "I"]
+
+# Per-instance command aliases. The runtime recognizes :ai <terms>,
+# :ai-summary, and :ai-refresh as additional names for this
+# instance on top of the always-available kind-level `:feeds*`
+# commands.
+default_commands = ["ai"]
+
+# Feed catalogue — every topic the source publishes. `default = true`
+# entries are active in a fresh instance; the rest are written as
+# commented-out blocks the user can uncomment to enable.
+
+[[feeds]]
+topic = "Research"
+url = "https://www.marktechpost.com/feed"
+default = true
+
+[[feeds]]
+topic = "HF"
+url = "https://huggingface.co/blog/feed.xml"
+default = true
+
+[[feeds]]
+topic = "Venture"
+url = "https://venturebeat.com/category/ai/feed/"
+default = true
+
+[[feeds]]
+topic = "News"
+url = "https://aiwire.net/feed/"
+default = true
+
+[[feeds]]
+topic = "Weekly"
+url = "https://lastweekin.ai/feed/"
+default = true
+
+[[feeds]]
+topic = "Papers"
+url = "https://www.thegradient.pub/rss/"
+default = true
+
+[[feeds]]
+topic = "OpenAI"
+url = "https://openai.com/news/rss.xml"
+default = true
+
+[[feeds]]
+topic = "r/LocalLLaMA"
+url = "https://www.reddit.com/r/LocalLLaMA/.rss"
+default = true
+
+[[feeds]]
+topic = "r/MLNews"
+url = "https://www.reddit.com/r/machinelearningnews/.rss"
+default = true
+
+[[feeds]]
+topic = "Data Science"
+url = "https://towardsdatascience.com/feed"
+default = true

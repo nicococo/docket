@@ -70,6 +70,7 @@ const BUILTIN_TEMPLATES: &[(&str, &str)] = &[
         "marketwatch",
         include_str!("templates/marketwatch.toml"),
     ),
+    ("ai", include_str!("templates/ai.toml")),
 ];
 
 /// Parse every built-in template. Panics on a malformed embedded TOML
