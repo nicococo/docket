@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 ntrospect0
+// Copyright (C) 2026 nicococo
 
 //! Size-tier helper for responsive widget rendering.
 //!
@@ -10,7 +11,7 @@
 //!
 //! # Community SDK surface
 //!
-//! `ViewTier` is part of the public widget SDK. Once glint is open-sourced,
+//! `ViewTier` is part of the public widget SDK. Once docket is open-sourced,
 //! community widget authors will import this type and match on its variants.
 //! **The variant names (`Compact`, `Standard`, `Expanded`, `Full`) and the
 //! threshold constant names are a one-way door at OSS release** — renaming

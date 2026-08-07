@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 ntrospect0
+// Copyright (C) 2026 nicococo
 
 use std::path::PathBuf;
 
@@ -23,7 +24,7 @@ fn token_file(account: &str) -> String {
 /// for the default account so source upgrades don't force a re-auth.
 const LEGACY_TOKEN_FILE: &str = "microsoft_oauth_token.toml";
 
-/// What we load from `~/.config/glint/credentials/microsoft_oauth_client.toml`.
+/// What we load from `~/.config/docket/credentials/microsoft_oauth_client.toml`.
 /// PKCE means there's no client secret to store — just the client_id from
 /// the Azure portal app registration.
 #[derive(Debug, Clone, Deserialize)]

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 ntrospect0
+// Copyright (C) 2026 nicococo
 
 //! Runtime-state persistence for the clock widget.
 //!
@@ -89,7 +90,7 @@ pub(super) fn hydrate_state(state: &mut ClockState, id: &str) {
         let end_at = unix_ms_to_systemtime(end_ms);
         state.timer.phase = if SystemTime::now() >= end_at {
             // We were running and the deadline already passed
-            // while glint was shut down — restore directly
+            // while docket was shut down — restore directly
             // into Fired so the alarm fires on first tick.
             TimerPhase::Fired { fired_at: end_at }
         } else {

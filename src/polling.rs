@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 ntrospect0
+// Copyright (C) 2026 nicococo
 
 //! Periodic-fetch debounce primitive.
 //!
@@ -10,7 +11,7 @@
 //! 2. A monotonic timestamp of the last attempt so we can ask
 //!    "is it time again?"
 //! 3. A way to seed (2) from a cached entry so a freshly-launched
-//!    glint with an on-disk cache doesn't fire a refresh in the
+//!    docket with an on-disk cache doesn't fire a refresh in the
 //!    first 250 ms tick.
 //!
 //! This module supplies that primitive once. The [`Widget`] trait

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 ntrospect0
+// Copyright (C) 2026 nicococo
 
 //! Half-block pixel-art weather glyphs, extracted from a stock 4×4
 //! icon set and faithfully sampled at each glyph's native chunky-pixel

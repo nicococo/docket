@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 ntrospect0
+// Copyright (C) 2026 nicococo
 
 //! Timer mode for the clock widget: countdown phase machine, the
 //! HH:MM:SS edit buffer, the alarm flash + edit-blink phase
@@ -377,7 +378,7 @@ impl ClockWidget {
             //   Starting time HH:MM:SS
             //   <blank>
             //   Timer alerts only while
-            //   glint is running
+            //   docket is running
             // Each row is pushed only when the pane is tall enough to
             // hold it — the running widget can render in a sliver
             // and still show the big digits.
@@ -390,7 +391,7 @@ impl ClockWidget {
                 (format!("Starting time   {}", format_hms(duration)), dim),
                 (String::new(), dim),
                 ("Timer alerts only while".to_string(), italic),
-                ("glint is running".to_string(), italic),
+                ("docket is running".to_string(), italic),
             ];
             for (text, style) in rows {
                 if (lines.len() as u16) >= inner.height {

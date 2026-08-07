@@ -280,7 +280,7 @@ grid_def = [
 [[presets]]
 id = "magazine"
 label = "Magazine (5 cells)"
-description = "Two rows on top, full-width stocks-style row at the bottom — glint's default seed."
+description = "Two rows on top, full-width stocks-style row at the bottom — docket's default seed."
 cells = 5
 grid_cols = 2
 grid_rows = 3

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 ntrospect0
+// Copyright (C) 2026 nicococo
 
 //! Profile discovery + name helpers.
 //!
@@ -12,13 +13,13 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 
 use super::{
-    active_profile, glint_root, seed_global_layer, seed_profile_dir, validate_profile_name,
+    active_profile, docket_root, seed_global_layer, seed_profile_dir, validate_profile_name,
     DEFAULT_PROFILE,
 };
 
-/// The directory holding every profile: `<glint_root>/profiles/`.
+/// The directory holding every profile: `<docket_root>/profiles/`.
 pub fn profiles_dir() -> Result<PathBuf> {
-    Ok(glint_root()?.join("profiles"))
+    Ok(docket_root()?.join("profiles"))
 }
 
 /// Profile names present on disk — `default` first, then alphabetical.
@@ -189,7 +190,7 @@ mod tests {
 
     fn temp_dir(tag: &str) -> PathBuf {
         let mut p = std::env::temp_dir();
-        p.push(format!("glint-profiles-test-{tag}-{}", std::process::id()));
+        p.push(format!("docket-profiles-test-{tag}-{}", std::process::id()));
         let _ = fs::remove_dir_all(&p);
         fs::create_dir_all(&p).unwrap();
         p

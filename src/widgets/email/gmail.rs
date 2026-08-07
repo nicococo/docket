@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 ntrospect0
+// Copyright (C) 2026 nicococo
 
 //! Gmail (Google Mail API v1) email provider. Uses the existing Google OAuth
 //! token (extended with the `gmail.readonly` scope) to list and read messages.
@@ -521,6 +522,8 @@ impl RawMessage {
             server_unread,
             plain_body,
             web_url,
+            account: String::new(),
+            imap_uid: None,
         })
     }
 }

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 ntrospect0
+// Copyright (C) 2026 nicococo
 
 //! HTML → plain text for email bodies, backed by the `html2text` renderer
 //! (the html5ever tree builder). Runs entirely in-process — no network.

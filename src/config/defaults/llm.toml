@@ -3,7 +3,7 @@
 enabled = true
 
 # ── Provider ─────────────────────────────────────────────────────────────────
-# glint can use one LLM provider at a time. Switch by changing `name`
+# docket can use one LLM provider at a time. Switch by changing `name`
 # (and the matching credentials file — see `model` notes below).
 #
 #   name = "anthropic"
@@ -17,7 +17,7 @@ enabled = true
 #     key file  — credentials/openai_key.toml
 #
 # `model` is free-form — any model name the provider's API accepts works,
-# so you can track new releases without waiting for a glint update.
+# so you can track new releases without waiting for a docket update.
 [provider]
 name = "anthropic"
 model = "claude-sonnet-4-6"

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 ntrospect0
+// Copyright (C) 2026 nicococo
 
 pub mod layout;
 pub mod migrate;
@@ -16,7 +17,7 @@ pub use layout::LayoutConfig;
 pub use types::Config;
 pub use types::ZoomMargin;
 
-/// Load a per-widget TOML config from `~/.config/glint/<name>.toml`. Returns
+/// Load a per-widget TOML config from `~/.config/docket/<name>.toml`. Returns
 /// `T::default()` if the file does not exist.
 pub fn load_widget_toml<T>(name: &str) -> Result<T>
 where
@@ -152,21 +153,21 @@ pub fn validate_profile_name(name: &str) -> Result<()> {
     Ok(())
 }
 
-/// The glint root — `~/.config/glint/` (overridable with `$XDG_CONFIG_HOME`).
+/// The docket root — `~/.config/docket/` (overridable with `$XDG_CONFIG_HOME`).
 /// This is the **global layer** shared across profiles. The XDG Base
 /// Directory layout is what the spec promises, so we use it consistently
 /// rather than `~/Library/Application Support/` (macOS) or `%APPDATA%`.
-pub fn glint_root() -> Result<PathBuf> {
+pub fn docket_root() -> Result<PathBuf> {
     if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME") {
         if !xdg.is_empty() {
-            return Ok(PathBuf::from(xdg).join("glint"));
+            return Ok(PathBuf::from(xdg).join("docket"));
         }
     }
     let home = dirs::home_dir().context("could not locate user home directory")?;
-    Ok(home.join(".config").join("glint"))
+    Ok(home.join(".config").join("docket"))
 }
 
-/// The active profile's config directory — `<glint_root>/profiles/<active>`.
+/// The active profile's config directory — `<docket_root>/profiles/<active>`.
 /// Every per-profile path (widget configs, credentials, runtime/wizard
 /// state, notes, log) resolves under this. An explicit `--config` override
 /// short-circuits to that file's directory.
@@ -190,7 +191,7 @@ pub fn config_dir() -> Result<PathBuf> {
 /// binary, without any automatic destructive migration. Opt in explicitly
 /// with `--migrate-profiles`.
 pub fn resolve_profile_dir(profile: &str) -> Result<PathBuf> {
-    let root = glint_root()?;
+    let root = docket_root()?;
     let profile_dir = root.join("profiles").join(profile);
     if profile == DEFAULT_PROFILE && !profile_dir.exists() && root.join("config.toml").exists() {
         return Ok(root);
@@ -247,11 +248,13 @@ pub const DEFAULT_MICROSOFT_CLIENT_TEMPLATE: &str = include_str!("defaults/crede
 
 pub const DEFAULT_CALDAV_TEMPLATE: &str = include_str!("defaults/credentials/caldav.toml");
 
+pub const DEFAULT_ICS_TEMPLATE: &str = include_str!("defaults/credentials/ics.toml");
+
 pub const DEFAULT_STOCKS_TOML: &str = include_str!("defaults/stocks.toml");
 
 pub const DEFAULT_CALENDAR_TOML: &str = include_str!("defaults/calendar.toml");
 
-/// Create `~/.config/glint/` and seed the default config files if they do not
+/// Create `~/.config/docket/` and seed the default config files if they do not
 /// already exist. Returns the path of the main `config.toml`.
 pub fn init_default_config() -> Result<PathBuf> {
     seed_global_layer()?;
@@ -260,12 +263,12 @@ pub fn init_default_config() -> Result<PathBuf> {
     Ok(dir.join("config.toml"))
 }
 
-/// Seed the shared **global layer** at the glint root: the colorscheme
+/// Seed the shared **global layer** at the docket root: the colorscheme
 /// library and the OAuth client-registration templates. Idempotent.
 pub(crate) fn seed_global_layer() -> Result<()> {
-    let root = glint_root()?;
+    let root = docket_root()?;
     std::fs::create_dir_all(&root)
-        .with_context(|| format!("failed to create glint root at {}", root.display()))?;
+        .with_context(|| format!("failed to create docket root at {}", root.display()))?;
     seed(&root.join("colorschemes.toml"), DEFAULT_COLORSCHEMES_TOML)?;
     let global_creds = crate::credentials::global_dir()?;
     seed_credentials(
@@ -307,6 +310,7 @@ pub(crate) fn seed_profile_dir(dir: &Path) -> Result<()> {
     )?;
     seed_credentials(&creds.join("openai_key.toml"), DEFAULT_OPENAI_KEY_TEMPLATE)?;
     seed_credentials(&creds.join("caldav.toml"), DEFAULT_CALDAV_TEMPLATE)?;
+    seed_credentials(&creds.join("ics.toml"), DEFAULT_ICS_TEMPLATE)?;
     Ok(())
 }
 
@@ -465,7 +469,7 @@ mod tests {
 
     #[test]
     fn load_missing_file_returns_defaults() {
-        let cfg = load(Some(Path::new("/nonexistent/glint/config.toml")))
+        let cfg = load(Some(Path::new("/nonexistent/docket/config.toml")))
             .expect("missing file should not error");
         assert_eq!(cfg.version, 1);
     }

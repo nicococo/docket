@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 ntrospect0
+// Copyright (C) 2026 nicococo
 
 //! Yahoo Finance v8/chart adapter shared by the stocks and forex widgets.
 //!
@@ -23,11 +24,11 @@ use serde::Deserialize;
 /// Build the shared Yahoo HTTP client. Browser-shaped UA so the chart
 /// endpoint doesn't reject us, 10s timeout, cookie jar (needed by stocks
 /// for the v10/quoteSummary crumb auth; harmless for forex). Identifies
-/// as glint underneath for transparency in Yahoo's server logs.
+/// as docket underneath for transparency in Yahoo's server logs.
 pub fn build_client() -> Result<reqwest::Client> {
     reqwest::Client::builder()
         .user_agent(concat!(
-            "Mozilla/5.0 (compatible; glint-tui/",
+            "Mozilla/5.0 (compatible; docket-tui/",
             env!("CARGO_PKG_VERSION"),
             ")"
         ))

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 ntrospect0
+// Copyright (C) 2026 nicococo
 
 //! On-disk credentials store — one home for every "load a TOML file
 //! holding a secret" / "write one with chmod 0600" pattern.
@@ -11,7 +12,7 @@
 //! security-relevant duplication that eventually ships a 0644
 //! token file by accident.
 //!
-//! All files live under `~/.config/glint/credentials/`. The
+//! All files live under `~/.config/docket/credentials/`. The
 //! directory is created with mode `0700` on first use. Save paths
 //! atomic-write to a sibling `<name>.tmp`, `chmod 0600` the tmp,
 //! then rename — so even a crash mid-write can't leak a partially-
@@ -36,11 +37,11 @@ pub fn dir() -> Result<PathBuf> {
     ensure_0700(crate::config::config_dir()?.join("credentials"))
 }
 
-/// The **global** credentials dir — `<glint_root>/credentials/`, shared
+/// The **global** credentials dir — `<docket_root>/credentials/`, shared
 /// across profiles. Holds app-level OAuth *client registrations* (the
 /// Azure / Google app, not any account). Created mode `0700`.
 pub fn global_dir() -> Result<PathBuf> {
-    ensure_0700(crate::config::glint_root()?.join("credentials"))
+    ensure_0700(crate::config::docket_root()?.join("credentials"))
 }
 
 fn ensure_0700(path: PathBuf) -> Result<PathBuf> {
@@ -160,7 +161,7 @@ mod tests {
         // collide with each other or with the user's real
         // credentials. The teardown drop the dir explicitly.
         let dir = std::env::temp_dir().join(format!(
-            "glint-credentials-test-{}-{}",
+            "docket-credentials-test-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -243,7 +244,7 @@ mod tests {
         // (`dir()` may still create the dir, but we don't assert on
         // that here; the ignored tests above exercise creation.)
         let tmp = std::env::temp_dir().join(format!(
-            "glint-creds-path-test-{}-{}",
+            "docket-creds-path-test-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)

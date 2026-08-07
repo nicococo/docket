@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 ntrospect0
+// Copyright (C) 2026 nicococo
 
 //! ASCII layout-preview sidebar. Drawn alongside the Assign + per-widget
 //! pages so the user can see which cell of the dashboard is currently

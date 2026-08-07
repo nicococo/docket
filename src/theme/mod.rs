@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 ntrospect0
+// Copyright (C) 2026 nicococo
 
 //! Color scheme system.
 //!
-//! Loads `~/.config/glint/colorschemes.toml`, picks the active scheme named in
+//! Loads `~/.config/docket/colorschemes.toml`, picks the active scheme named in
 //! `config.toml`'s `[global] theme`, and resolves it into a [`Theme`] struct of
 //! ready-to-use Ratatui [`Style`]s. Missing roles fall back to built-in
 //! defaults so a scheme can override one or two things and leave the rest
@@ -35,7 +36,7 @@ use anyhow::{Context, Result};
 use ratatui::style::{Color, Modifier, Style};
 use serde::{Deserialize, Deserializer};
 
-use crate::config::{config_dir, glint_root};
+use crate::config::{config_dir, docket_root};
 
 /// A single style declaration, decoupled from Ratatui's [`Style`] so we can
 /// distinguish "absent" (inherit) from "explicit default". Convert into a
@@ -198,7 +199,7 @@ impl Default for Theme {
 }
 
 impl Theme {
-    /// Hardcoded fallback palette — matches the colors glint shipped with
+    /// Hardcoded fallback palette — matches the colors docket shipped with
     /// before the theme system existed. Returned when no `colorschemes.toml`
     /// is present and used to fill in any roles a scheme omits.
     pub fn builtin_defaults() -> Self {
@@ -307,11 +308,11 @@ pub struct ColorSchemesFile {
     pub schemes: HashMap<String, ColorScheme>,
 }
 
-/// Path to the **global** colorscheme library at the glint root. This is
+/// Path to the **global** colorscheme library at the docket root. This is
 /// shared across profiles; a profile may add/override schemes via its own
 /// `colorschemes.toml` (see [`load_schemes_file`]).
 pub fn colorschemes_path() -> Result<PathBuf> {
-    Ok(glint_root()?.join("colorschemes.toml"))
+    Ok(docket_root()?.join("colorschemes.toml"))
 }
 
 /// Load the colorscheme library: the global root file as a base, with an
@@ -339,7 +340,7 @@ fn read_schemes_file(path: &std::path::Path) -> Result<ColorSchemesFile> {
     toml::from_str(&contents).with_context(|| format!("failed to parse {}", path.display()))
 }
 
-/// Load the app theme. Looks up scheme `name` in `~/.config/glint/colorschemes.toml`
+/// Load the app theme. Looks up scheme `name` in `~/.config/docket/colorschemes.toml`
 /// and overlays it on the built-in defaults. Missing file → defaults only.
 /// Missing scheme name → warn and use defaults. Missing roles within a
 /// scheme → silently fall back to the built-in for that role.
@@ -365,12 +366,12 @@ pub fn theme_from_scheme(scheme: &ColorScheme) -> Arc<Theme> {
     Arc::new(Theme::builtin_defaults().with_overrides(scheme))
 }
 
-/// Persist the active scheme name to `~/.config/glint/config.toml` so the
+/// Persist the active scheme name to `~/.config/docket/config.toml` so the
 /// choice survives a restart. Does a targeted line edit rather than
 /// re-serializing the whole struct so the user's comments and formatting
 /// stay intact. If `config.toml` doesn't exist, this is a silent no-op (the
 /// app is running on built-in defaults; the user can save their choice by
-/// running `glint --init`).
+/// running `docket --init`).
 ///
 /// The edit looks for the first `theme = "..."` line under a `[global]`
 /// section and rewrites just its value, preserving indentation. If

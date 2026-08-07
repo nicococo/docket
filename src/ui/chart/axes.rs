@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 ntrospect0
+// Copyright (C) 2026 nicococo
 
 //! Chart-axis primitives shared by widgets that render a braille
 //! time-series. Today: y-axis tick row indices, the right-anchored

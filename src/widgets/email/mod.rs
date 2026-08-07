@@ -1,13 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 ntrospect0
+// Copyright (C) 2026 nicococo
 
 //! Email widget — read-only feed of recent messages across Gmail / Outlook.
 //!
 //! Closely mirrors the News widget (provider trait, expand/select/open flow,
 //! optional LLM summarization, refresh polling). Key differences:
 //!   - "Folders" replace News's topic tabs.
-//!   - Server-side read state is OR'd with a local "seen via glint" cache
-//!     so glint never has to write to the server.
+//!   - Server-side read state is OR'd with a local "seen via docket" cache
+//!     so docket never has to write to the server.
 //!   - Bodies come from the provider's body endpoint, with HTML→text fallback.
 
 pub mod gmail;
@@ -47,6 +48,9 @@ use seen_store::SeenStore;
 
 const MAX_SUMMARY_LINES: usize = 5;
 const MAX_PER_FOLDER: usize = 100;
+/// Implicit first tab in multi-account IMAP mode — merges every configured
+/// account, mirroring News's "All" topic tab.
+const ALL_ACCOUNTS_TAB: &str = "All";
 /// Minimum list-area content width before the list splits into list + read pane.
 /// Intentionally very wide: the read pane is only shown when the widget is
 /// genuinely large (zoomed pane or a wide dedicated cell). At 175 cols and
@@ -81,9 +85,18 @@ pub struct EmailConfig {
     pub refresh_minutes: u64,
 
     /// Gmail label ids (`INBOX`, `SENT`, …) or Outlook well-known names
-    /// (`inbox`, `sentitems`, …).
+    /// (`inbox`, `sentitems`, …). Ignored when `accounts` below is non-empty.
     #[serde(default = "default_folders")]
     pub folders: Vec<String>,
+
+    /// Multiple named IMAP accounts merged into one panel — each becomes
+    /// its own tab (plus an implicit "All" tab), analogous to News's topic
+    /// tabs. Only meaningful when `provider = "imap"`; empty (the default)
+    /// preserves single-account behavior exactly, reading `folders` above
+    /// and `credentials/imap.toml`. When non-empty, each entry's
+    /// credentials instead live in `credentials/imap_<label>.toml`.
+    #[serde(default)]
+    pub accounts: Vec<EmailAccountEntry>,
 
     /// On-demand message summarisation when an LLM provider is configured.
     /// Press `s` on an expanded message.
@@ -116,6 +129,18 @@ fn default_folders() -> Vec<String> {
     vec!["INBOX".into()]
 }
 
+/// One IMAP account inside a multi-account `[[accounts]]` list.
+#[derive(Debug, Clone, Deserialize)]
+pub struct EmailAccountEntry {
+    /// Tab label, and the suffix of its credentials file
+    /// (`credentials/imap_<label>.toml`).
+    pub label: String,
+    /// Folders to merge for this account. Defaults to `["INBOX"]`, same as
+    /// single-account mode.
+    #[serde(default = "default_folders")]
+    pub folders: Vec<String>,
+}
+
 impl Default for EmailConfig {
     fn default() -> Self {
         Self {
@@ -123,6 +148,7 @@ impl Default for EmailConfig {
             latest_days: default_latest_days(),
             refresh_minutes: default_refresh_minutes(),
             folders: default_folders(),
+            accounts: Vec::new(),
             summarize_with_llm: false,
             account_address: None,
             colors: ColorScheme::default(),
@@ -179,6 +205,10 @@ struct EmailState {
     /// path; read by handle_key to suppress the inline `e`/Enter expand
     /// while the full body is already visible in the read pane.
     read_pane_active: bool,
+    /// Armed by `d`; the message pending a delete-to-trash confirmation.
+    /// `y` commits ([`EmailWidget::confirm_delete`]), any other key
+    /// cancels — see the shared `crate::ui::modal` confirm primitive.
+    confirm_delete: Option<Arc<EmailMessage>>,
     /// Display-state dirty bit drained by `take_dirty`. Set true by
     /// every async-task / tick-time mutation site so the main loop's
     /// dirty-flag gate triggers a redraw.
@@ -216,6 +246,12 @@ pub struct EmailWidget {
     /// react to expand-induced changes without races.
     seen: Arc<Mutex<SeenStore>>,
     folders: Vec<String>,
+    /// Non-empty only in multi-account IMAP mode (`[[accounts]]` in
+    /// email.toml). When present, this widget ignores `provider`/`folders`
+    /// above and fetches from every listed account instead; the tab bar
+    /// shows an account per tab (plus "All") rather than folders. See
+    /// [`Self::tab_labels`] and [`Self::spawn_refresh_multi_imap`].
+    imap_accounts: Vec<ImapAccountHandle>,
     latest_days: u32,
     summarize_with_llm: bool,
     llm: Option<Arc<dyn LlmProvider>>,
@@ -235,6 +271,17 @@ pub struct EmailWidget {
     shortcut_prefs: Vec<char>,
     /// Persistent cache of the merged message list across configured folders.
     cache: ScopedCache,
+}
+
+/// One connected account in multi-account IMAP mode. Deliberately holds a
+/// concrete `imap::ImapProvider` rather than going through
+/// `EmailProviderHandle` — multi-account is IMAP-only, so there's no
+/// dispatch to do, and `cached_account()` is called directly from `render`.
+struct ImapAccountHandle {
+    /// Tab label — matches the `[[accounts]]` entry's `label`.
+    label: String,
+    provider: Arc<imap::ImapProvider>,
+    folders: Vec<String>,
 }
 
 /// Thin wrapper so the widget can fetch a fresh `cached_account()` snapshot
@@ -307,8 +354,23 @@ impl EmailWidget {
         } else {
             config.folders.clone()
         };
-        let (provider, provider_label, provider_ready, auth_hint) =
-            build_provider(&config.provider);
+        let multi_imap = config.provider.eq_ignore_ascii_case("imap") && !config.accounts.is_empty();
+        let (provider, provider_label, provider_ready, auth_hint, imap_accounts) = if multi_imap {
+            let (handles, ready, hint) = build_imap_accounts(&config.accounts);
+            // Multi-account mode never reads `provider` (every code path
+            // branches on `imap_accounts` being non-empty first), but the
+            // field still needs a value.
+            (
+                EmailProviderHandle::Empty,
+                "imap".to_string(),
+                ready,
+                hint,
+                handles,
+            )
+        } else {
+            let (p, label, ready, hint) = build_provider(&config.provider);
+            (p, label, ready, hint, Vec::new())
+        };
 
         let colors_override = config.colors.clone();
         let theme = app_theme.with_overrides(&colors_override);
@@ -358,8 +420,18 @@ impl EmailWidget {
             .load::<String>(CACHE_KEY_ACCOUNT_ADDRESS)
             .map(|e| e.value);
         let initial_account = config.account_address.clone().or(cached_address.clone());
+        // Multi-account mode has no single title-row address to resolve —
+        // render() reads each account's cached_account() directly instead —
+        // so seed a sentinel here purely to keep `is_due()` on the regular
+        // mail-refresh cadence instead of the single-account fast retry
+        // meant for an unresolved `/me` lookup.
+        let multi_imap_account_sentinel = if multi_imap {
+            Some("multi-account".to_string())
+        } else {
+            None
+        };
         let mut initial_state = EmailState {
-            account: initial_account.clone(),
+            account: multi_imap_account_sentinel.or(initial_account.clone()),
             // Fast retry while account is being resolved (~30s) plus
             // the regular mail-refresh cadence. Both get stamped on
             // every spawn_refresh; is_due picks which one to consult
@@ -405,6 +477,7 @@ impl EmailWidget {
             state: Arc::new(Mutex::new(initial_state)),
             seen: Arc::new(Mutex::new(seen)),
             folders,
+            imap_accounts,
             latest_days: config.latest_days.max(1),
             summarize_with_llm: config.summarize_with_llm,
             llm,
@@ -420,19 +493,42 @@ impl EmailWidget {
         }
     }
 
+    /// Visible tab labels — folders in single-account mode, or `"All"` +
+    /// one tab per configured account in multi-account IMAP mode. Every
+    /// tab-bar / tab-cycling / tab-filtering call site goes through this
+    /// instead of touching `self.folders` directly, so the two modes share
+    /// one rendering and input path.
+    fn tab_labels(&self) -> Vec<String> {
+        if self.imap_accounts.is_empty() {
+            self.folders.clone()
+        } else {
+            let mut tabs = vec![ALL_ACCOUNTS_TAB.to_string()];
+            tabs.extend(self.imap_accounts.iter().map(|a| a.label.clone()));
+            tabs
+        }
+    }
+
+    /// Whether `msg` belongs on the given visible tab — folder equality in
+    /// single-account mode, account equality (or the "All" tab) in
+    /// multi-account mode.
+    fn message_matches_tab(&self, msg: &EmailMessage, tab: &str) -> bool {
+        if self.imap_accounts.is_empty() {
+            msg.folder.eq_ignore_ascii_case(tab)
+        } else {
+            tab == ALL_ACCOUNTS_TAB || msg.account.eq_ignore_ascii_case(tab)
+        }
+    }
+
     fn filtered_messages(&self) -> Vec<Arc<EmailMessage>> {
         let st = self.state.lock().expect("email state poisoned");
-        let folder = self
-            .folders
-            .get(
-                st.active_folder_idx
-                    .min(self.folders.len().saturating_sub(1)),
-            )
+        let tabs = self.tab_labels();
+        let active = tabs
+            .get(st.active_folder_idx.min(tabs.len().saturating_sub(1)))
             .cloned()
             .unwrap_or_default();
         st.messages
             .iter()
-            .filter(|m| m.folder.eq_ignore_ascii_case(&folder))
+            .filter(|m| self.message_matches_tab(m, &active))
             .cloned()
             .collect()
     }
@@ -475,6 +571,10 @@ impl EmailWidget {
             st.mail_poll.mark_attempted();
             st.dirty = true;
         }
+        if !self.imap_accounts.is_empty() {
+            self.spawn_refresh_multi_imap();
+            return;
+        }
         let provider = self.provider.clone();
         let state = self.state.clone();
         let folders = self.folders.clone();
@@ -504,7 +604,7 @@ impl EmailWidget {
             // Trim oversized bodies. The expanded view caps at
             // `MAX_SUMMARY_LINES` (5) and full-message read happens via
             // `o` opening the user's mail client, so we never paint
-            // more than the first ~400 chars in glint anyway. 4 KB is
+            // more than the first ~400 chars in docket anyway. 4 KB is
             // ample headroom for the visible snippet + LLM summary
             // context, and drops mailing-list bodies that routinely
             // ship 50+ KB of HTML-stripped text per message.
@@ -539,30 +639,77 @@ impl EmailWidget {
         });
     }
 
+    /// Multi-account IMAP refresh path — fetches every configured
+    /// account's folders in turn (accounts run sequentially; each
+    /// account's own folders were already sequential in single-account
+    /// mode, so this keeps the same "no concurrent IMAP sessions to worry
+    /// about" property) and merges the results, tagging each message with
+    /// its account label. Mirrors [`Self::spawn_refresh`]'s body but
+    /// without the single-account title-row address bookkeeping — the
+    /// title row reads each account's `cached_account()` directly in
+    /// `render` instead.
+    fn spawn_refresh_multi_imap(&self) {
+        let accounts: Vec<(String, Arc<imap::ImapProvider>, Vec<String>)> = self
+            .imap_accounts
+            .iter()
+            .map(|a| (a.label.clone(), a.provider.clone(), a.folders.clone()))
+            .collect();
+        let state = self.state.clone();
+        let latest_days = self.latest_days;
+        let cache = self.cache.clone();
+        tokio::spawn(async move {
+            let since = Utc::now() - chrono::Duration::days(latest_days as i64);
+            let mut messages: Vec<EmailMessage> = Vec::new();
+            let mut last_error: Option<String> = None;
+            for (label, prov, folders) in &accounts {
+                for folder in folders {
+                    match prov.fetch_recent(folder, since, MAX_PER_FOLDER).await {
+                        Ok(mut chunk) => {
+                            // Tag with the account label (used by tab
+                            // filtering) and disambiguate the id — IMAP UIDs
+                            // are only unique per-account, so two accounts'
+                            // "INBOX" could otherwise collide in the
+                            // seen-store and the message-list keying.
+                            for m in &mut chunk {
+                                m.account = label.clone();
+                                m.id = format!("{label}-{}", m.id);
+                            }
+                            messages.append(&mut chunk);
+                        }
+                        Err(err) => {
+                            tracing::warn!(account = %label, folder = %folder, error = %err, "email fetch failed");
+                            last_error = Some(format!("{label}/{folder}: {err}"));
+                        }
+                    }
+                }
+            }
+            messages.sort_by_key(|m| std::cmp::Reverse(m.received));
+            for m in &mut messages {
+                truncate_body_in_place(&mut m.plain_body, 4096);
+            }
+            if last_error.is_none() {
+                if let Err(err) = cache.store(CACHE_KEY_MESSAGES, &messages) {
+                    tracing::warn!(error = %err, "email cache store failed");
+                }
+            }
+            let mut st = state.lock().expect("email state poisoned");
+            st.inflight = false;
+            st.messages = messages.into_iter().map(Arc::new).collect();
+            st.last_error = last_error;
+            st.dirty = true;
+        });
+    }
+
     fn move_selection(&mut self, delta: isize) {
         let filtered = self.filtered_messages();
         if filtered.is_empty() {
             return;
         }
-        let new_idx;
-        let was_expanded;
-        {
-            let mut st = self.state.lock().expect("email state poisoned");
-            new_idx = (st.selected as isize + delta).clamp(0, filtered.len() as isize - 1) as usize;
-            st.selected = new_idx;
-            was_expanded = st.expanded;
-        }
-        // When the user is in expanded mode, navigating up/down is
-        // visually "opening" each message they land on — they can see
-        // the body in the expanded pane. Mark seen the same way
-        // toggle_expand does so the unread dot disappears after a
-        // single scroll-by visit. Without this the unread state
-        // lingered until the user explicitly collapsed + re-expanded.
-        if was_expanded {
-            if let Some(msg) = filtered.get(new_idx) {
-                self.mark_seen_if_unseen(&msg.id);
-            }
-        }
+        let mut st = self.state.lock().expect("email state poisoned");
+        let new_idx = (st.selected as isize + delta).clamp(0, filtered.len() as isize - 1) as usize;
+        st.selected = new_idx;
+        // Scrolling/selecting must never mark a message read — only the
+        // explicit `u` keybinding (toggle_read_state) changes read state.
     }
 
     fn jump_to(&mut self, idx: usize) {
@@ -570,38 +717,181 @@ impl EmailWidget {
         if filtered.is_empty() {
             return;
         }
-        let new_idx;
-        let was_expanded;
-        {
-            let mut st = self.state.lock().expect("email state poisoned");
-            new_idx = idx.min(filtered.len() - 1);
-            st.selected = new_idx;
-            was_expanded = st.expanded;
+        let mut st = self.state.lock().expect("email state poisoned");
+        st.selected = idx.min(filtered.len() - 1);
+    }
+
+    /// Press-`u` entry point: flip the selected message between read and
+    /// unread. Updates the local seen-store immediately (so the UI reacts
+    /// with no network latency), then fires an async IMAP `STORE` to push
+    /// the same state to the server — see [`Self::spawn_set_seen`].
+    fn toggle_read_state(&mut self) {
+        let filtered = self.filtered_messages();
+        let selected: Option<Arc<EmailMessage>> = {
+            let st = self.state.lock().expect("email state poisoned");
+            filtered.get(st.selected).cloned()
+        };
+        let Some(msg) = selected else {
+            return;
+        };
+        let currently_unread = self.is_unread(&msg);
+        let mut seen = self.seen.lock().expect("seen-store poisoned");
+        let result = if currently_unread {
+            seen.mark_seen(&msg.id)
+        } else {
+            seen.mark_unread(&msg.id)
+        };
+        if let Err(err) = result {
+            tracing::warn!(error = %err, id = %msg.id, "failed to persist read-state toggle");
         }
-        if was_expanded {
-            if let Some(msg) = filtered.get(new_idx) {
-                self.mark_seen_if_unseen(&msg.id);
+        drop(seen);
+        // New server state is the opposite of "currently unread".
+        self.spawn_set_seen(&msg, /* seen */ currently_unread);
+        let mut st = self.state.lock().expect("email state poisoned");
+        st.dirty = true;
+    }
+
+    /// Fire-and-forget: push `seen` to the mail server for `msg` over
+    /// IMAP. No-op (with a warning) for messages without a known
+    /// `imap_uid` — Gmail/Outlook OAuth messages, or IMAP messages from
+    /// before this field existed in a stale cache. Best-effort: on
+    /// failure the local seen-store override already applied by the
+    /// caller stands, so the toggle still "works" from the user's
+    /// perspective, just without server-side reflection until the next
+    /// successful toggle or manual retry.
+    fn spawn_set_seen(&self, msg: &Arc<EmailMessage>, seen: bool) {
+        let Some(uid) = msg.imap_uid else {
+            tracing::warn!(id = %msg.id, "no imap_uid on message; can't write read-state to server");
+            return;
+        };
+        // Multi-account IMAP mode holds concrete `Arc<imap::ImapProvider>`
+        // handles (see `ImapAccountHandle`) rather than going through
+        // `EmailProviderHandle`, so the two modes need separate lookups.
+        if !self.imap_accounts.is_empty() {
+            let Some(account) = self.imap_accounts.iter().find(|a| a.label == msg.account) else {
+                tracing::warn!(id = %msg.id, account = %msg.account, "no matching imap account to write read-state to server");
+                return;
+            };
+            let provider = account.provider.clone();
+            let folder = msg.folder.clone();
+            let id = msg.id.clone();
+            tokio::spawn(async move {
+                if let Err(err) = provider.set_seen(&folder, uid, seen).await {
+                    tracing::warn!(error = %err, id = %id, seen, "failed to write read-state to server");
+                }
+            });
+            return;
+        }
+        let provider = self.provider.clone();
+        let folder = msg.folder.clone();
+        let id = msg.id.clone();
+        tokio::spawn(async move {
+            let Some(prov) = provider.as_provider() else {
+                return;
+            };
+            if let Err(err) = prov.set_seen(&folder, uid, seen).await {
+                tracing::warn!(error = %err, id = %id, seen, "failed to write read-state to server");
             }
+        });
+    }
+
+    /// Press-`d` entry point: arm the delete-to-trash confirmation modal
+    /// for the selected message. No-op if nothing is selected.
+    fn arm_delete_confirm(&mut self) {
+        let filtered = self.filtered_messages();
+        let mut st = self.state.lock().expect("email state poisoned");
+        if let Some(msg) = filtered.get(st.selected) {
+            st.confirm_delete = Some(msg.clone());
         }
     }
 
-    /// Persist a seen-mark for `id` to the seen-store. Logged + ignored
-    /// on failure (a stale seen-store is annoying but not data loss —
-    /// the user's mail server-side unread state is the canonical
-    /// source, and the next fetch will reconcile).
-    fn mark_seen_if_unseen(&self, id: &str) {
-        let mut seen = self.seen.lock().expect("seen-store poisoned");
-        if let Err(err) = seen.mark_seen(id) {
-            tracing::warn!(error = %err, id = %id, "failed to persist seen state");
+    /// User answered `y` on the delete-to-trash modal: optimistically
+    /// remove the message from the visible list (so the UI reacts with
+    /// no network latency), then fire the actual IMAP move-to-Trash in
+    /// the background — see [`Self::spawn_move_to_trash`].
+    fn confirm_delete(&mut self) {
+        let msg = {
+            let mut st = self.state.lock().expect("email state poisoned");
+            st.confirm_delete.take()
+        };
+        let Some(msg) = msg else { return };
+        {
+            let mut st = self.state.lock().expect("email state poisoned");
+            st.messages.retain(|m| m.id != msg.id);
+            st.selected = st.selected.min(st.messages.len().saturating_sub(1));
+            st.dirty = true;
         }
+        self.spawn_move_to_trash(&msg);
+    }
+
+    /// Fire-and-forget: move `msg` to the server's Trash. Mirrors
+    /// [`Self::spawn_set_seen`]'s provider dispatch (multi-account IMAP
+    /// holds concrete `Arc<imap::ImapProvider>` handles; single-account
+    /// mode goes through `EmailProviderHandle`).
+    ///
+    /// On failure, re-inserts `msg` into the visible list — the
+    /// optimistic removal in `confirm_delete` was premature — and
+    /// surfaces the error via the existing `last_error` banner. Silently
+    /// swallowing a failed delete would leave the user believing a
+    /// message is safely in Trash when it's actually still sitting
+    /// untouched on the server.
+    fn spawn_move_to_trash(&self, msg: &Arc<EmailMessage>) {
+        let Some(uid) = msg.imap_uid else {
+            tracing::warn!(id = %msg.id, "no imap_uid on message; can't delete on server");
+            let mut st = self.state.lock().expect("email state poisoned");
+            st.messages.push(msg.clone());
+            st.messages.sort_by_key(|m| std::cmp::Reverse(m.received));
+            st.last_error = Some(
+                "Delete failed: message has no server id yet — try again after the next refresh"
+                    .into(),
+            );
+            st.dirty = true;
+            return;
+        };
+        let state = self.state.clone();
+        let msg = msg.clone();
+        if !self.imap_accounts.is_empty() {
+            let Some(account) = self.imap_accounts.iter().find(|a| a.label == msg.account) else {
+                tracing::warn!(id = %msg.id, account = %msg.account, "no matching imap account to delete on server");
+                return;
+            };
+            let provider = account.provider.clone();
+            let folder = msg.folder.clone();
+            tokio::spawn(async move {
+                if let Err(err) = provider.move_to_trash(&folder, uid).await {
+                    tracing::warn!(error = %err, id = %msg.id, "failed to delete message on server");
+                    let mut st = state.lock().expect("email state poisoned");
+                    st.messages.push(msg);
+                    st.messages.sort_by_key(|m| std::cmp::Reverse(m.received));
+                    st.last_error = Some(format!("Delete failed: {err}"));
+                    st.dirty = true;
+                }
+            });
+            return;
+        }
+        let provider = self.provider.clone();
+        let folder = msg.folder.clone();
+        tokio::spawn(async move {
+            let Some(prov) = provider.as_provider() else {
+                return;
+            };
+            if let Err(err) = prov.move_to_trash(&folder, uid).await {
+                tracing::warn!(error = %err, id = %msg.id, "failed to delete message on server");
+                let mut st = state.lock().expect("email state poisoned");
+                st.messages.push(msg);
+                st.messages.sort_by_key(|m| std::cmp::Reverse(m.received));
+                st.last_error = Some(format!("Delete failed: {err}"));
+                st.dirty = true;
+            }
+        });
     }
 
     fn cycle_folder(&mut self, forward: bool) {
-        if self.folders.len() <= 1 {
+        let n = self.tab_labels().len();
+        if n <= 1 {
             return;
         }
         let mut st = self.state.lock().expect("email state poisoned");
-        let n = self.folders.len();
         st.active_folder_idx = if forward {
             (st.active_folder_idx + 1) % n
         } else {
@@ -625,38 +915,24 @@ impl EmailWidget {
         }
     }
 
-    /// Toggle expanded state on the selected message. When expanding,
-    /// also mark the message as seen-via-glint and persist the
-    /// seen-store. (Subsequent scrolls inside expanded mode also mark
-    /// — that's handled inside [`Self::move_selection`] /
-    /// [`Self::jump_to`].)
+    /// Toggle expanded state on the selected message. Does *not* change
+    /// read state — only the explicit `u` keybinding
+    /// ([`Self::toggle_read_state`]) does that.
     fn toggle_expand(&mut self) {
-        let filtered = self.filtered_messages();
-        let selected_id: Option<String> = {
-            let st = self.state.lock().expect("email state poisoned");
-            filtered.get(st.selected).map(|m| m.id.clone())
-        };
-        let expanded_now = {
-            let mut st = self.state.lock().expect("email state poisoned");
-            if st.messages.is_empty() {
-                return;
-            }
-            st.expanded = !st.expanded;
-            st.expanded
-        };
-        if expanded_now {
-            if let Some(id) = selected_id {
-                self.mark_seen_if_unseen(&id);
-            }
+        let mut st = self.state.lock().expect("email state poisoned");
+        if st.messages.is_empty() {
+            return;
         }
+        st.expanded = !st.expanded;
     }
 
     /// Press-`s` entry point. Drives the per-message Body ⇄ Summary
-    /// toggle with a side-effect of expanding (and auto-marking-seen)
-    /// when the user hits it from collapsed mode:
+    /// toggle with a side-effect of expanding when the user hits it from
+    /// collapsed mode. Never changes read state — only `u`
+    /// ([`Self::toggle_read_state`]) does that.
     ///
-    /// - **Collapsed**: expand, mark seen, switch to Summary view, fire
-    ///   the LLM (cache-hit returns instantly).
+    /// - **Collapsed**: expand, switch to Summary view, fire the LLM
+    ///   (cache-hit returns instantly).
     /// - **Expanded + currently Body**: switch to Summary; if not yet
     ///   requested, fire the LLM (cache-hit returns instantly).
     /// - **Expanded + currently Summary**: switch back to Body — no
@@ -674,24 +950,21 @@ impl EmailWidget {
             return;
         };
 
-        let (was_collapsed, will_show_summary) = {
+        let will_show_summary = {
             let mut st = self.state.lock().expect("email state poisoned");
             let was_collapsed = !st.expanded;
             if was_collapsed {
                 st.expanded = true;
                 st.summary_view.insert(msg.id.clone(), true);
-                (true, true)
+                true
             } else {
                 let cur = *st.summary_view.get(&msg.id).unwrap_or(&false);
                 let new = !cur;
                 st.summary_view.insert(msg.id.clone(), new);
-                (false, new)
+                new
             }
         };
 
-        if was_collapsed {
-            self.mark_seen_if_unseen(&msg.id);
-        }
         if will_show_summary {
             // request_summary is idempotent — cache-hits jump straight
             // to Ready without an LLM call. Calling unconditionally
@@ -786,20 +1059,24 @@ impl EmailWidget {
         });
     }
 
-    /// True if the message should display the unread `●` indicator: the
-    /// server still considers it unread AND the local seen-store has no
-    /// record of the user having expanded it inside glint.
+    /// True if the message should display the unread `●` indicator.
+    /// Priority: an explicit `u`-forced-unread override always wins; next a
+    /// "seen via docket" mark (auto-set on expand, or via `u`) always reads
+    /// as read; otherwise falls back to the server's own unread state.
     fn is_unread(&self, msg: &EmailMessage) -> bool {
-        if !msg.server_unread {
+        let seen = self.seen.lock().expect("seen-store poisoned");
+        if seen.is_forced_unread(&msg.id) {
+            return true;
+        }
+        if seen.contains(&msg.id) {
             return false;
         }
-        let seen = self.seen.lock().expect("seen-store poisoned");
-        !seen.contains(&msg.id)
+        msg.server_unread
     }
 
     /// Mirrors the inner-area split used by `render`.
     fn split_inner(&self, inner: Rect) -> (Rect, Rect, Rect) {
-        let has_tabs = self.folders.len() > 1;
+        let has_tabs = self.tab_labels().len() > 1;
         let tab_height: u16 = if has_tabs { 2 } else { 1 };
         let footer_height = 1u16;
         let list_height = inner.height.saturating_sub(footer_height + tab_height);
@@ -816,7 +1093,7 @@ impl EmailWidget {
 
     fn tab_index_at(&self, click_col: u16, tab_area: Rect) -> Option<usize> {
         let mut x: u16 = tab_area.x + 1;
-        for (i, label) in self.folders.iter().enumerate() {
+        for (i, label) in self.tab_labels().iter().enumerate() {
             let w = label.chars().count() as u16 + 2;
             if click_col >= x && click_col < x + w {
                 return Some(i);
@@ -858,7 +1135,7 @@ fn build_provider(name: &str) -> (EmailProviderHandle, String, bool, Option<Stri
                 Some(hint),
             ),
         },
-        "imap" => match build_imap() {
+        "imap" => match build_imap("imap.toml") {
             Ok(p) => (EmailProviderHandle::Imap(p), "imap".into(), true, None),
             Err(hint) => (EmailProviderHandle::Empty, "imap".into(), false, Some(hint)),
         },
@@ -877,12 +1154,12 @@ fn build_outlook() -> Result<outlook::OutlookEmailProvider, String> {
     use crate::auth::microsoft::{store::MicrosoftToken, OAuthClientConfig as MsClient};
     let client = MsClient::load().map_err(|err| {
         tracing::warn!(error = %err, "microsoft_oauth_client.toml missing or invalid");
-        "Drop microsoft_oauth_client.toml in ~/.config/glint/credentials/".to_string()
+        "Drop microsoft_oauth_client.toml in ~/.config/docket/credentials/".to_string()
     })?;
     let token = MicrosoftToken::load()
         .map_err(|err| format!("Outlook token unreadable: {err}"))?
         .ok_or_else(|| {
-            "Run `glint --auth microsoft` to connect Microsoft Outlook (the Email widget needs Mail.Read — re-run after upgrading)".to_string()
+            "Run `docket --auth microsoft` to connect Microsoft Outlook (the Email widget needs Mail.Read — re-run after upgrading)".to_string()
         })?;
     outlook::OutlookEmailProvider::new(client, token)
         .map_err(|err| format!("Outlook email init failed: {err}"))
@@ -892,13 +1169,13 @@ fn build_gmail() -> Result<gmail::GmailProvider, String> {
     use crate::auth::google::{store::GoogleToken, OAuthClientConfig as GClient};
     let client = GClient::load().map_err(|err| {
         tracing::warn!(error = %err, "google_oauth_client.toml missing or invalid");
-        "Drop google_oauth_client.toml in ~/.config/glint/credentials/".to_string()
+        "Drop google_oauth_client.toml in ~/.config/docket/credentials/".to_string()
     })?;
     let token = match GoogleToken::load() {
         Ok(Some(t)) => t,
         Ok(None) => {
             return Err(
-                "Run `glint --auth google` to connect Gmail (the Email widget needs gmail.readonly — re-run after upgrading)".into(),
+                "Run `docket --auth google` to connect Gmail (the Email widget needs gmail.readonly — re-run after upgrading)".into(),
             );
         }
         Err(err) => return Err(format!("Google token unreadable: {err}")),
@@ -906,10 +1183,10 @@ fn build_gmail() -> Result<gmail::GmailProvider, String> {
     gmail::GmailProvider::new(client, token).map_err(|err| format!("Gmail init failed: {err}"))
 }
 
-fn build_imap() -> Result<imap::ImapProvider, String> {
+fn build_imap(filename: &str) -> Result<imap::ImapProvider, String> {
     let dir = crate::credentials::dir()
         .map_err(|err| format!("IMAP credentials dir unavailable: {err}"))?;
-    let path = dir.join("imap.toml");
+    let path = dir.join(filename);
     if !path.exists() {
         return Err(format!(
             "IMAP credentials missing at {} — run --setup to capture them",
@@ -927,6 +1204,38 @@ fn build_imap() -> Result<imap::ImapProvider, String> {
         ));
     }
     Ok(imap::ImapProvider::new(creds))
+}
+
+/// Build one [`ImapAccountHandle`] per `[[accounts]]` entry, each loading
+/// its own `credentials/imap_<label>.toml`. Partial failure is tolerated —
+/// accounts that fail to load are dropped with a hint appended to the
+/// returned diagnostic string; the widget still renders whichever accounts
+/// did connect. Returns `ready = true` as soon as at least one succeeds.
+fn build_imap_accounts(entries: &[EmailAccountEntry]) -> (Vec<ImapAccountHandle>, bool, Option<String>) {
+    let mut handles = Vec::new();
+    let mut hints = Vec::new();
+    for entry in entries {
+        let filename = format!("imap_{}.toml", entry.label);
+        match build_imap(&filename) {
+            Ok(p) => handles.push(ImapAccountHandle {
+                label: entry.label.clone(),
+                provider: Arc::new(p),
+                folders: if entry.folders.is_empty() {
+                    default_folders()
+                } else {
+                    entry.folders.clone()
+                },
+            }),
+            Err(hint) => hints.push(format!("{}: {hint}", entry.label)),
+        }
+    }
+    let ready = !handles.is_empty();
+    let hint = if hints.is_empty() {
+        None
+    } else {
+        Some(hints.join(" · "))
+    };
+    (handles, ready, hint)
 }
 
 // ── Widget trait impl ───────────────────────────────────────────────────────
@@ -976,15 +1285,16 @@ impl Widget for EmailWidget {
             )
         };
 
-        // Apply the active folder filter.
-        let folder_name = self
-            .folders
-            .get(active_idx.min(self.folders.len().saturating_sub(1)))
+        // Apply the active tab filter (folder in single-account mode,
+        // account in multi-account IMAP mode — see `tab_labels`).
+        let tabs = self.tab_labels();
+        let active_tab = tabs
+            .get(active_idx.min(tabs.len().saturating_sub(1)))
             .cloned()
-            .unwrap_or_else(|| "INBOX".into());
+            .unwrap_or_default();
         let filtered: Vec<Arc<EmailMessage>> = messages
             .into_iter()
-            .filter(|m| m.folder.eq_ignore_ascii_case(&folder_name))
+            .filter(|m| self.message_matches_tab(m, &active_tab))
             .collect();
 
         // Base title is just "Email" / "Email (instance)" — the
@@ -996,11 +1306,24 @@ impl Widget for EmailWidget {
         } else {
             format!("Email ({})", self.instance)
         };
-        let account_label = account
-            .as_deref()
-            .map(String::from)
-            .unwrap_or_else(|| "(loading…)".into());
-        let metadata = format!("[{}] {}", self.provider_label, account_label);
+        let metadata = if self.imap_accounts.is_empty() {
+            let account_label = account
+                .as_deref()
+                .map(String::from)
+                .unwrap_or_else(|| "(loading…)".into());
+            format!("[{}] {}", self.provider_label, account_label)
+        } else {
+            // No single resolved address to show — list every account's
+            // username instead (IMAP has no separate `/me` call, so
+            // `cached_account()` is just the configured username and is
+            // available immediately, unlike Gmail/Outlook's OAuth `/me`).
+            let names: Vec<String> = self
+                .imap_accounts
+                .iter()
+                .map(|a| a.provider.cached_account().unwrap_or_else(|| a.label.clone()))
+                .collect();
+            format!("[imap] {}", names.join(", "))
+        };
 
         let block = apply_title_row(
             Block::default()
@@ -1058,7 +1381,7 @@ impl Widget for EmailWidget {
             }
             lines.push(Line::from(""));
             lines.push(Line::from(Span::styled(
-                "Run `glint --setup` to configure email.",
+                "Run `docket --setup` to configure email.",
                 self.theme.text_dim,
             )));
             let body = Paragraph::new(lines).alignment(Alignment::Center);
@@ -1066,12 +1389,13 @@ impl Widget for EmailWidget {
             return;
         }
 
-        // Folder tab bar.
-        let has_tabs = self.folders.len() > 1;
+        // Tab bar — folders in single-account mode, accounts in
+        // multi-account IMAP mode.
+        let has_tabs = tabs.len() > 1;
         if has_tabs {
-            let mut spans: Vec<Span<'_>> = Vec::with_capacity(self.folders.len() * 2);
+            let mut spans: Vec<Span<'_>> = Vec::with_capacity(tabs.len() * 2);
             spans.push(Span::raw(" "));
-            for (i, label) in self.folders.iter().enumerate() {
+            for (i, label) in tabs.iter().enumerate() {
                 let is_active = i == active_idx;
                 let style = if is_active {
                     self.theme.text_selected
@@ -1079,7 +1403,7 @@ impl Widget for EmailWidget {
                     self.theme.text_dim
                 };
                 spans.push(Span::styled(format!("[{label}]"), style));
-                if i + 1 < self.folders.len() {
+                if i + 1 < tabs.len() {
                     spans.push(Span::raw(" "));
                 }
             }
@@ -1196,15 +1520,21 @@ impl Widget for EmailWidget {
             let is_selected = i == selected;
             let expand_this = is_selected && expanded && read_area.is_none();
 
+            let unread = self.is_unread(msg);
+            // Read messages fall back to the same dim/non-bold style as
+            // the date column — only unread messages get the brilliant/
+            // focused treatment. Selection highlight always wins so the
+            // cursor stays visible regardless of read state.
             let row_style = if is_selected {
                 self.theme.text_selected
+            } else if !unread {
+                self.theme.text_dim
             } else if focused {
                 self.theme.text_focused
             } else {
                 self.theme.text_brilliant
             };
 
-            let unread = self.is_unread(msg);
             let indicator = if unread { "●" } else { "○" };
             let sender = normalize_sender(&msg.from_name, &msg.from_address, sender_label_w);
             let date = format_received(now_local, msg.received);
@@ -1380,14 +1710,14 @@ impl Widget for EmailWidget {
         // that hint to avoid implying a binding that does nothing in this mode.
         let footer_text = if read_area.is_some() {
             if summarize_usable {
-                "↑/↓ select · ←/→ folder · o open · s summarize · r refresh"
+                "↑/↓ select · ←/→ folder · o open · s summarize · u read/unread · d delete · r refresh"
             } else {
-                "↑/↓ select · ←/→ folder · o open · r refresh"
+                "↑/↓ select · ←/→ folder · o open · u read/unread · d delete · r refresh"
             }
         } else if summarize_usable {
-            "↑/↓ select · ←/→ folder · e/⏎/click expand · o open · s summarize · r refresh"
+            "↑/↓ select · ←/→ folder · e/⏎/click expand · o open · s summarize · u read/unread · d delete · r refresh"
         } else {
-            "↑/↓ select · ←/→ folder · e/⏎/click expand · o open · r refresh"
+            "↑/↓ select · ←/→ folder · e/⏎/click expand · o open · u read/unread · d delete · r refresh"
         };
         let footer = Paragraph::new(Line::from(Span::styled(footer_text, self.theme.text_dim)))
             .alignment(Alignment::Right);
@@ -1395,11 +1725,32 @@ impl Widget for EmailWidget {
 
         // Persist scroll + the row layout so click handling can map
         // mouse coordinates back to a message index.
-        let mut st = self.state.lock().expect("email state poisoned");
-        st.scroll = scroll;
-        st.row_layout = row_layout;
-        st.last_list_area = Some(list_area);
-        st.read_pane_active = read_area.is_some();
+        let confirm_target = {
+            let mut st = self.state.lock().expect("email state poisoned");
+            st.scroll = scroll;
+            st.row_layout = row_layout;
+            st.last_list_area = Some(list_area);
+            st.read_pane_active = read_area.is_some();
+            st.confirm_delete.clone()
+        };
+        if let Some(msg) = confirm_target {
+            let subject = if msg.subject.trim().is_empty() {
+                "(no subject)".to_string()
+            } else {
+                msg.subject.clone()
+            };
+            crate::ui::modal::render(
+                frame,
+                area,
+                &self.theme,
+                crate::ui::modal::ConfirmModal {
+                    title: " Move to Trash? ",
+                    target: &subject,
+                    hint: Some("  [y] delete (recoverable ~30d)  ·  any other key cancels"),
+                    max_width: 54,
+                },
+            );
+        }
     }
 
     fn handle_key(&mut self, key: KeyEvent) -> EventResult {
@@ -1413,6 +1764,28 @@ impl Widget for EmailWidget {
             if c.is_ascii_uppercase() {
                 return EventResult::Ignored;
             }
+        }
+        // Delete-to-trash confirm modal: y commits, any other key
+        // cancels. Handled before the normal dispatch so the user can't
+        // accidentally move selection / open a message while the
+        // prompt is up.
+        if self
+            .state
+            .lock()
+            .expect("email state poisoned")
+            .confirm_delete
+            .is_some()
+        {
+            match crate::ui::modal::dispatch_key(key) {
+                crate::ui::modal::ConfirmChoice::Confirm => self.confirm_delete(),
+                crate::ui::modal::ConfirmChoice::Cancel => {
+                    self.state
+                        .lock()
+                        .expect("email state poisoned")
+                        .confirm_delete = None;
+                }
+            }
+            return EventResult::Handled;
         }
         match key.code {
             KeyCode::Up | KeyCode::Char('k') => {
@@ -1459,6 +1832,14 @@ impl Widget for EmailWidget {
             }
             KeyCode::Char('r') => {
                 self.mark_dirty();
+                EventResult::Handled
+            }
+            KeyCode::Char('u') => {
+                self.toggle_read_state();
+                EventResult::Handled
+            }
+            KeyCode::Char('d') => {
+                self.arm_delete_confirm();
                 EventResult::Handled
             }
             KeyCode::Char('[') | KeyCode::Left | KeyCode::Char('h') => {
@@ -1567,13 +1948,18 @@ impl Widget for EmailWidget {
     fn keybindings(&self) -> Vec<(&'static str, &'static str)> {
         vec![
             ("↑ / ↓ / j / k", "select message"),
-            ("← / → / [ / ] / h / l", "cycle folder"),
+            (
+                "← / → / [ / ] / h / l",
+                "cycle folder (or account, in multi-account IMAP mode)",
+            ),
             ("PgUp / PgDn", "±10 messages"),
             ("g / Home", "jump to top"),
             ("End", "jump to bottom"),
-            ("e / Enter / click", "expand selected (marks seen locally)"),
+            ("e / Enter / click", "expand selected"),
             ("o", "open message in browser"),
             ("s", "request LLM summary (when enabled)"),
+            ("u", "toggle read/unread (IMAP: syncs to server)"),
+            ("d", "delete to Trash — recoverable ~30d (IMAP only, y to confirm)"),
             ("r", "force refresh"),
         ]
     }
@@ -1780,7 +2166,7 @@ pub const KIND: &str = "email";
 /// email.toml; the wizard's renderer merges in only the keys it manages
 /// so hand-edits survive `--setup` re-runs.
 ///
-/// Note on IMAP: glint's email widget currently speaks only the Gmail
+/// Note on IMAP: docket's email widget currently speaks only the Gmail
 /// and Outlook REST APIs. IMAP support is on the roadmap; once it lands
 /// this descriptor will gain an `imap_*` field group + a credentials
 /// path. For now, IMAP shows up as a disabled choice with explanatory
@@ -1790,7 +2176,7 @@ pub fn wizard_descriptor() -> crate::wizard::descriptor::WizardDescriptor {
     WizardDescriptor {
         display_name: "Email",
         blurb: "Lightweight message list backed by Gmail or Outlook. Select \
-                a provider, authorize once, and glint surfaces unread + \
+                a provider, authorize once, and docket surfaces unread + \
                 recent messages. IMAP support is planned but not yet \
                 wired up.",
         load_from_toml: Some(load_email_from_toml),
@@ -2001,7 +2387,7 @@ fn render_email_toml(
     let base: std::borrow::Cow<str> = match existing {
         Some(text) => std::borrow::Cow::Borrowed(text),
         None => std::borrow::Cow::Owned(
-            "# Generated by `glint --setup`. Hand-edit freely; the wizard\n\
+            "# Generated by `docket --setup`. Hand-edit freely; the wizard\n\
              # preserves additional keys (account_address, colors, shortcuts)\n\
              # the next time you run --setup.\n"
                 .to_string(),

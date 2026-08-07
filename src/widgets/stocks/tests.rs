@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 ntrospect0
+// Copyright (C) 2026 nicococo
 
 //! Unit tests for the stocks widget. Split out of `mod.rs` per the repo standard.
 
@@ -14,7 +15,7 @@ struct TempConfigDir(std::path::PathBuf);
 impl TempConfigDir {
     fn set() -> Self {
         let dir = std::env::temp_dir().join(format!(
-            "glint-stocks-test-{}-{:?}",
+            "docket-stocks-test-{}-{:?}",
             std::process::id(),
             std::thread::current().id()
         ));

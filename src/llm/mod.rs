@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 ntrospect0
+// Copyright (C) 2026 nicococo
 
 pub mod anthropic;
 pub mod cache;
@@ -29,7 +30,7 @@ pub struct LlmProviderDef {
     pub name: &'static str,
     /// Human-readable label used by the wizard's provider picker.
     pub display_name: &'static str,
-    /// Credentials filename under `~/.config/glint/credentials/` that
+    /// Credentials filename under `~/.config/docket/credentials/` that
     /// stores this provider's API key.
     pub credentials_filename: &'static str,
     /// URL where the user obtains an API key (shown in the wizard hint
@@ -127,7 +128,7 @@ fn default_provider() -> &'static LlmProviderDef {
         .expect("at least one LLM provider must be registered")
 }
 
-/// A `LlmProvider` is the boundary between glint widgets and any LLM. Provider
+/// A `LlmProvider` is the boundary between docket widgets and any LLM. Provider
 /// chooses how to map `LlmRequest` onto its native API; widgets stay generic.
 #[async_trait]
 pub trait LlmProvider: Send + Sync {
@@ -165,7 +166,7 @@ pub struct LlmResponse {
     pub text: String,
 }
 
-/// User-configurable LLM options (loaded from `~/.config/glint/llm.toml`).
+/// User-configurable LLM options (loaded from `~/.config/docket/llm.toml`).
 ///
 /// Per-feature on/off toggles live in each LLM-aware widget's own TOML
 /// (e.g. `summarize_with_llm = true` in news.toml), keeping this layer

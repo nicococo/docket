@@ -1,7 +1,7 @@
 #!/bin/bash
 #
-# Build a double-clickable macOS launcher (~/Applications/Glint.app) that
-# opens glint in your terminal, using the bundled glint icon.
+# Build a double-clickable macOS launcher (~/Applications/Docket.app) that
+# opens docket in your terminal, using the bundled docket icon.
 #
 # Auto-detects an installed terminal. Supported:
 #   kitty, ghostty, wezterm, alacritty, rio   (launched directly)
@@ -13,16 +13,16 @@
 # Override the choice with the TERMINAL env var, e.g.:
 #   TERMINAL=alacritty ./install-macos-app.sh
 #
-# Requires: glint on your $PATH. Re-run any time to rebuild the bundle.
+# Requires: docket on your $PATH. Re-run any time to rebuild the bundle.
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ICON="$SCRIPT_DIR/glint.icns"
-APP="$HOME/Applications/Glint.app"
+ICON="$SCRIPT_DIR/docket.icns"
+APP="$HOME/Applications/Docket.app"
 
-GLINT="$(command -v glint || true)"
-[ -n "$GLINT" ] || { echo "error: 'glint' not found on \$PATH — install it first." >&2; exit 1; }
+DOCKET="$(command -v docket || true)"
+[ -n "$DOCKET" ] || { echo "error: 'docket' not found on \$PATH — install it first." >&2; exit 1; }
 [ -f "$ICON" ]  || { echo "error: icon not found at $ICON" >&2; exit 1; }
 
 # Detection order (most terminal-emulator-ish first; Terminal.app always exists).
@@ -69,7 +69,7 @@ fi
 BIN="$(resolve "$chosen")"
 [ -n "$BIN" ] || { echo "error: terminal '$chosen' not found on this system." >&2; exit 1; }
 
-# Write the bundle's executable, tailored to the chosen terminal. glint's
+# Write the bundle's executable, tailored to the chosen terminal. docket's
 # absolute path is baked in; cwd is set to $HOME at launch.
 write_launcher() {
   local out="$1"
@@ -78,46 +78,46 @@ write_launcher() {
       cat > "$out" <<EOF
 #!/bin/bash
 exec "$BIN" \\
-  --single-instance --instance-group glint \\
+  --single-instance --instance-group docket \\
   --directory "\$HOME" \\
   -o macos_quit_when_last_window_closed=yes \\
-  "$GLINT"
+  "$DOCKET"
 EOF
       ;;
     ghostty)
       cat > "$out" <<EOF
 #!/bin/bash
-exec "$BIN" --working-directory="\$HOME" -e "$GLINT"
+exec "$BIN" --working-directory="\$HOME" -e "$DOCKET"
 EOF
       ;;
     wezterm)
       cat > "$out" <<EOF
 #!/bin/bash
-exec "$BIN" start --cwd "\$HOME" "$GLINT"
+exec "$BIN" start --cwd "\$HOME" "$DOCKET"
 EOF
       ;;
     alacritty)
       cat > "$out" <<EOF
 #!/bin/bash
-exec "$BIN" --working-directory "\$HOME" -e "$GLINT"
+exec "$BIN" --working-directory "\$HOME" -e "$DOCKET"
 EOF
       ;;
     rio)
       cat > "$out" <<EOF
 #!/bin/bash
-exec "$BIN" --working-dir "\$HOME" -e "$GLINT"
+exec "$BIN" --working-dir "\$HOME" -e "$DOCKET"
 EOF
       ;;
     iterm2)
       # No launch-a-command CLI; drive it with AppleScript. exec replaces the
-      # login shell so quitting glint leaves no stray prompt.
+      # login shell so quitting docket leaves no stray prompt.
       cat > "$out" <<EOF
 #!/bin/bash
 osascript <<'APPLESCRIPT'
 tell application "iTerm"
   activate
   set w to (create window with default profile)
-  tell current session of w to write text "cd ~; clear; exec '$GLINT'"
+  tell current session of w to write text "cd ~; clear; exec '$DOCKET'"
 end tell
 APPLESCRIPT
 EOF
@@ -128,7 +128,7 @@ EOF
 osascript <<'APPLESCRIPT'
 tell application "Terminal"
   activate
-  do script "cd ~; clear; exec '$GLINT'"
+  do script "cd ~; clear; exec '$DOCKET'"
 end tell
 APPLESCRIPT
 EOF
@@ -138,27 +138,27 @@ EOF
 
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-write_launcher "$APP/Contents/MacOS/glint-launch"
-chmod +x "$APP/Contents/MacOS/glint-launch"
+write_launcher "$APP/Contents/MacOS/docket-launch"
+chmod +x "$APP/Contents/MacOS/docket-launch"
 
 cat > "$APP/Contents/Info.plist" <<'EOF'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-  <key>CFBundleName</key>               <string>Glint</string>
-  <key>CFBundleDisplayName</key>        <string>Glint</string>
-  <key>CFBundleIdentifier</key>         <string>com.ntrospect0.glint</string>
+  <key>CFBundleName</key>               <string>Docket</string>
+  <key>CFBundleDisplayName</key>        <string>Docket</string>
+  <key>CFBundleIdentifier</key>         <string>com.ntrospect0.docket</string>
   <key>CFBundlePackageType</key>        <string>APPL</string>
-  <key>CFBundleExecutable</key>         <string>glint-launch</string>
-  <key>CFBundleIconFile</key>           <string>glint</string>
+  <key>CFBundleExecutable</key>         <string>docket-launch</string>
+  <key>CFBundleIconFile</key>           <string>docket</string>
   <key>LSMinimumSystemVersion</key>     <string>11.0</string>
   <key>NSHighResolutionCapable</key>    <true/>
 </dict>
 </plist>
 EOF
 
-cp "$ICON" "$APP/Contents/Resources/glint.icns"
+cp "$ICON" "$APP/Contents/Resources/docket.icns"
 
 # Nudge LaunchServices to pick up the new bundle + icon.
 /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "$APP" 2>/dev/null || true

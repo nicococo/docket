@@ -1,23 +1,23 @@
 [package]
-name = "glint-tui"
-version = "0.5.0"
+name = "docket-tui"
+version = "0.1.0"
 edition = "2021"
-description = "A fast, extensible terminal dashboard for stocks, calendar, news, and beyond"
+description = "A fast, opinionated terminal dashboard for work and project management — forked from glint"
 license = "GPL-3.0-or-later"
-repository = "https://github.com/ntrospect0/glint"
-keywords = ["tui", "dashboard", "terminal", "stocks", "ratatui"]
+repository = "https://github.com/nicococo/docket"
+keywords = ["tui", "dashboard", "terminal", "productivity", "ratatui"]
 categories = ["command-line-interface"]
 
-# The package crate is `glint-tui` (kept for crates.io publishing), but the
-# produced binary is just `glint` — that's what ships to $PATH and what the
+# The package crate is `docket-tui` (kept for crates.io publishing), but the
+# produced binary is just `docket` — that's what ships to $PATH and what the
 # user types to launch the dashboard.
 [[bin]]
-name = "glint"
+name = "docket"
 path = "src/main.rs"
 
 # ── Widget features ──────────────────────────────────────────────────────────
 # Each widget compiles in only when its feature is enabled. `default` aliases
-# the `widgets-all` umbrella so a plain `cargo install glint-tui` ships with
+# the `widgets-all` umbrella so a plain `cargo install docket-tui` ships with
 # every widget — the slim-build path is available for downstream packagers
 # (and binary-size-sensitive deployments) via `--no-default-features` plus a
 # hand-picked subset.

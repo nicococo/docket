@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 ntrospect0
+// Copyright (C) 2026 nicococo
 
 use std::{
     cell::Cell,
@@ -109,7 +110,7 @@ impl App {
         // persist between runs.
         let cache = Cache::open_default().unwrap_or_else(|err| {
             tracing::warn!(error = %err, "failed to resolve cache dir; using temp dir");
-            Cache::at(std::env::temp_dir().join("glint-cache"))
+            Cache::at(std::env::temp_dir().join("docket-cache"))
         });
         // Best-effort startup sweep: drop cache files no widget has touched
         // in 30 days. Each widget's cache size is bounded per entry, but

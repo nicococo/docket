@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 ntrospect0
+// Copyright (C) 2026 nicococo
 
 //! Welcome page. First-run users get an orientation blurb; users with a
 //! `.wizard_state.toml` from a prior run get a `[Resume]` / `[Start fresh]`
@@ -74,12 +75,12 @@ pub fn render(frame: &mut Frame, area: Rect, app: &WizardApp) {
     let mut lines: Vec<Line> = Vec::new();
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(
-        "Welcome to the glint setup wizard.",
+        "Welcome to the docket setup wizard.",
         style::section_header(),
     )));
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(
-        "This wizard walks you through glint's global settings, grid layout, \
+        "This wizard walks you through docket's global settings, grid layout, \
          and per-widget configuration. Your answers are buffered and only \
          written to disk on the final confirmation page — you can quit \
          mid-flow (Ctrl-C) and resume later.",

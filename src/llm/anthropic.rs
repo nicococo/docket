@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 ntrospect0
+// Copyright (C) 2026 nicococo
 
 use anyhow::{Context, Result};
 // rustc's `unused_imports` lint mis-fires on proc-macro attribute imports
@@ -32,7 +33,7 @@ impl ApiKey {
         &self.0
     }
 
-    /// Loads the key from `~/.config/glint/credentials/anthropic_key.toml`.
+    /// Loads the key from `~/.config/docket/credentials/anthropic_key.toml`.
     /// Returns `Ok(None)` when the file is absent or carries only the template
     /// placeholder, so callers can disable LLM features transparently.
     pub fn load() -> Result<Option<Self>> {

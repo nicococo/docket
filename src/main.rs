@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 ntrospect0
+// Copyright (C) 2026 nicococo
 
 use std::io::{self, BufRead, Write};
 use std::path::PathBuf;
@@ -30,11 +31,11 @@ mod widgets;
 mod wizard;
 mod zoom;
 
-/// glint — terminal dashboard for stocks, calendar, news, and beyond.
+/// docket — terminal dashboard for stocks, calendar, news, and beyond.
 #[derive(Parser, Debug)]
-#[command(name = "glint", version, about, long_about = None)]
+#[command(name = "docket", version, about, long_about = None)]
 struct Cli {
-    /// Create ~/.config/glint/ and seed default config files, then exit.
+    /// Create ~/.config/docket/ and seed default config files, then exit.
     #[arg(long)]
     init: bool,
 
@@ -49,7 +50,7 @@ struct Cli {
     auth: Option<String>,
 
     /// Clear cached data before launching. With no value, wipes
-    /// `$XDG_CACHE_HOME/glint/` entirely. Pass a widget kind (`news`) or
+    /// `$XDG_CACHE_HOME/docket/` entirely. Pass a widget kind (`news`) or
     /// `kind@instance` (`news@home`) to scope the clear. Prompts for [y/N]
     /// confirmation; use --clear-cache-forced to skip the prompt.
     #[arg(long, value_name = "TARGET", num_args = 0..=1, default_missing_value = "*")]
@@ -60,8 +61,8 @@ struct Cli {
     clear_cache_forced: Option<String>,
 
     /// Profile to use — an isolated config tree under
-    /// `~/.config/glint/profiles/<name>/`. Defaults to "default". Also
-    /// settable via the GLINT_PROFILE environment variable. Mutually
+    /// `~/.config/docket/profiles/<name>/`. Defaults to "default". Also
+    /// settable via the DOCKET_PROFILE environment variable. Mutually
     /// exclusive with --config.
     #[arg(long, short = 'p', visible_alias = "p", value_name = "NAME")]
     profile: Option<String>,
@@ -119,7 +120,7 @@ fn main() -> Result<()> {
     } else {
         cli.profile
             .clone()
-            .or_else(|| std::env::var("GLINT_PROFILE").ok().filter(|s| !s.is_empty()))
+            .or_else(|| std::env::var("DOCKET_PROFILE").ok().filter(|s| !s.is_empty()))
             .unwrap_or_else(|| config::DEFAULT_PROFILE.to_string())
     };
     config::validate_profile_name(&profile)?;
@@ -169,8 +170,8 @@ fn main() -> Result<()> {
         if let Some(name) = cli.new_profile.as_deref() {
             config::profiles::create(name, cli.from.as_deref())?;
             match cli.from.as_deref() {
-                Some(src) => println!("Created profile {name:?} (cloned config from {src:?}). Re-authorize its accounts with `glint --profile {name} --auth <provider>`."),
-                None => println!("Created profile {name:?}. Configure it with `glint --profile {name} --setup`."),
+                Some(src) => println!("Created profile {name:?} (cloned config from {src:?}). Re-authorize its accounts with `docket --profile {name} --auth <provider>`."),
+                None => println!("Created profile {name:?}. Configure it with `docket --profile {name} --setup`."),
             }
             return Ok(());
         }
@@ -192,19 +193,19 @@ fn main() -> Result<()> {
             println!(
                 "Copied {copied} item(s) into {}.\n\
                  The flat files at the root are left in place so an older \
-                 glint keeps working — remove them once you've fully switched \
-                 with `glint --cleanup-flat-config`.",
+                 docket keeps working — remove them once you've fully switched \
+                 with `docket --cleanup-flat-config`.",
                 dest.display()
             );
             return Ok(());
         }
         if cli.cleanup_flat_config {
-            let migrated = config::glint_root()
+            let migrated = config::docket_root()
                 .map(|r| r.join("profiles").join(config::DEFAULT_PROFILE).exists())
                 .unwrap_or(false);
             if !migrated {
                 return Err(anyhow!(
-                    "not migrated yet — run `glint --migrate-profiles` first"
+                    "not migrated yet — run `docket --migrate-profiles` first"
                 ));
             }
             let n = config::migrate::remove_flat_originals()?;
@@ -255,7 +256,7 @@ fn main() -> Result<()> {
         {
             let p = config::active_profile();
             return Err(anyhow!(
-                "profile {p:?} not found. Create it with: glint --profile {p} --setup"
+                "profile {p:?} not found. Create it with: docket --profile {p} --setup"
             ));
         }
 
@@ -263,23 +264,23 @@ fn main() -> Result<()> {
         // `--config <path>` opts out — the user explicitly named a file.
         if cli.config.is_none() && !looks_initialized() {
             eprintln!(
-                "No config detected at ~/.config/glint/config.toml — launching the setup wizard."
+                "No config detected at ~/.config/docket/config.toml — launching the setup wizard."
             );
-            eprintln!("(You can re-run `glint --setup` later to make changes.)");
+            eprintln!("(You can re-run `docket --setup` later to make changes.)");
             eprintln!();
             config::init_default_config()?;
             // First run (no config) — go straight into the wizard for the
             // default profile; the Manager would only list "default".
             wizard::run(false)?;
             eprintln!();
-            eprintln!("Launching glint…");
+            eprintln!("Launching docket…");
         }
 
         app::run(cli.config).await
     })
 }
 
-/// True when `~/.config/glint/config.toml` exists. Path-resolution failures
+/// True when `~/.config/docket/config.toml` exists. Path-resolution failures
 /// (no home dir, etc.) report `true` so an unusual environment doesn't
 /// block launch on a wizard prompt.
 fn looks_initialized() -> bool {
@@ -330,7 +331,7 @@ impl ClearAction {
 
     fn confirm_message(&self) -> String {
         match self {
-            Self::All => "Clear ALL cached glint data?".to_string(),
+            Self::All => "Clear ALL cached docket data?".to_string(),
             Self::Kind(kind) => format!("Clear all cached data for widget {kind:?}?"),
             Self::Instance { kind, instance } => {
                 format!("Clear cached data for {kind}@{instance}?")
@@ -388,7 +389,7 @@ fn init_tracing() {
     use tracing_subscriber::{fmt, EnvFilter};
     let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("warn"));
 
-    // Route logs to ~/.config/glint/glint.log — alt-screen mode would corrupt
+    // Route logs to ~/.config/docket/docket.log — alt-screen mode would corrupt
     // the dashboard the moment a widget logged to stderr. `tail -f` it when
     // debugging.
     let Ok(dir) = config::config_dir() else {
@@ -397,7 +398,7 @@ fn init_tracing() {
     if std::fs::create_dir_all(&dir).is_err() {
         return;
     }
-    let path = dir.join("glint.log");
+    let path = dir.join("docket.log");
     let Ok(file) = std::fs::OpenOptions::new()
         .create(true)
         .append(true)

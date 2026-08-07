@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to glint are documented here. Format loosely follows
+All notable changes to docket are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions track
 the `Cargo.toml` `version` field.
 
@@ -60,28 +60,28 @@ as before.
 
 ## [0.4.0] — unreleased
 
-**Profiles.** `glint --profile <name>` (or `-p <name>`, or
-`GLINT_PROFILE`) runs an isolated config tree, so one machine can hold a
+**Profiles.** `docket --profile <name>` (or `-p <name>`, or
+`DOCKET_PROFILE`) runs an isolated config tree, so one machine can hold a
 focused **work** dashboard, a stripped-down **travel** view, etc. — each
 with its own layout, widgets, theme, and accounts. Without a profile,
-glint uses `"default"`.
+docket uses `"default"`.
 
 ### Added
 
-- **Per-profile config trees** under `~/.config/glint/profiles/<name>/`:
+- **Per-profile config trees** under `~/.config/docket/profiles/<name>/`:
   layout, widget configs, the selected theme, account tokens, notes,
   runtime/wizard state, cache, and log are all per-profile.
-- **Shared global layer** at the glint root: the colorscheme **library**
+- **Shared global layer** at the docket root: the colorscheme **library**
   (`colorschemes.toml`, with optional per-profile overrides merged by
   name) and the OAuth **client registrations** (`*_oauth_client.toml`) —
   define/register once, use from every profile.
 - **Active-profile indicator** in the dashboard status bar — a
   `Profile: <name>` segment shown for any non-default profile so the
   active context is unmistakable (the default profile is unchanged).
-- **Profile Manager in the setup wizard.** A bare `glint --setup` opens a
+- **Profile Manager in the setup wizard.** A bare `docket --setup` opens a
   front page listing your profiles: pick one to configure, or create /
   clone / rename / delete right there (same ops as the CLI, with a delete
-  confirmation). `glint --profile X --setup` edits X directly.
+  confirmation). `docket --profile X --setup` edits X directly.
 - **Profile management CLI:** `--list-profiles`, `--new-profile <name>`
   (`--from <src>` to clone a profile's *config*, credentials excluded),
   `--rename-profile OLD:NEW`, `--delete-profile <name>`. Guards: names
@@ -91,21 +91,21 @@ glint uses `"default"`.
 ### Changed
 
 - **On-disk layout — flat configs keep working; migration is opt-in.** A
-  pre-profiles flat `~/.config/glint/` is read **in place** by the default
+  pre-profiles flat `~/.config/docket/` is read **in place** by the default
   profile (no automatic move), so an older flat binary can share the
   directory safely. Migrate into `profiles/default/` explicitly — via the
-  `--setup` migration prompt (recommended), or `glint --migrate-profiles`.
+  `--setup` migration prompt (recommended), or `docket --migrate-profiles`.
   The wizard prompt migrates *and* removes the now-dead flat duplicates;
   the CLI copies and leaves them (clean up later with
-  `glint --cleanup-flat-config`). The shared colorscheme library + client
+  `docket --cleanup-flat-config`). The shared colorscheme library + client
   registrations always stay at the root.
 - **Cache, notes, and logs are now per-profile.** Notes previously
-  defaulted to a shared `~/.glint/notes`; the default profile adopts any
+  defaulted to a shared `~/.docket/notes`; the default profile adopts any
   existing one on first run, and other profiles start empty.
 
 ## [0.3.0]
 
-The 0.2 release is the structural refactor of glint into a plugin-style
+The 0.2 release is the structural refactor of docket into a plugin-style
 platform: registries for widgets, auth providers, and LLM providers
 became the documented seams for community contributions. The bulk of
 this entry captures changes since the initial 0.2 plan — the widget
@@ -119,7 +119,7 @@ on memory, HTTP, and rendering.
   block can now carry an `account = "<label>"` field, so a work Outlook
   and a personal Outlook (or two Google accounts) coexist in one calendar.
   Tokens are stored per-account (`…_oauth_token.<account>.toml`); authorize
-  extra accounts with `glint --auth microsoft:<label>`. A named account's
+  extra accounts with `docket --auth microsoft:<label>`. A named account's
   `source` is provider-namespaced as `kind/label` (e.g. `outlook/work`),
   so per-calendar colors don't collide — even across providers. The
   setup wizard stays single-account per provider (the default account);
@@ -138,7 +138,7 @@ on memory, HTTP, and rendering.
   preserved across note switches), `Ctrl-A` / `Ctrl-E` line jumps,
   `Ctrl-U` delete-line, `Ctrl-Z` / `Ctrl-Shift-Z` undo/redo, mouse
   click to position cursor in insert mode. Per-note `.md` files under
-  `~/.config/glint/notes/<instance>/` — users can `cat`, hand-edit,
+  `~/.config/docket/notes/<instance>/` — users can `cat`, hand-edit,
   back up, or git-track. Multi-instance via `notes@<instance>`.
 - **Email widget** (`widget-email`). Unified inbox preview across
   Gmail (OAuth), Outlook (OAuth), and IMAP (app password) — adding
@@ -198,7 +198,7 @@ on memory, HTTP, and rendering.
   `WizardDescriptor`, inline OAuth credentials capture, post-auth
   remote-options fetch (Gmail labels, Outlook folders, IMAP folders
   pre-populated into the picker), resume buffer, and per-page Enter
-  / [Save & Next] semantics. Re-runs with `glint --setup` are safe;
+  / [Save & Next] semantics. Re-runs with `docket --setup` are safe;
   the wizard preserves keys it doesn't manage.
 - **Unified title bar**. Every widget gets a `▶ … ◀` focus chevron
   pair, the shortcut letter painted into the title text, and a
@@ -249,7 +249,7 @@ on memory, HTTP, and rendering.
 - **Default config layout reflects the registry.** Widget registration
   is a single `WidgetDescriptor` entry instead of edits in `app.rs`.
 - **News widget fetches article body for richer summaries.** When
-  `s` requests an LLM summary, glint can fetch the article page and
+  `s` requests an LLM summary, docket can fetch the article page and
   feed its extracted body to the LLM instead of just the RSS excerpt.
   Per-feed `fetch_body = true/false` override; widget-wide
   `fetch_body_for_summary` default. Uses `readability` for extraction.
@@ -278,7 +278,7 @@ on memory, HTTP, and rendering.
 - **`DataProvider` trait** (`src/providers/`). Implemented but never
   dispatched through; widgets call their concrete providers directly.
 - **`--auth outlook`** alias for `--auth microsoft`. Use the registry name.
-- **`docs/` folder.** `docs/glint-spec.md` + `docs/stack-spec.md` were
+- **`docs/` folder.** `docs/docket-spec.md` + `docs/stack-spec.md` were
   scratchpads from the initial design phase that drifted from the
   implementation. Their content is captured (and kept accurate) in
   `README.md` and `AGENTS.md`.

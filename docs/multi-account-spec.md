@@ -55,7 +55,7 @@ name, self-migrating.
   accounts of the same kind.
 - **Extra accounts are manual.** A second account is added by
   hand-editing `calendar.toml` (a second `[[providers]]` block with an
-  `account` label) and running `glint --auth microsoft:<label>` to mint
+  `account` label) and running `docket --auth microsoft:<label>` to mint
   its token (the auth provider is `microsoft`; the calendar `kind` is
   `outlook`).
 
@@ -94,7 +94,7 @@ The wizard only ever auths the `"default"` account, but a manual second
 account needs a way to obtain its token, so the CLI must understand
 labels:
 
-- Parse `provider:account` in `run_auth` (`src/main.rs:218`) — `glint
+- Parse `provider:account` in `run_auth` (`src/main.rs:218`) — `docket
   --auth microsoft:work`; bare `microsoft` ⇒ `default`. `registry::find`
   still resolves the provider; the label is threaded into the save.
 - Prefer threading the label as **data**, not a new trait-method

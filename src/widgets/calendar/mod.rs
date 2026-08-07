@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 ntrospect0
+// Copyright (C) 2026 nicococo
 
 pub mod caldav;
 mod colors;
 mod config;
 pub mod google;
+pub mod ics;
 pub mod local;
 mod nav;
 pub mod outlook;
@@ -80,7 +82,7 @@ pub struct CalendarWidget {
     source_label: String,
     /// When Google was requested but failed to initialize (no client config or
     /// no token), we keep the user-visible explanation so the widget can show
-    /// "Run `glint --auth google`" instead of silently using the local seed.
+    /// "Run `docket --auth google`" instead of silently using the local seed.
     auth_hint: Option<String>,
     colors: CalendarColors,
     state: Arc<Mutex<CalendarState>>,
@@ -250,6 +252,9 @@ impl CalendarWidget {
                 // have their own web UI with no canonical URL we can
                 // derive from the credentials.
                 ProviderKind::Caldav => None,
+                // A plain ICS feed URL isn't a browsable calendar page —
+                // no canonical web surface to derive it from either.
+                ProviderKind::Ics => None,
                 // Local-only calendars have no web surface.
                 ProviderKind::Local => None,
             };

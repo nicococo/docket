@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 ntrospect0
+// Copyright (C) 2026 nicococo
 
-//! Interactive setup wizard for glint. Invoked by `glint --setup` and by
+//! Interactive setup wizard for docket. Invoked by `docket --setup` and by
 //! the first-run UX in `main.rs` when no `config.toml` is present.
 //!
 //! The wizard is a TUI app of its own (ratatui + crossterm) that buffers

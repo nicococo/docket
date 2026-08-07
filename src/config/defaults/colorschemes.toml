@@ -1,4 +1,4 @@
-# Color schemes for glint's chrome (borders, titles) and a handful of
+# Color schemes for docket's chrome (borders, titles) and a handful of
 # semantic text roles. Pick the active scheme via `[global] theme = "..."` in
 # config.toml — or live-switch with `:scheme <name>` from the command bar.
 # Per-widget overrides go in a `[colors]` block inside each widget's TOML
@@ -20,7 +20,7 @@
 # from the terminal" — useful for `bg` and `border.unfocused` to let your
 # terminal theme show through.
 #
-# Roles glint reads:
+# Roles docket reads:
 #   border.focused           — widget border when the cell is focused (Tab cycles)
 #   border.unfocused         — widget border on inactive cells
 #   widget_title.focused     — title text when the pane is focused. The
@@ -55,17 +55,17 @@
 #                              indicating the Shift+<letter> focus shortcut
 #                              (e.g. red C in Clock = Shift+C focuses the clock)
 #
-# Missing roles silently fall back to glint's built-in defaults below, so a
+# Missing roles silently fall back to docket's built-in defaults below, so a
 # scheme can override one field and leave the rest alone.
 
 # IMPORTANT: dotted keys (border.focused, text.plain, …) must NOT be quoted.
 # In TOML, `"border.focused"` is a single literal key, while `border.focused`
-# (unquoted) creates the nested `[border] focused` structure glint expects.
+# (unquoted) creates the nested `[border] focused` structure docket expects.
 # Quoted keys parse cleanly but never reach the deserializer, so they look
 # like silent no-ops at runtime.
 
 # ── Default ─────────────────────────────────────────────────────────────────
-# Matches the original glint palette.
+# Matches the original docket palette.
 [schemes.default]
 border.focused           = { fg = "light_cyan",   modifiers = ["bold"] }
 border.unfocused         = "default"

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 ntrospect0
+// Copyright (C) 2026 nicococo
 
 //! TUI shell for the wizard. Owns the event loop, page dispatch, progress
 //! header, and footer hint bar. Pages are stateless renderers driven by
@@ -156,7 +157,7 @@ pub fn run_wizard(show_manager: bool) -> Result<WizardOutcome> {
     // the active profile directly. A resume buffer does NOT skip the Manager —
     // picking a profile lands on Welcome, which offers Resume.
     let initial_page = if show_manager {
-        let flat_present = crate::config::glint_root()
+        let flat_present = crate::config::docket_root()
             .map(|r| r.join("config.toml").exists())
             .unwrap_or(false);
         if flat_present {
@@ -426,7 +427,7 @@ fn run_oauth_for_provider(provider_name: &str) -> Result<()> {
         )
     })?;
     // The wizard only ever authenticates the default account; extra
-    // accounts are added via `glint --auth <provider>:<label>`.
+    // accounts are added via `docket --auth <provider>:<label>`.
     let handle = tokio::runtime::Handle::current();
     tokio::task::block_in_place(|| {
         handle.block_on((provider.run)(crate::auth::DEFAULT_ACCOUNT))
@@ -548,7 +549,7 @@ fn render(frame: &mut Frame, app: &WizardApp) {
 
 fn render_header(frame: &mut Frame, area: Rect, app: &WizardApp) {
     let title_line = Line::from(vec![
-        Span::styled(" glint setup ", style::section_header()),
+        Span::styled(" docket setup ", style::section_header()),
         Span::raw(" — "),
         Span::styled(
             app.page.title(&app.state),

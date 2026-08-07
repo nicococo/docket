@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 ntrospect0
+// Copyright (C) 2026 nicococo
 
 //! Curated topic + feed catalogue surfaced by the news widget's
 //! `--setup` wizard.
@@ -18,7 +19,7 @@
 //! `news.toml` carries, not what's in this file.
 //!
 //! A future phase will additionally scan
-//! `~/.config/glint/news.catalogue.toml` (or similar) so power users
+//! `~/.config/docket/news.catalogue.toml` (or similar) so power users
 //! can extend the wizard's built-in options without recompiling.
 
 use serde::Deserialize;

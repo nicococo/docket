@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 ntrospect0
+// Copyright (C) 2026 nicococo
 
 //! Platform-level persistent cache.
 //!
@@ -25,10 +26,10 @@
 //!
 //! ## Storage layout
 //!
-//! Files live under `$XDG_CACHE_HOME/glint/` (typically `~/.cache/glint/`):
+//! Files live under `$XDG_CACHE_HOME/docket/` (typically `~/.cache/docket/`):
 //!
 //! ```text
-//! ~/.cache/glint/<kind>/<instance>/<key>.json
+//! ~/.cache/docket/<kind>/<instance>/<key>.json
 //! ```
 //!
 //! Each file is `{ "stored_at": <RFC3339>, "value": <T> }`. Writes go to a
@@ -53,15 +54,15 @@ use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
-/// Root cache rooted at `~/.cache/glint/`. Cloneable cheaply (it's just a path).
+/// Root cache rooted at `~/.cache/docket/`. Cloneable cheaply (it's just a path).
 #[derive(Debug, Clone)]
 pub struct Cache {
     root: PathBuf,
 }
 
 impl Cache {
-    /// Open the default cache under `$XDG_CACHE_HOME/glint/` (falling back to
-    /// `~/.cache/glint/`). The directory is created lazily on first write.
+    /// Open the default cache under `$XDG_CACHE_HOME/docket/` (falling back to
+    /// `~/.cache/docket/`). The directory is created lazily on first write.
     pub fn open_default() -> Result<Self> {
         Ok(Self {
             root: default_dir()?,
@@ -198,7 +199,7 @@ impl ScopedCache {
     /// cache and don't collide with each other across parallel runs.
     pub fn ephemeral() -> Self {
         let dir = std::env::temp_dir().join(format!(
-            "glint-ephemeral-{}-{}",
+            "docket-ephemeral-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -356,15 +357,15 @@ struct StoredEntry<T> {
     value: T,
 }
 
-/// The cache root for all profiles: `$XDG_CACHE_HOME/glint/` (or
-/// `~/.cache/glint/`), before the per-profile segment.
+/// The cache root for all profiles: `$XDG_CACHE_HOME/docket/` (or
+/// `~/.cache/docket/`), before the per-profile segment.
 fn cache_base() -> Result<PathBuf> {
     match std::env::var("XDG_CACHE_HOME") {
-        Ok(xdg) if !xdg.is_empty() => Ok(PathBuf::from(xdg).join("glint")),
+        Ok(xdg) if !xdg.is_empty() => Ok(PathBuf::from(xdg).join("docket")),
         _ => Ok(dirs::home_dir()
             .context("could not locate user home directory")?
             .join(".cache")
-            .join("glint")),
+            .join("docket")),
     }
 }
 
@@ -415,7 +416,7 @@ mod tests {
 
     fn tmpdir() -> PathBuf {
         let mut p = std::env::temp_dir();
-        p.push(format!("glint-cache-test-{}", std::process::id()));
+        p.push(format!("docket-cache-test-{}", std::process::id()));
         p.push(format!("{:?}", std::thread::current().id()));
         let _ = std::fs::remove_dir_all(&p);
         p

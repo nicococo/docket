@@ -10,20 +10,26 @@ first_day_of_week = "sunday"
 # Calendar sources. Each [[providers]] entry pulls events from one backend;
 # add multiple entries to merge timelines (e.g. work Google + personal
 # Outlook). The default config is "local" — events listed below — which works
-# offline. Comment in any of these and `glint --auth <name>` to connect a
+# offline. Comment in any of these and `docket --auth <name>` to connect a
 # real backend.
 #
 # [[providers]]
-# kind = "google"            # run `glint --auth google` first
+# kind = "google"            # run `docket --auth google` first
 # calendar_ids = ["primary"] # or e.g. ["team@group.calendar.google.com"]
 #
 # [[providers]]
-# kind = "outlook"           # run `glint --auth microsoft` first
+# kind = "outlook"           # run `docket --auth microsoft` first
 # calendar_ids = []          # empty = the account's default calendar
 #
 # [[providers]]
 # kind = "caldav"            # fill in credentials/caldav.toml
 # calendar_ids = []          # empty = auto-discover every calendar
+#
+# [[providers]]
+# kind = "ics"               # fill in credentials/ics.toml — no OAuth, just
+#                            # a feed URL (e.g. Google's "Secret address in
+#                            # iCal format"); updates lag a few hours behind
+# account = "default"        # matches a [[feeds]] label in credentials/ics.toml
 
 # CalDAV-only: optional explicit calendar URLs used when a `caldav` provider
 # entry doesn't supply its own `calendar_ids`. Auto-discovers when empty.

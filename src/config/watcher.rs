@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 ntrospect0
+// Copyright (C) 2026 nicococo
 
 //! File-system watcher that notifies the main loop when any
-//! `~/.config/glint/*.toml` file changes, so widgets can hot-reload their
+//! `~/.config/docket/*.toml` file changes, so widgets can hot-reload their
 //! config without an app restart.
 //!
 //! We watch the directory rather than individual files because editors often
@@ -15,7 +16,7 @@ use anyhow::{Context, Result};
 use notify::{Event, EventKind, RecursiveMode, Watcher};
 use tokio::sync::mpsc;
 
-/// Spawn a notify watcher on `~/.config/glint/`. Emits one `PathBuf` per
+/// Spawn a notify watcher on `~/.config/docket/`. Emits one `PathBuf` per
 /// (likely) file mutation through the returned channel. Caller is responsible
 /// for filtering by extension and tolerating spurious / duplicate events
 /// (editors often fire several per save).

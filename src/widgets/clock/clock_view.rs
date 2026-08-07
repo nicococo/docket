@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 ntrospect0
+// Copyright (C) 2026 nicococo
 
 //! Clock-mode rendering and helpers — the big-digit time face, the
 //! optional ticker line, the date row, and the scrollable World

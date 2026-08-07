@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 ntrospect0
+// Copyright (C) 2026 nicococo
 
 //! Per-instance note persistence.
 //!
@@ -7,17 +8,25 @@
 //! is whatever [`resolve_root`] decided on at widget mount: the user's
 //! configured `notes_dir` if it could be created, otherwise the
 //! per-profile `<config_dir>/notes`, falling back to the shared legacy
-//! `~/.glint/notes`.
+//! `~/.docket/notes`.
 //!
 //! One Markdown file per note. The on-disk layout is intentionally plain:
 //! users can `cat` a note, hand-edit it, back the directory up with git,
 //! or move notes between machines by copying files. Atomic writes via
 //! temp + rename keep partial writes from corrupting an existing note.
 //!
-//! Filename = `<id>.md`, where `id` is a lexicographically-sortable
-//! timestamp-with-counter so listings sort newest-first naturally. The
-//! filename is purely an internal handle; the visible note name comes
-//! from the first line of the body.
+//! Filename = `<title>.md`, where `title` is the note's first line,
+//! sanitized for the filesystem (falling back to `Untitled` when the
+//! first line is blank, and disambiguated with a trailing ` 2`, ` 3`,
+//! etc. on collision). Keeping the on-disk filename in sync with the
+//! title — rather than an opaque generated id — is what makes a notes
+//! directory pleasant to browse in a tool like Obsidian, which shows
+//! the filename, not file contents, in its file list.
+//!
+//! `Note::id` doubles as the current filename stem. It changes when the
+//! title (first line) changes and a save renames the file underneath
+//! it — callers that key long-lived state (undo history, "last active
+//! note") by `id` need to follow the rename; see `save`'s doc comment.
 //!
 //! Last-edited time is `fs::Metadata::modified()` — we don't carry our
 //! own header, which means users who hand-edit the file get a free
@@ -45,12 +54,71 @@ pub struct Note {
 impl Note {
     /// Display name = first line, trimmed. Empty body → "(empty)".
     pub fn display_name(&self) -> &str {
-        let line = self.body.lines().next().unwrap_or("").trim();
+        let line = raw_title(&self.body);
         if line.is_empty() {
             "(empty)"
         } else {
             line
         }
+    }
+}
+
+/// First line of a note body, trimmed. May be empty.
+fn raw_title(body: &str) -> &str {
+    body.lines().next().unwrap_or("").trim()
+}
+
+/// Characters that are illegal or awkward in filenames across the
+/// filesystems docket runs on (notably Windows-reserved chars, since
+/// vaults get synced cross-platform via tools like Obsidian Sync).
+const FILENAME_UNSAFE: &[char] = &['/', '\\', ':', '*', '?', '"', '<', '>', '|'];
+
+/// Turn a note's raw title into a filesystem-safe filename stem.
+/// Blank titles fall back to `Untitled`; illegal characters become `-`;
+/// leading/trailing dots and whitespace are trimmed (leading dots would
+/// make the file hidden on Unix); length is capped well under typical
+/// filesystem limits to leave room for a disambiguation suffix.
+fn sanitize_title_for_filename(title: &str) -> String {
+    let cleaned: String = title
+        .chars()
+        .map(|c| {
+            if FILENAME_UNSAFE.contains(&c) || c.is_control() {
+                '-'
+            } else {
+                c
+            }
+        })
+        .collect();
+    let trimmed = cleaned.trim().trim_matches('.').trim();
+    if trimmed.is_empty() {
+        "Untitled".to_string()
+    } else {
+        trimmed.chars().take(100).collect()
+    }
+}
+
+/// Find a filename stem in `dir` that doesn't collide with an existing
+/// `<stem>.md`, starting from `desired` and trying `"{desired} 2"`,
+/// `"{desired} 3"`, etc. `exclude` is the note's own current stem (if
+/// any) — its file doesn't count as a collision against itself since
+/// it's about to be overwritten or renamed away.
+fn unique_stem(dir: &Path, desired: &str, exclude: Option<&str>) -> String {
+    let taken = |stem: &str| -> bool {
+        if Some(stem) == exclude {
+            return false;
+        }
+        dir.join(format!("{stem}.md")).exists()
+    };
+    if !taken(desired) {
+        return desired.to_string();
+    }
+    let mut n = 2;
+    loop {
+        let candidate = format!("{desired} {n}");
+        if !taken(&candidate) {
+            return candidate;
+        }
+        n += 1;
     }
 }
 
@@ -85,7 +153,7 @@ pub enum Resolution {
     /// configured path so the toast can quote it.
     FellBackToDefault { rejected: PathBuf },
     /// Neither the configured override nor the per-profile default could
-    /// be created; we landed on the shared legacy `~/.glint/notes`.
+    /// be created; we landed on the shared legacy `~/.docket/notes`.
     /// Carries every path that was tried so the toast / log can surface
     /// the full story.
     FellBackToLegacy { rejected: Vec<PathBuf> },
@@ -94,13 +162,13 @@ pub enum Resolution {
 /// Resolve the root directory for notes storage and ensure it exists.
 ///
 /// Tries the user's configured override first (if non-empty), then
-/// `~/.glint/notes`, then the legacy `~/.config/glint/notes`. Each
+/// `~/.docket/notes`, then the legacy `~/.config/docket/notes`. Each
 /// candidate is `mkdir -p`'d; the first one that survives that step
 /// wins. A leading `~/` in the configured path is expanded against
 /// `$HOME`.
 ///
 /// Returns an `Err` only if all three candidates fail — which in
-/// practice means the home directory is unwritable, a situation glint
+/// practice means the home directory is unwritable, a situation docket
 /// can't gracefully recover from anyway.
 pub fn resolve_root(configured: Option<&str>) -> Result<(PathBuf, Resolution)> {
     let mut rejected: Vec<PathBuf> = Vec::new();
@@ -119,7 +187,7 @@ pub fn resolve_root(configured: Option<&str>) -> Result<(PathBuf, Resolution)> {
 
     // ── Tier 2 (default): per-profile <config_dir>/notes. ──
     if let Ok(path) = crate::config::config_dir().map(|p| p.join("notes")) {
-        // The default profile inherits a pre-profiles ~/.glint/notes once.
+        // The default profile inherits a pre-profiles ~/.docket/notes once.
         adopt_legacy_notes(&path);
         if try_mkdir_p(&path) {
             // No configured override → this is the happy path.
@@ -137,8 +205,8 @@ pub fn resolve_root(configured: Option<&str>) -> Result<(PathBuf, Resolution)> {
         rejected.push(path);
     }
 
-    // ── Tier 3 (legacy fallback): ~/.glint/notes (shared, pre-profiles). ──
-    if let Some(path) = home_join(".glint").map(|p| p.join("notes")) {
+    // ── Tier 3 (legacy fallback): ~/.docket/notes (shared, pre-profiles). ──
+    if let Some(path) = home_join(".docket").map(|p| p.join("notes")) {
         if try_mkdir_p(&path) {
             return Ok((path, Resolution::FellBackToLegacy { rejected }));
         }
@@ -155,7 +223,7 @@ pub fn resolve_root(configured: Option<&str>) -> Result<(PathBuf, Resolution)> {
     )
 }
 
-/// One-time adoption of a pre-profiles `~/.glint/notes` into the default
+/// One-time adoption of a pre-profiles `~/.docket/notes` into the default
 /// profile's per-profile notes dir. Only the default profile inherits it
 /// (the single pre-profiles install *was* "default"); other profiles start
 /// empty. Best-effort — a failed move just leaves the legacy dir in place
@@ -167,7 +235,7 @@ fn adopt_legacy_notes(per_profile: &Path) {
     if per_profile.exists() {
         return;
     }
-    let Some(legacy) = home_join(".glint").map(|p| p.join("notes")) else {
+    let Some(legacy) = home_join(".docket").map(|p| p.join("notes")) else {
         return;
     };
     if !legacy.exists() {
@@ -180,10 +248,10 @@ fn adopt_legacy_notes(per_profile: &Path) {
         Ok(()) => tracing::info!(
             from = %legacy.display(),
             to = %per_profile.display(),
-            "notes: adopted pre-profiles ~/.glint/notes into the default profile"
+            "notes: adopted pre-profiles ~/.docket/notes into the default profile"
         ),
         Err(err) => {
-            tracing::warn!(error = %err, "notes: could not adopt legacy ~/.glint/notes")
+            tracing::warn!(error = %err, "notes: could not adopt legacy ~/.docket/notes")
         }
     }
 }
@@ -223,8 +291,20 @@ fn home_join(suffix: &str) -> Option<PathBuf> {
 
 /// Resolve the on-disk directory for one instance's notes inside an
 /// already-resolved root. Created lazily on first write.
+///
+/// The default `"main"` instance (the vast majority of setups only
+/// ever have this one) stores directly in `root` — no subfolder — so a
+/// `notes_dir` pointed at, say, an Obsidian vault folder shows notes
+/// right there instead of nested one level down under a folder named
+/// "main". Additional named instances (`notes@work.toml`, etc.) still
+/// get their own subfolder so two instances sharing a `notes_dir`
+/// don't collide.
 pub fn notes_dir(root: &Path, instance: &str) -> PathBuf {
-    root.join(sanitize_instance(instance))
+    if instance == "main" {
+        root.to_path_buf()
+    } else {
+        root.join(sanitize_instance(instance))
+    }
 }
 
 fn sanitize_instance(instance: &str) -> String {
@@ -289,14 +369,44 @@ pub fn load_all(root: &Path, instance: &str) -> Vec<Note> {
 /// Atomic write of one note. Creates the instance directory on demand.
 /// Updates the in-memory note's `modified` to the new mtime so callers
 /// can re-sort without an extra stat.
+///
+/// If the note's title (first line) no longer matches the current
+/// on-disk filename, the file is renamed to match (disambiguated on
+/// collision) and `note.id` is updated to the new stem — callers that
+/// key long-lived state by `id` (undo history, "last active note") must
+/// re-key it under the new value after this returns; compare the id
+/// before and after the call to detect a rename.
 pub fn save(root: &Path, instance: &str, note: &mut Note) -> Result<()> {
     let dir = notes_dir(root, instance);
     fs::create_dir_all(&dir).with_context(|| format!("create {}", dir.display()))?;
-    let path = dir.join(format!("{}.md", note.id));
-    let tmp = dir.join(format!("{}.md.tmp", note.id));
+
+    let desired = sanitize_title_for_filename(raw_title(&note.body));
+    let new_id = if desired == note.id {
+        note.id.clone()
+    } else {
+        unique_stem(&dir, &desired, Some(note.id.as_str()))
+    };
+
+    let path = dir.join(format!("{new_id}.md"));
+    let tmp = dir.join(format!("{new_id}.md.tmp"));
     fs::write(&tmp, &note.body).with_context(|| format!("write {}", tmp.display()))?;
     fs::rename(&tmp, &path)
         .with_context(|| format!("rename {} → {}", tmp.display(), path.display()))?;
+
+    if new_id != note.id {
+        let old_path = dir.join(format!("{}.md", note.id));
+        if old_path.exists() {
+            if let Err(err) = fs::remove_file(&old_path) {
+                tracing::warn!(
+                    path = %old_path.display(),
+                    error = %err,
+                    "notes: failed to remove old file after rename"
+                );
+            }
+        }
+        note.id = new_id;
+    }
+
     note.modified = fs::metadata(&path)
         .and_then(|m| m.modified())
         .unwrap_or_else(|_| SystemTime::now());
@@ -320,7 +430,7 @@ mod tests {
 
     fn tmp_home() -> tempdir::PathGuard {
         let dir = std::env::temp_dir().join(format!(
-            "glint-notes-test-{}-{:?}",
+            "docket-notes-test-{}-{:?}",
             std::process::id(),
             std::thread::current().id()
         ));
@@ -401,11 +511,88 @@ mod tests {
         };
         save(g.as_ref(), &inst, &mut n).expect("save");
         assert!(n.modified > SystemTime::UNIX_EPOCH, "save must stamp mtime");
+        assert_eq!(n.id, "alpha", "filename should follow the title");
 
         let loaded = load_all(g.as_ref(), &inst);
         assert_eq!(loaded.len(), 1);
         assert_eq!(loaded[0].body, "alpha\nbeta");
         assert_eq!(loaded[0].id, n.id);
+    }
+
+    #[test]
+    fn save_renames_file_when_title_changes() {
+        let g = tmp_home();
+        let inst = unique_instance("rename");
+        let mut n = Note {
+            id: new_id(),
+            body: "first title".into(),
+            modified: SystemTime::UNIX_EPOCH,
+        };
+        save(g.as_ref(), &inst, &mut n).expect("save");
+        assert_eq!(n.id, "first title");
+        let dir = notes_dir(g.as_ref(), &inst);
+        assert!(dir.join("first title.md").exists());
+
+        n.body = "second title".into();
+        save(g.as_ref(), &inst, &mut n).expect("save again");
+        assert_eq!(n.id, "second title");
+        assert!(
+            !dir.join("first title.md").exists(),
+            "old filename should be gone"
+        );
+        assert!(dir.join("second title.md").exists());
+
+        let loaded = load_all(g.as_ref(), &inst);
+        assert_eq!(loaded.len(), 1, "rename must not leave a duplicate file");
+    }
+
+    #[test]
+    fn save_disambiguates_title_collisions() {
+        let g = tmp_home();
+        let inst = unique_instance("collide");
+        let mut a = Note {
+            id: new_id(),
+            body: "Same Title".into(),
+            modified: SystemTime::UNIX_EPOCH,
+        };
+        save(g.as_ref(), &inst, &mut a).expect("save a");
+        let mut b = Note {
+            id: new_id(),
+            body: "Same Title".into(),
+            modified: SystemTime::UNIX_EPOCH,
+        };
+        save(g.as_ref(), &inst, &mut b).expect("save b");
+
+        assert_eq!(a.id, "Same Title");
+        assert_eq!(b.id, "Same Title 2");
+        assert_eq!(load_all(g.as_ref(), &inst).len(), 2);
+    }
+
+    #[test]
+    fn save_falls_back_to_untitled_for_blank_title() {
+        let g = tmp_home();
+        let inst = unique_instance("blank");
+        let mut n = Note {
+            id: new_id(),
+            body: "".into(),
+            modified: SystemTime::UNIX_EPOCH,
+        };
+        save(g.as_ref(), &inst, &mut n).expect("save");
+        assert_eq!(n.id, "Untitled");
+    }
+
+    #[test]
+    fn sanitize_title_for_filename_strips_unsafe_chars_and_caps_length() {
+        assert_eq!(sanitize_title_for_filename("normal title"), "normal title");
+        assert_eq!(
+            sanitize_title_for_filename("a/b\\c:d*e?f\"g<h>i|j"),
+            "a-b-c-d-e-f-g-h-i-j"
+        );
+        assert_eq!(sanitize_title_for_filename("  spaced  "), "spaced");
+        assert_eq!(sanitize_title_for_filename("..."), "Untitled");
+        assert_eq!(sanitize_title_for_filename(""), "Untitled");
+        let long = "x".repeat(500);
+        assert_eq!(sanitize_title_for_filename(&long).chars().count(), 100);
     }
 
     #[test]
@@ -456,6 +643,18 @@ mod tests {
     }
 
     #[test]
+    fn notes_dir_for_main_instance_is_the_root_itself() {
+        let root = PathBuf::from("/some/vault/docket");
+        assert_eq!(notes_dir(&root, "main"), root);
+    }
+
+    #[test]
+    fn notes_dir_for_named_instance_gets_a_subfolder() {
+        let root = PathBuf::from("/some/vault/docket");
+        assert_eq!(notes_dir(&root, "work"), root.join("work"));
+    }
+
+    #[test]
     fn resolve_root_uses_configured_when_creatable() {
         let g = tmp_home();
         let target = g.0.join("custom-notes");
@@ -475,7 +674,7 @@ mod tests {
         fs::write(&blocker, b"not a directory").unwrap();
         let bad = blocker.join("sub").to_string_lossy().to_string();
         let (root, res) = resolve_root(Some(&bad)).expect("resolve");
-        // Either tier 2 (~/.glint/notes) or tier 3 (~/.config/glint/notes)
+        // Either tier 2 (~/.docket/notes) or tier 3 (~/.config/docket/notes)
         // should have caught it — both signal a fallback.
         assert_ne!(root, PathBuf::from(&bad));
         assert!(

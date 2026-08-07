@@ -1,14 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 ntrospect0
+// Copyright (C) 2026 nicococo
 
 //! Notes widget — a vim-flavoured notepad with multi-note
 //! navigation. Notes live as one `.md` file per note under
-//! `<root>/<instance>/`, where `root` defaults to `~/.glint/notes` and
+//! `<root>/<instance>/`, where `root` defaults to `~/.docket/notes` and
 //! is overridable in `notes.toml` via `notes_dir = "..."`. The
 //! filesystem is the source of truth, and the widget reloads from disk
 //! on startup. If the configured directory can't be created the widget
-//! falls back to `~/.glint/notes`, and as a final fallback
-//! `~/.config/glint/notes` — surfacing a title-bar toast either way.
+//! falls back to `~/.docket/notes`, and as a final fallback
+//! `~/.config/docket/notes` — surfacing a title-bar toast either way.
 //!
 //! ## Modes
 //!
@@ -60,14 +61,14 @@ use super::{AppContext, EventResult, Widget, WidgetCtx};
 
 pub const KIND: &str = "notes";
 
-/// User-facing config under `~/.config/glint/notes.toml` (or
+/// User-facing config under `~/.config/docket/notes.toml` (or
 /// `notes@<instance>.toml`). All fields optional; the widget is
 /// usable with an empty file.
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct NotesConfig {
     /// On-disk root for note files (the `<instance>/` subdir lives
     /// inside this). Leading `~/` is expanded against `$HOME`. Empty
-    /// or absent → the built-in default `~/.glint/notes`. Unwritable
+    /// or absent → the built-in default `~/.docket/notes`. Unwritable
     /// values fall back through the chain documented on
     /// [`store::resolve_root`].
     #[serde(default)]
@@ -486,10 +487,20 @@ impl NotesWidget {
         let Some(note) = st.notes.get_mut(active) else {
             return;
         };
+        let old_id = note.id.clone();
         if let Err(err) = store::save(&self.root, &self.instance, note) {
             tracing::warn!(error = %err, "notes: save failed");
             st.set_status(format!("Save failed: {err}"));
             return;
+        }
+        // A title edit renames the on-disk file, which changes `id`
+        // (it doubles as the filename stem) — follow that rename so
+        // undo/redo history keyed by the old id isn't orphaned.
+        let new_id = st.notes[active].id.clone();
+        if new_id != old_id {
+            if let Some(h) = st.history.remove(&old_id) {
+                st.history.insert(new_id, h);
+            }
         }
         // Re-sort by mtime desc; restore active to follow the note.
         let active_id = st.notes[active].id.clone();
@@ -2382,7 +2393,7 @@ fn truncate_for_meta(s: &str, max: usize) -> String {
 }
 
 /// Wizard descriptor. The only field is `notes_dir` — where note
-/// files live on disk. Defaults to `~/.glint/notes`; leaving the field
+/// files live on disk. Defaults to `~/.docket/notes`; leaving the field
 /// blank in the wizard keeps the default. Other knobs (colours,
 /// shortcut letters) live in `notes.toml` and are managed by hand.
 pub fn wizard_descriptor() -> crate::wizard::descriptor::WizardDescriptor {
@@ -2401,14 +2412,14 @@ pub fn wizard_descriptor() -> crate::wizard::descriptor::WizardDescriptor {
             key: "notes_dir",
             label: "Notes directory",
             help: "Where note files are stored on disk. Defaults to \
-                   ~/.glint/notes; leave blank to accept that. If the \
-                   directory can't be created at launch, Glint falls \
-                   back to ~/.glint/notes, then to ~/.config/glint/notes, \
+                   ~/.docket/notes; leave blank to accept that. If the \
+                   directory can't be created at launch, Docket falls \
+                   back to ~/.docket/notes, then to ~/.config/docket/notes, \
                    and surfaces a title-bar warning either way.",
             required: false,
             kind: WizardFieldKind::Path {
                 mode: PathMode::Dir,
-                default: Some("~/.glint/notes".to_string()),
+                default: Some("~/.docket/notes".to_string()),
             },
             validate: None,
         }],
@@ -2420,7 +2431,7 @@ pub fn wizard_descriptor() -> crate::wizard::descriptor::WizardDescriptor {
 /// would already pick `notes_dir` up as a top-level string scalar; we
 /// supply an explicit loader anyway so a missing value lands as an
 /// empty `Path` (signalling "use the default" rather than the literal
-/// string `"~/.glint/notes"` showing in the input).
+/// string `"~/.docket/notes"` showing in the input).
 fn load_notes_config_from_toml(
     doc: &toml::Value,
 ) -> std::collections::HashMap<String, crate::wizard::descriptor::WizardValue> {
@@ -2483,12 +2494,12 @@ fn strip_top_level_scalar(text: &str, key: &str) -> String {
 /// writes the file for the first time (no prior contents). Re-runs
 /// preserve whatever is on disk via `toml_merge`.
 const NOTES_TOML_PREAMBLE: &str =
-    "# Generated by `glint --setup`. Hand-edit freely; the wizard\n\
+    "# Generated by `docket --setup`. Hand-edit freely; the wizard\n\
      # only manages the `notes_dir` line.\n\
      #\n\
      # notes_dir: where note files are stored on disk. Leading `~/`\n\
      # is expanded against $HOME. Leave unset to use the built-in\n\
-     # default `~/.glint/notes`.\n\
+     # default `~/.docket/notes`.\n\
      \n";
 
 /// Run the store's three-tier root resolver and translate its result
@@ -2522,7 +2533,7 @@ fn resolve_root_or_emergency(
                 instance = %instance,
                 rejected = ?rejected,
                 using = %root.display(),
-                "notes: configured + per-profile dirs unwritable; using shared legacy ~/.glint/notes"
+                "notes: configured + per-profile dirs unwritable; using shared legacy ~/.docket/notes"
             );
             (
                 root.clone(),
@@ -2537,7 +2548,7 @@ fn resolve_root_or_emergency(
             tracing::error!(error = %err, "notes: no writable root; saves will fail");
             let dead = crate::config::config_dir()
                 .map(|p| p.join("notes"))
-                .unwrap_or_else(|_| std::path::PathBuf::from("./glint-notes"));
+                .unwrap_or_else(|_| std::path::PathBuf::from("./docket-notes"));
             (
                 dead,
                 Some("Notes storage unavailable — saves will fail".to_string()),

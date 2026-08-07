@@ -3,7 +3,7 @@
 # Embedded into the binary at build time and surfaced by the feeds
 # widget's --setup wizard. Editing this file requires a rebuild;
 # users who want to add a custom source instead drop a fresh TOML
-# at this same shape under ~/.config/glint/templates/ (planned for
+# at this same shape under ~/.config/docket/templates/ (planned for
 # a later phase) or write their feeds@<instance>.toml by hand.
 
 id = "wsj"

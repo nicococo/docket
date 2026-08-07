@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 ntrospect0
+// Copyright (C) 2026 nicococo
 
 //! Migration / cleanup prompt — shown ahead of the Profile Manager when a
 //! flat (pre-profiles) config, or its leftover duplicates, are present.
@@ -30,7 +31,7 @@ use crate::wizard::{app::WizardApp, style};
 
 /// `profiles/default/` exists → already migrated (any flat files are leftovers).
 pub fn already_migrated() -> bool {
-    config::glint_root()
+    config::docket_root()
         .map(|r| r.join("profiles").join(config::DEFAULT_PROFILE).exists())
         .unwrap_or(false)
 }
@@ -92,7 +93,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &WizardApp) {
         )));
         lines.push(Line::from(""));
         lines.push(Line::from(Span::styled(
-            "Your config lives in the old flat layout at ~/.config/glint/. \
+            "Your config lives in the old flat layout at ~/.config/docket/. \
              Migrating moves it into profiles/default/ and unlocks multiple \
              profiles you can create, clone, and switch between. Keeping it \
              stays single-profile — you'll just edit the default config here.",
@@ -121,7 +122,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &WizardApp) {
         lines.push(Line::from(""));
         lines.push(Line::from(Span::styled(
             "You've migrated to profiles/default/, but duplicate flat files \
-             remain at ~/.config/glint/. glint no longer reads them — they're \
+             remain at ~/.config/docket/. docket no longer reads them — they're \
              now just clutter that can cause confusion. They're safe to remove \
              (the live copies are in profiles/default/).",
             style::blurb(),

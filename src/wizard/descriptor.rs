@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 ntrospect0
+// Copyright (C) 2026 nicococo
 
 //! Wizard descriptor — the declarative contract each widget exports so the
 //! wizard driver can render its setup page without hard-coded per-widget

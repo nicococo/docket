@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 ntrospect0
+// Copyright (C) 2026 nicococo
 
 //! Unit tests for the email widget. Split out of `mod.rs` per the repo standard.
 
@@ -204,6 +205,8 @@ fn make_message(line_count: usize) -> provider::EmailMessage {
         server_unread: false,
         plain_body: body,
         web_url: None,
+        account: String::new(),
+        imap_uid: None,
     }
 }
 
@@ -531,4 +534,77 @@ fn narrow_rect_e_key_toggles_inline_expand() {
         !widget.state.lock().unwrap().expanded,
         "expanded must return to false after second e press"
     );
+}
+
+fn imap_account_handle(label: &str) -> ImapAccountHandle {
+    let creds = imap::ImapCredentials {
+        host: "imap.example.com".into(),
+        port: 993,
+        use_tls: true,
+        username: format!("{label}@example.com"),
+        app_password: "unused-in-tests".into(),
+    };
+    ImapAccountHandle {
+        label: label.to_string(),
+        provider: Arc::new(imap::ImapProvider::new(creds)),
+        folders: vec!["INBOX".into()],
+    }
+}
+
+fn msg_with_account(account: &str, folder: &str) -> Arc<EmailMessage> {
+    Arc::new(EmailMessage {
+        account: account.to_string(),
+        folder: folder.to_string(),
+        ..make_message(0)
+    })
+}
+
+#[test]
+fn tab_labels_single_account_mode_returns_folders() {
+    let cfg = EmailConfig {
+        provider: "imap".into(),
+        folders: vec!["INBOX".into(), "Archive".into()],
+        ..EmailConfig::default()
+    };
+    let widget = EmailWidget::with_config(cfg);
+    assert_eq!(widget.tab_labels(), vec!["INBOX", "Archive"]);
+}
+
+#[test]
+fn tab_labels_multi_account_mode_prepends_all_tab() {
+    let cfg = EmailConfig {
+        provider: "imap".into(),
+        ..EmailConfig::default()
+    };
+    let mut widget = EmailWidget::with_config(cfg);
+    widget.imap_accounts = vec![imap_account_handle("personal"), imap_account_handle("work")];
+    assert_eq!(widget.tab_labels(), vec!["All", "personal", "work"]);
+}
+
+#[test]
+fn message_matches_tab_single_account_filters_by_folder() {
+    let cfg = EmailConfig::default();
+    let widget = EmailWidget::with_config(cfg);
+    let inbox = msg_with_account("", "INBOX");
+    let archive = msg_with_account("", "Archive");
+    assert!(widget.message_matches_tab(&inbox, "INBOX"));
+    assert!(!widget.message_matches_tab(&archive, "INBOX"));
+}
+
+#[test]
+fn message_matches_tab_multi_account_filters_by_account_or_all() {
+    let cfg = EmailConfig {
+        provider: "imap".into(),
+        ..EmailConfig::default()
+    };
+    let mut widget = EmailWidget::with_config(cfg);
+    widget.imap_accounts = vec![imap_account_handle("personal"), imap_account_handle("work")];
+
+    let personal_msg = msg_with_account("personal", "INBOX");
+    let work_msg = msg_with_account("work", "INBOX");
+
+    assert!(widget.message_matches_tab(&personal_msg, "personal"));
+    assert!(!widget.message_matches_tab(&work_msg, "personal"));
+    assert!(widget.message_matches_tab(&personal_msg, "All"));
+    assert!(widget.message_matches_tab(&work_msg, "All"));
 }

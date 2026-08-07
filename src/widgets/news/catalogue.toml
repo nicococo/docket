@@ -3,7 +3,7 @@
 # Curated topics + RSS/Atom feeds the wizard offers as checkboxes
 # on `--setup news`. Embedded into the binary at build time via
 # `include_str!`. Editing this file requires a rebuild; user-side
-# additions go directly into `~/.config/glint/news.toml` as
+# additions go directly into `~/.config/docket/news.toml` as
 # `[[topics]]` / `[[feeds]]` blocks (the wizard preserves
 # hand-added entries across re-runs).
 #

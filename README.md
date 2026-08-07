@@ -1,4 +1,4 @@
-# glint
+# docket
 
 A fast, keyboard-driven terminal dashboard. Stocks, forex + crypto,
 calendar, weather, news, email, notes, system resources, image gallery —
@@ -10,27 +10,54 @@ https://github.com/user-attachments/assets/31f79aef-412c-44fb-bd72-c684e6aa9185
 *A live capture — keyboard shortcuts driving focus, view changes, and
 widget interaction across the dashboard.*
 
-![Composed glint dashboard with clock, weather, calendar, news, stocks, resources, and gallery widgets in the tokyonight scheme](docs/screenshots/glint-demo1.png)
+![Composed docket dashboard with clock, weather, calendar, news, stocks, resources, and gallery widgets in the tokyonight scheme](docs/screenshots/docket-demo1.png)
 
 *A composed dashboard — clock + weather on the left, a calendar / email
 / notes stack and a stocks / forex / WSJ stack on the right, system
 resources and a rotating gallery filling the rest. `tokyonight` scheme.*
 
-![The same layout with the calendar rotated to week view, weather expanded to a 3-day forecast, and the WSJ news widget scrolling the latest articles](docs/screenshots/glint-demo2.png)
+![The same layout with the calendar rotated to week view, weather expanded to a 3-day forecast, and the WSJ news widget scrolling the latest articles](docs/screenshots/docket-demo2.png)
 
 *Same layout, different views — calendar in week mode, weather showing
 the 3-day forecast, the gallery rotating its next image, and the WSJ
 feed scrolling the latest articles in the middle stack.*
 
-![A different 5-pane layout in the chalktone scheme, focused on the WSJ widget with an NVDA stock chart open](docs/screenshots/glint-demo3.png)
+![A different 5-pane layout in the chalktone scheme, focused on the WSJ widget with an NVDA stock chart open](docs/screenshots/docket-demo3.png)
 
 *A different 5-pane layout in the `chalktone` scheme, focused on the
 WSJ stack with an NVDA chart open in stocks on the right.*
 
 Everything is opt-in, locally configured, and persists in plain TOML
-under `~/.config/glint/` — no accounts, no telemetry, no cloud
-component glint controls. The setup wizard generates a working
+under `~/.config/docket/` — no accounts, no telemetry, no cloud
+component docket controls. The setup wizard generates a working
 dashboard on first launch.
+
+---
+
+## Origins
+
+docket is a hard fork of [**glint**](https://github.com/ntrospect0/glint),
+a fast, keyboard-driven terminal dashboard written by
+[**ntrospect0**](https://github.com/ntrospect0). Every widget engine,
+the wizard, the rendering pipeline, the config/cache architecture —
+the whole foundation this project stands on — is ntrospect0's design
+and work. glint's own goal is to be a general-purpose, highly
+adaptable dashboard: whatever mix of stocks, weather, calendar, news,
+and more you want, composed your way. That idea, and the care put
+into making it genuinely pleasant to use in a terminal, is what made
+this fork worth doing in the first place — thank you, ntrospect0.
+
+docket exists because I wanted something narrower and more opinionated:
+a dashboard purpose-built around *my* work and project management, not
+a general-purpose canvas. That's a different design goal than glint's,
+not a better one, so rather than pile my opinions onto glint as
+options and flags, I forked it and started shaping it toward that one
+purpose. This is a standalone project going forward — it doesn't track
+glint's upstream changes, and its own direction will diverge over
+time. If you want the general-purpose dashboard, go use glint; it's
+great, and this project wouldn't exist without it.
+
+Like glint, docket is licensed GPL-3.0-or-later — see [`LICENSE`](LICENSE).
 
 ---
 
@@ -42,9 +69,9 @@ dashboard on first launch.
   widget or a **stack** of widgets you cycle between with `.` / `,`.
 - **Multi-instance** — run the same widget kind in several panes
   (`stocks@watchlist1` + `stocks@watchlist2`, `clock@home` + `clock@office`).
-- **Profiles** — `glint --profile work` (or `-p work`) runs an isolated
+- **Profiles** — `docket --profile work` (or `-p work`) runs an isolated
   config tree: its own layout, widgets, theme, and accounts. Create,
-  switch, and manage them from the setup wizard (`glint --setup`). The
+  switch, and manage them from the setup wizard (`docket --setup`). The
   colorscheme library and OAuth app registrations are shared; everything
   else is per-profile. See [INSTRUCTIONS.md → Profiles](INSTRUCTIONS.md#profiles).
 - **Live config reload** — edit any widget's TOML and the dashboard
@@ -52,7 +79,7 @@ dashboard on first launch.
 - **Theming** — nine bundled colour schemes; per-widget colour overrides;
   add your own schemes by editing one TOML file. `:scheme nord` switches
   live.
-- **Setup wizard** — `glint --setup` (or first launch with no config)
+- **Setup wizard** — `docket --setup` (or first launch with no config)
   walks you through layout, widget assignment, and credentials with
   copy-pasteable instructions for each external service.
 - **Keyboard-first, mouse-friendly** — `Tab` cycles widgets,
@@ -66,7 +93,7 @@ dashboard on first launch.
   becomes fully legible without leaving the terminal. Retarget the zoom
   to another widget with `Tab` or `Shift+<letter>` without exiting.
 - **No cloud component**: every credential lives on disk under
-  `~/.config/glint/credentials/` (0600 perms). API calls go directly
+  `~/.config/docket/credentials/` (0600 perms). API calls go directly
   from your machine to the upstream service.
 
 ---
@@ -79,8 +106,8 @@ You need a recent Rust toolchain (1.81+). Install via
 [`rustup`](https://rustup.rs/) if you don't have one.
 
 ```sh
-git clone https://github.com/ntrospect0/glint.git glint
-cd glint
+git clone https://github.com/nicococo/docket.git docket
+cd docket
 
 # Per-user install (no sudo, installs to ~/.local/bin):
 make install PREFIX=~/.local
@@ -99,17 +126,17 @@ export PATH="$HOME/.local/bin:$PATH"
 Verify:
 
 ```sh
-glint --version
+docket --version
 ```
 
 ### Makefile targets
 
 | target | what it does |
 |---|---|
-| `make` / `make release` | release build at `target/release/glint` |
+| `make` / `make release` | release build at `target/release/docket` |
 | `make build` | debug build (faster compile, slower runtime) |
-| `make install` | release build + copy to `$(PREFIX)/bin/glint` |
-| `make uninstall` | remove `$(PREFIX)/bin/glint` |
+| `make install` | release build + copy to `$(PREFIX)/bin/docket` |
+| `make uninstall` | remove `$(PREFIX)/bin/docket` |
 | `make test` | run the test suite |
 | `make clean` | `cargo clean` |
 
@@ -136,21 +163,21 @@ make install PREFIX=~/.local   # or sudo make install
 
 ### macOS app icon (optional)
 
-<img src="assets/icon/glint.png" alt="glint app icon" width="96" align="right" />
+<img src="assets/icon/docket.png" alt="docket app icon" width="96" align="right" />
 
-glint is a terminal program, but on macOS you can wrap it in a
+docket is a terminal program, but on macOS you can wrap it in a
 double-clickable app that opens it in your terminal — handy for the
 Dock or Spotlight. The icon assets live in
-[`assets/icon/`](assets/icon/) (`glint.png` and `glint.icns`).
+[`assets/icon/`](assets/icon/) (`docket.png` and `docket.icns`).
 
-With glint on your `$PATH`:
+With docket on your `$PATH`:
 
 ```sh
 ./assets/icon/install-macos-app.sh
 ```
 
-This builds `~/Applications/Glint.app` with the icon above, launching
-glint in `~`. First open may need a right-click → **Open** (the bundle
+This builds `~/Applications/Docket.app` with the icon above, launching
+docket in `~`. First open may need a right-click → **Open** (the bundle
 isn't code-signed).
 
 The script auto-detects an installed terminal and supports **Kitty,
@@ -173,7 +200,7 @@ terminal isn't listed.
 Launch with no existing config and you land in the setup wizard:
 
 ```sh
-glint
+docket
 # → "No config detected … launching the setup wizard."
 ```
 
@@ -189,12 +216,12 @@ The wizard walks you through:
 5. **OAuth flows** (where needed) — Gmail, Outlook, Google Calendar all
    captured inline through the wizard with copy-paste instructions.
 
-![Setup wizard layout step — picking a 5-pane preset such as "Sidebar + 2x2"](docs/screenshots/glint-setup.png)
+![Setup wizard layout step — picking a 5-pane preset such as "Sidebar + 2x2"](docs/screenshots/docket-setup.png)
 
 *The wizard's layout step — pick a pane count, then a preset; widget
 assignment follows on the next page.*
 
-Re-run any time with `glint --setup`. Every section has an
+Re-run any time with `docket --setup`. Every section has an
 **Edit / Skip** gate; skipping leaves that TOML untouched, so hand-edits
 and comments survive.
 
@@ -216,7 +243,7 @@ the live keybinding overlay.
 | **Email** | unified inbox preview with optional per-message LLM summaries | Gmail (OAuth), Outlook (OAuth), any IMAP server (app password) |
 | **Resources** | htop-style CPU / memory / top-process view | local `sysinfo` (no FFI) |
 | **Gallery** | rotating inline image slideshow (any image glob you point it at) | none — uses iTerm2 / Kitty / Sixel inline image protocol, falls back to unicode half-blocks |
-| **Notes** | vim-flavoured multi-note pad with undo/redo, mouse cursor positioning, per-note files | none — plain `.md` files under `~/.config/glint/notes/` |
+| **Notes** | vim-flavoured multi-note pad with undo/redo, mouse cursor positioning, per-note files | none — plain `.md` files under `~/.config/docket/notes/` |
 
 Every widget is independently optional. The wizard surfaces only what
 you turn on; missing credentials route gracefully into the inline
@@ -226,7 +253,7 @@ capture flow.
 
 ## Configuration
 
-All files live under `~/.config/glint/`:
+All files live under `~/.config/docket/`:
 
 | file | what it controls |
 |---|---|
@@ -396,7 +423,7 @@ State (selection, scroll, active tab, warm data) is preserved entering
 | **Weather** | `:weather <city>` retarget · `x` revert to default |
 | **Clock** | `:time <city>` retarget · `x` revert to local |
 | **News** | `↑/↓` select · `←/→` filter tabs · `e` expand · `s` LLM summary · `Enter` open · `x` clear search |
-| **Email** | `↑/↓` select · `Enter` open in mail client · `e` expand · `s` LLM summary |
+| **Email** | `↑/↓` select · `←/→` folder · `e`/`Enter` expand · `o` open in mail client · `s` LLM summary · `u` mark read/unread · `r` refresh |
 | **Resources** | `m` toggle sort (CPU ↔ memory) · `r` force refresh |
 | **Gallery** | `p` pause/resume · `n` / `N` step · `↑/↓` rotation interval ±1s |
 | **Notes** | `+` new · `-` delete (confirm) · `i` insert · `ESC` normal · `h`/`l` focus list / content · `j`/`k` scroll · `gg`/`G` top/bottom · `y` yank note · `Ctrl-A`/`Ctrl-E` line start/end · `Ctrl-U` delete line · `Ctrl-Z` / `Ctrl-Shift-Z` undo / redo |
@@ -409,23 +436,23 @@ assignments and active scheme.
 ## CLI reference
 
 ```sh
-glint                    # launch the dashboard (or wizard on first run)
-glint --setup            # launch the wizard
-glint --init             # create ~/.config/glint/ with default seed files
-glint --auth <provider>  # run an auth flow (google, microsoft, imap, anthropic, openai)
-glint --clear-cache [TARGET]
-                         # wipe ~/.cache/glint/ entirely, or scope to
+docket                    # launch the dashboard (or wizard on first run)
+docket --setup            # launch the wizard
+docket --init             # create ~/.config/docket/ with default seed files
+docket --auth <provider>  # run an auth flow (google, microsoft, imap, anthropic, openai)
+docket --clear-cache [TARGET]
+                         # wipe ~/.cache/docket/ entirely, or scope to
                          # a widget kind (news) or instance (news@home)
-glint --config <FILE>    # override the default XDG location
-glint --version
+docket --config <FILE>    # override the default XDG location
+docket --version
 ```
 
 ---
 
 ## External dependencies
 
-glint pulls every piece of remote data directly from the upstream
-service; nothing routes through a glint-owned backend.
+docket pulls every piece of remote data directly from the upstream
+service; nothing routes through a docket-owned backend.
 
 | service | used by | auth |
 |---|---|---|
@@ -460,20 +487,20 @@ summaries). Full list in `Cargo.toml`.
 
 | where | what |
 |---|---|
-| `~/.config/glint/*.toml` | your config — fully owned and editable by you |
-| `~/.config/glint/credentials/` (0600) | OAuth tokens, API keys, IMAP passwords |
-| `~/.config/glint/notes/` | notes as plain `.md` files |
-| `~/.cache/glint/` | per-widget on-disk caches (news articles, calendar events, email messages, etc.) — regenerable; a startup sweep drops anything > 30 days old |
-| `~/.config/glint/glint.log` | runtime log; `tail -f` it to debug |
+| `~/.config/docket/*.toml` | your config — fully owned and editable by you |
+| `~/.config/docket/credentials/` (0600) | OAuth tokens, API keys, IMAP passwords |
+| `~/.config/docket/notes/` | notes as plain `.md` files |
+| `~/.cache/docket/` | per-widget on-disk caches (news articles, calendar events, email messages, etc.) — regenerable; a startup sweep drops anything > 30 days old |
+| `~/.config/docket/docket.log` | runtime log; `tail -f` it to debug |
 
-glint never sends data to any third party that isn't named in the
+docket never sends data to any third party that isn't named in the
 External dependencies table above. There is no telemetry.
 
 ### Credential storage — what it does and doesn't protect
 
-Today every credential glint stores (IMAP / CalDAV app passwords, LLM
+Today every credential docket stores (IMAP / CalDAV app passwords, LLM
 API keys, OAuth tokens) lives in a TOML file under
-`~/.config/glint/credentials/` with `0600` permissions and an atomic
+`~/.config/docket/credentials/` with `0600` permissions and an atomic
 write. This mirrors the convention used by `aws`, `gcloud`, `gh`,
 `docker`, `npm`, `ssh`, and similar local-first CLIs.
 
@@ -495,17 +522,17 @@ What it doesn't cover:
 - ❌ Root / sudo on the host can read the file.
 - ❌ Backups that include `~/.config/` (Time Machine, restic, borg,
   Arq, dotfile syncers like chezmoi / yadm / GNU stow) will carry the
-  credentials along. Excluding `~/.config/glint/credentials/` is
+  credentials along. Excluding `~/.config/docket/credentials/` is
   recommended; on dotfile managers add it to the per-host ignore
   list rather than syncing it across machines.
 
 Recommended posture:
 
 1. Keep full-disk encryption on.
-2. Exclude `~/.config/glint/credentials/` from your backup tool.
+2. Exclude `~/.config/docket/credentials/` from your backup tool.
 3. Exclude it from any dotfile sync — credentials should stay
    per-host.
-4. Prefer OAuth and app passwords (which glint already does) over
+4. Prefer OAuth and app passwords (which docket already does) over
    master passwords.
 
 **Coming post-v0.2**: a tiered credential backend (OS keychain →
@@ -517,11 +544,11 @@ Deferred for the scope.
 
 ## Troubleshooting
 
-- **`glint` not found after install** — make sure `$(PREFIX)/bin` is on
+- **`docket` not found after install** — make sure `$(PREFIX)/bin` is on
   your `$PATH`. The Makefile prints the right export line at the end of
   `make install`.
 - **Gallery shows chunky pixelated images** — your terminal doesn't
-  speak iTerm2 / Kitty / Sixel inline protocols, so glint fell back to
+  speak iTerm2 / Kitty / Sixel inline protocols, so docket fell back to
   unicode half-blocks. Switch to iTerm2 (macOS), WezTerm, Kitty, or
   enable sixel mode in your terminal.
 - **OAuth flow won't open a browser** — the auth flow prints the URL
@@ -533,16 +560,16 @@ Deferred for the scope.
   launch with the wrong symbol set.
 - **Logs**: runtime alt-screen mode means stderr/stdout would corrupt
   the display, so warnings/errors land in
-  `~/.config/glint/glint.log`. `tail -f ~/.config/glint/glint.log`
+  `~/.config/docket/docket.log`. `tail -f ~/.config/docket/docket.log`
   while debugging.
-- **Reset to defaults**: move aside `~/.config/glint/` and re-run
-  `glint --setup`.
+- **Reset to defaults**: move aside `~/.config/docket/` and re-run
+  `docket --setup`.
 
 ---
 
 ## Contributing
 
-glint is pre-launch v0.2; the architecture is settling but the surface
+docket is pre-launch v0.2; the architecture is settling but the surface
 is largely stable. If you want to dig in:
 
 1. `make test` — runs the full suite (~460 tests). Should pass clean
@@ -565,10 +592,10 @@ Issues and PRs welcome.
 
 ## License
 
-glint is licensed under **GNU GPL v3 or later** — see
+docket is licensed under **GNU GPL v3 or later** — see
 [LICENSE](LICENSE) for the full text. In short: you're free to use,
-modify, and redistribute glint, but any modified version you
-distribute must also be GPL-licensed and must keep glint's
+modify, and redistribute docket, but any modified version you
+distribute must also be GPL-licensed and must keep docket's
 copyright notices intact. The author retains the right to offer
 the project under additional licenses (see
 [CONTRIBUTING.md](CONTRIBUTING.md) for the contributor sign-off +

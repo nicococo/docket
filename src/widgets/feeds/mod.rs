@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 ntrospect0
+// Copyright (C) 2026 nicococo
 
 //! Feeds widget — tabbed single-source RSS reader.
 //!
@@ -52,11 +53,11 @@ use crate::ui::{apply_title_row, MetadataEmphasis};
 use super::{AppContext, EventResult, Widget, WidgetCtx};
 
 use image::HeroImageStore;
-use provider::{FeedArticle, FeedDefinition, FeedsRssProvider};
+use provider::{dedup_by_url, FeedArticle, FeedDefinition, FeedsRssProvider, FetchOutcome};
 
 pub const KIND: &str = "feeds";
 
-/// Loaded from `~/.config/glint/feeds.toml` (or
+/// Loaded from `~/.config/docket/feeds.toml` (or
 /// `feeds@<instance>.toml`).
 ///
 /// The catalogue lives directly inside this file as `[[feeds]]`
@@ -548,15 +549,15 @@ impl FeedsWidget {
         let cache = self.cache.clone();
         tokio::spawn(async move {
             let provider = FeedsRssProvider::new(feeds);
-            let articles = provider.fetch().await;
-            // Persist for next launch.
+            let outcome = provider.fetch().await;
+
+            let mut st = state.lock().expect("feeds state poisoned");
+            let articles = merge_with_stale_topics(outcome, &st.articles);
+
             if !articles.is_empty() {
                 if let Err(err) = cache.store(CACHE_KEY_ARTICLES, &articles) {
                     tracing::warn!(error = %err, "feeds: articles cache store failed");
                 }
-            }
-            let mut st = state.lock().expect("feeds state poisoned");
-            if !articles.is_empty() {
                 // Clamp selection so the new list doesn't leave the
                 // cursor pointing past the end.
                 let max = articles.len().saturating_sub(1);
@@ -1377,6 +1378,31 @@ impl FeedsWidget {
 }
 
 const CACHE_KEY_ARTICLES: &str = "articles";
+
+/// Merge a fetch round's fresh articles with the previous in-memory list,
+/// carrying forward stale articles for any topic whose feed failed this
+/// round rather than dropping them. Without this, a single transient
+/// failure (Reddit's RSS endpoint rate-limits aggressively, e.g. HTTP 429,
+/// even at typical poll intervals) would wipe that topic's articles from
+/// both live state and the on-disk cache on the very next otherwise-
+/// successful refresh, since the old code replaced the whole list
+/// unconditionally whenever *any* feed in the instance still returned data.
+fn merge_with_stale_topics(
+    outcome: FetchOutcome,
+    previous: &[Arc<FeedArticle>],
+) -> Vec<FeedArticle> {
+    let mut articles = outcome.articles;
+    if !outcome.failed_topics.is_empty() {
+        let stale = previous
+            .iter()
+            .filter(|a| outcome.failed_topics.contains(&a.topic))
+            .map(|a| (**a).clone());
+        articles.extend(stale);
+        dedup_by_url(&mut articles);
+        articles.sort_by_key(|a| std::cmp::Reverse(a.published));
+    }
+    articles
+}
 
 fn summary_key(url: &str, length: SummaryLength) -> String {
     format!("{}-{}", url, length.cache_suffix())

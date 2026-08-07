@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 ntrospect0
+// Copyright (C) 2026 nicococo
 
 //! Starter templates surfaced by the feeds widget's `--setup` wizard.
 //!
@@ -16,7 +17,7 @@
 //! Adding a new built-in template: drop a new TOML in
 //! `src/widgets/feeds/templates/`, add a matching `include_str!` line
 //! to [`BUILTIN_TEMPLATES`] below, and ship a release. A future phase
-//! will additionally scan `~/.config/glint/templates/` so power users
+//! will additionally scan `~/.config/docket/templates/` so power users
 //! can add custom templates without recompiling.
 
 use serde::Deserialize;

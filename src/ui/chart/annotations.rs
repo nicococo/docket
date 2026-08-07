@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 ntrospect0
+// Copyright (C) 2026 nicococo
 
 //! Calendar-aware helpers for chart x-axis labels. Short month names,
 //! leap-year predicate, the rolling 12-month label generator the long-

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 ntrospect0
+// Copyright (C) 2026 nicococo
 
 //! Persistence for in-flight wizard state.
 //!
@@ -30,7 +31,7 @@ pub const STATE_FILENAME: &str = ".wizard_state.toml";
 /// any state file they read and discard the file on mismatch.
 pub const STATE_VERSION: u32 = 1;
 
-/// Absolute path to the state file under `$XDG_CONFIG_HOME/glint/`.
+/// Absolute path to the state file under `$XDG_CONFIG_HOME/docket/`.
 pub fn state_path() -> Result<PathBuf> {
     Ok(config::config_dir()?.join(STATE_FILENAME))
 }
@@ -126,7 +127,7 @@ mod tests {
     fn with_xdg(test_name: &str) -> (PathBuf, std::sync::MutexGuard<'static, ()>) {
         let guard = XDG_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let dir = std::env::temp_dir().join(format!(
-            "glint-wizard-storage-{}-{}-{}",
+            "docket-wizard-storage-{}-{}-{}",
             test_name,
             std::process::id(),
             std::time::SystemTime::now()
@@ -174,8 +175,8 @@ mod tests {
     #[ignore = "mutates the process-wide XDG_CONFIG_HOME — opt in with --ignored"]
     fn load_returns_none_on_version_mismatch() {
         let (dir, _guard) = with_xdg("version_mismatch");
-        std::fs::create_dir_all(dir.join("glint")).unwrap();
-        let path = dir.join("glint").join(STATE_FILENAME);
+        std::fs::create_dir_all(dir.join("docket")).unwrap();
+        let path = dir.join("docket").join(STATE_FILENAME);
         std::fs::write(&path, "version = 9999\n").unwrap();
         assert!(load().unwrap().is_none());
     }

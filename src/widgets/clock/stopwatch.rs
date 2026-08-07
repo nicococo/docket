@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 ntrospect0
+// Copyright (C) 2026 nicococo
 
 //! Stopwatch mode for the clock widget: the closed-form elapsed
 //! counter, the lap list, the render + key handlers for the

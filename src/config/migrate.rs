@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 ntrospect0
+// Copyright (C) 2026 nicococo
 
 //! Opt-in, non-destructive migration of a pre-profiles flat config into
 //! `profiles/default/`.
@@ -12,7 +13,7 @@
 //!
 //! - a flat layout is read **in place** for the default profile until you opt
 //!   in (see [`crate::config::config_dir`]), and
-//! - `glint --migrate-profiles` **copies** the flat per-profile files into
+//! - `docket --migrate-profiles` **copies** the flat per-profile files into
 //!   `profiles/default/` and **leaves the originals**, so an older flat binary
 //!   keeps working. Remove the root `*.toml` yourself once you've fully
 //!   switched.
@@ -24,7 +25,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 
-use super::{glint_root, DEFAULT_PROFILE};
+use super::{docket_root, DEFAULT_PROFILE};
 
 const STAGING_DIR: &str = ".default.partial";
 
@@ -43,10 +44,10 @@ fn is_global_client_file(name: &str) -> bool {
 /// directory and the number of top-level items copied. Non-destructive: the
 /// flat originals are left in place.
 pub fn migrate_to_profiles() -> Result<(PathBuf, usize)> {
-    migrate_to_profiles_at(&glint_root()?)
+    migrate_to_profiles_at(&docket_root()?)
 }
 
-/// Pure core, parameterized on the glint root for testability.
+/// Pure core, parameterized on the docket root for testability.
 pub(crate) fn migrate_to_profiles_at(root: &Path) -> Result<(PathBuf, usize)> {
     if !root.join("config.toml").exists() {
         anyhow::bail!("no flat config.toml at {} to migrate", root.display());
@@ -87,7 +88,7 @@ pub(crate) fn migrate_to_profiles_at(root: &Path) -> Result<(PathBuf, usize)> {
 /// `profiles/default/` (they're the same files) and with the user's explicit
 /// consent — it removes files an older flat binary would otherwise read.
 pub fn remove_flat_originals() -> Result<usize> {
-    remove_flat_originals_at(&glint_root()?)
+    remove_flat_originals_at(&docket_root()?)
 }
 
 pub(crate) fn remove_flat_originals_at(root: &Path) -> Result<usize> {
@@ -224,7 +225,7 @@ mod tests {
 
     fn temp_root(tag: &str) -> PathBuf {
         let mut p = std::env::temp_dir();
-        p.push(format!("glint-migrate-test-{tag}-{}", std::process::id()));
+        p.push(format!("docket-migrate-test-{tag}-{}", std::process::id()));
         let _ = fs::remove_dir_all(&p);
         fs::create_dir_all(&p).unwrap();
         p

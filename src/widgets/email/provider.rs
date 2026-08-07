@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 ntrospect0
+// Copyright (C) 2026 nicococo
 
 //! Common types shared by both Email providers (Gmail + Outlook). The widget
 //! talks to providers exclusively through this trait so adding a third
@@ -38,6 +39,20 @@ pub struct EmailMessage {
     /// Gmail: built from the id. Outlook: comes from Graph's `webLink`. IMAP
     /// (future) will be `None` — there's no canonical web URL for raw IMAP.
     pub web_url: Option<String>,
+    /// Which configured account this came from — only meaningful in
+    /// multi-account IMAP mode (`[[accounts]]` in email.toml), where it
+    /// becomes the tab-filter key alongside `folder`. Providers themselves
+    /// leave this empty; the widget stamps it in after `fetch_recent`
+    /// returns, since only the widget knows which account label a given
+    /// fetch belongs to.
+    #[serde(default)]
+    pub account: String,
+    /// The IMAP UID for this message, when it came from the IMAP
+    /// provider — needed to write the `\Seen` flag back to the server
+    /// via [`EmailProvider::set_seen`]. `None` for Gmail/Outlook OAuth
+    /// messages, which don't support server-side writes in docket yet.
+    #[serde(default)]
+    pub imap_uid: Option<u32>,
 }
 
 /// One folder / label in the user's mailbox. `id` is what the provider
@@ -82,4 +97,29 @@ pub trait EmailProvider: Send + Sync {
     /// isn't safely expressible here.
     #[allow(dead_code)]
     fn account_address(&self) -> Option<&str>;
+
+    /// Write the message's read/unread state back to the server, so
+    /// pressing `u` in docket is reflected in the real mailbox (and other
+    /// clients) rather than being a purely local overlay. `uid` is
+    /// [`EmailMessage::imap_uid`]; `seen` is the desired new state.
+    ///
+    /// Default: unsupported. Only the IMAP provider currently overrides
+    /// this — Gmail/Outlook OAuth would need their own API calls
+    /// (`users.messages.modify` / Graph's `PATCH .../messages/{id}`)
+    /// which aren't wired up.
+    async fn set_seen(&self, folder: &str, uid: u32, seen: bool) -> Result<()> {
+        let _ = (folder, uid, seen);
+        anyhow::bail!("server-side read/unread not supported by this provider")
+    }
+
+    /// Move a message to the account's Trash — a *recoverable* delete
+    /// (Gmail and most providers auto-purge Trash ~30 days later, and
+    /// the message can be manually restored from there any time before
+    /// that). `uid` is [`EmailMessage::imap_uid`].
+    ///
+    /// Default: unsupported, same rationale as [`Self::set_seen`].
+    async fn move_to_trash(&self, folder: &str, uid: u32) -> Result<()> {
+        let _ = (folder, uid);
+        anyhow::bail!("delete-to-trash not supported by this provider")
+    }
 }

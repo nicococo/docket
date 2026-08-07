@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 ntrospect0
+// Copyright (C) 2026 nicococo
 
 pub mod big_digits;
 pub mod chart;
@@ -754,7 +755,7 @@ mod tests {
 
         let config = crate::config::Config::default();
         let theme = Arc::new(crate::theme::Theme::builtin_defaults());
-        let cache = crate::cache::Cache::at(std::env::temp_dir().join("glint-ui-zoom-test"));
+        let cache = crate::cache::Cache::at(std::env::temp_dir().join("docket-ui-zoom-test"));
         let mut manager = crate::widgets::WidgetManager::new();
         // Register the clock widget so display_name() is available.
         let widget = crate::widgets::registry::build_for("clock", "main", |instance| {
@@ -1920,7 +1921,7 @@ fn build_help_sections(
     }
 
     // Append a "Color schemes" section that lists every named scheme in
-    // ~/.config/glint/colorschemes.toml so the user doesn't have to
+    // ~/.config/docket/colorschemes.toml so the user doesn't have to
     // remember them. Marks the active one with `●`. Read errors and the
     // missing-file case both yield an empty section (skipped silently).
     if let Ok(file) = crate::theme::load_schemes_file() {

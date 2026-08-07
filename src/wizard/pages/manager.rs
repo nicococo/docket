@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 ntrospect0
+// Copyright (C) 2026 nicococo
 
-//! Profile Manager — the wizard's front page for a bare `glint --setup`.
+//! Profile Manager — the wizard's front page for a bare `docket --setup`.
 //!
 //! Lists the profiles and manages them interactively: pick one to configure,
 //! or create / clone / rename / delete. The mutations call the same tested

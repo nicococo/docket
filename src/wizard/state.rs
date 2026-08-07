@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 ntrospect0
+// Copyright (C) 2026 nicococo
 
 //! In-flight wizard state. Buffered across pages until the user clicks
 //! `Complete and Save` on the confirmation page, at which point we write
@@ -7,7 +8,7 @@
 //!
 //! The state is also serialised to disk after every page advance so a
 //! mid-flow `Ctrl+C` can be resumed via the welcome page's `[Resume]`
-//! option on the next `glint --setup`. See [`crate::wizard::storage`].
+//! option on the next `docket --setup`. See [`crate::wizard::storage`].
 
 #![allow(dead_code)] // consumed once the TUI driver lands.
 
@@ -116,7 +117,7 @@ pub enum AuthStatus {
     /// token to credentials/. The `provider` name is the key.
     Authorized,
     /// User picked `Skip — set up later`. The confirmation page surfaces
-    /// the command to run (`glint --auth <provider>`).
+    /// the command to run (`docket --auth <provider>`).
     Deferred,
     /// Flow ran but failed. The user can retry; if they Skip after a
     /// failure we record the last error message for the confirmation
@@ -126,7 +127,7 @@ pub enum AuthStatus {
 
 /// The full wizard buffer — everything the user has answered up to (but
 /// not including) the Complete-and-Save step. Serialised to disk as
-/// `~/.config/glint/.wizard_state.toml`.
+/// `~/.config/docket/.wizard_state.toml`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WizardState {
     /// Schema version of this state file. Bump when we make incompatible

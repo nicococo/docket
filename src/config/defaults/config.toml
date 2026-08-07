@@ -5,7 +5,7 @@ version = 1
 # Ships with "default", "chalktone", "gruvbox", "tokyonight",
 # "rosepine", "nord", "bluloco", "onedark", and "miasma". An
 # unrecognized name falls
-# back to glint's built-in palette.
+# back to docket's built-in palette.
 theme = "default"
 command_key = ":"
 refresh_all_on_focus = true
@@ -19,7 +19,7 @@ log_level = "info"
 #                widget honors the choice without per-widget config.
 mouse_scroll = "natural"
 
-# Bottom-of-screen status bar (glint version, ticking clock, scheme name,
+# Bottom-of-screen status bar (docket version, ticking clock, scheme name,
 # quick hints). Set false to reclaim that row for the widget grid; `?`
 # still surfaces the full help overlay either way.
 show_status_bar = true

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 ntrospect0
+// Copyright (C) 2026 nicococo
 
 //! Microsoft Graph (Outlook / Microsoft 365) email provider. Mirrors the
 //! calendar Outlook provider's HTTP+OAuth shape — same token refresh path,
@@ -169,7 +170,7 @@ impl OutlookEmailProvider {
         Ok(index)
     }
 
-    /// Resolve a user-supplied folder name to the value glint should
+    /// Resolve a user-supplied folder name to the value docket should
     /// send to Graph. Well-known names (`inbox`, `sentitems`, …) pass
     /// through; everything else is looked up in the folder index by
     /// case-insensitive display name. Returns `None` when the index
@@ -508,6 +509,8 @@ impl RawMessage {
             server_unread: !self.is_read,
             plain_body,
             web_url: self.web_link,
+            account: String::new(),
+            imap_uid: None,
         })
     }
 }

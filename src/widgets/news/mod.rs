@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 ntrospect0
+// Copyright (C) 2026 nicococo
 
 pub mod catalogue;
 pub mod provider;
@@ -1128,7 +1129,7 @@ impl Widget for NewsWidget {
 
         if articles.is_empty() {
             let msg = if !self.feeds_configured {
-                "No feeds configured. Edit ~/.config/glint/news.toml to add [[feeds]] entries."
+                "No feeds configured. Edit ~/.config/docket/news.toml to add [[feeds]] entries."
             } else if inflight {
                 "Loading news…"
             } else {
@@ -1668,14 +1669,7 @@ async fn fetch_and_extract_body(url: &str) -> Result<String> {
         // Same browser-shaped headers we send for RSS — article pages
         // are at least as bot-gated as feed endpoints. Per-request so
         // these don't bleed into other widgets' HTTP traffic.
-        .header(
-            reqwest::header::USER_AGENT,
-            concat!(
-                "Mozilla/5.0 (compatible; glint-tui/",
-                env!("CARGO_PKG_VERSION"),
-                "; +https://github.com/ntrospect0/glint) Gecko/20100101 Firefox/120.0",
-            ),
-        )
+        .header(reqwest::header::USER_AGENT, crate::http::BROWSER_USER_AGENT)
         .header(
             reqwest::header::ACCEPT,
             "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
@@ -2132,7 +2126,7 @@ pub fn wizard_descriptor() -> crate::wizard::descriptor::WizardDescriptor {
                 key: "summarize_with_llm",
                 label: "Summarise expanded articles with LLM",
                 help: "Requires the LLM provider you picked on the Global page \
-                       to have its API key set. When off, glint stays fully \
+                       to have its API key set. When off, docket stays fully \
                        offline and shows raw RSS excerpts.",
                 required: false,
                 kind: WizardFieldKind::Bool { default: true },

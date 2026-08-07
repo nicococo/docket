@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 ntrospect0
+// Copyright (C) 2026 nicococo
 
 //! Confirmation page. Summary of what's about to be written + the
 //! "Complete and Save" trigger. Points the user at the relevant TOMLs for
@@ -58,14 +59,14 @@ pub fn render(frame: &mut Frame, area: Rect, app: &WizardApp) {
         style::section_header(),
     )));
     lines.push(Line::from(""));
-    lines.push(Line::from("  ~/.config/glint/config.toml"));
+    lines.push(Line::from("  ~/.config/docket/config.toml"));
     for assignment in &app.state.assignments {
         let stem = if assignment.instance == "main" {
             assignment.kind.clone()
         } else {
             format!("{}@{}", assignment.kind, assignment.instance)
         };
-        lines.push(Line::from(format!("  ~/.config/glint/{stem}.toml")));
+        lines.push(Line::from(format!("  ~/.config/docket/{stem}.toml")));
     }
     let picked_provider_name = match app.state.global_get("llm_provider") {
         Some(crate::wizard::descriptor::WizardValue::Choice(s)) => s.clone(),
@@ -75,7 +76,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &WizardApp) {
             .unwrap_or_default(),
     };
     let picked_provider = crate::llm::find_provider(&picked_provider_name);
-    lines.push(Line::from("  ~/.config/glint/llm.toml"));
+    lines.push(Line::from("  ~/.config/docket/llm.toml"));
     if let Some(def) = picked_provider {
         let key_state = format!("llm_api_key__{}", def.name);
         let typed_key = match app.state.global_get(&key_state) {
@@ -84,7 +85,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &WizardApp) {
         };
         if !typed_key.is_empty() {
             lines.push(Line::from(format!(
-                "  ~/.config/glint/credentials/{}",
+                "  ~/.config/docket/credentials/{}",
                 def.credentials_filename
             )));
         }
@@ -165,13 +166,13 @@ pub fn render(frame: &mut Frame, area: Rect, app: &WizardApp) {
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(
         "Tip: every <widget>.toml is plain TOML — open it in your editor, save, and \
-         the next time glint launches (or :reload at runtime) the change takes effect.",
+         the next time docket launches (or :reload at runtime) the change takes effect.",
         style::blurb(),
     )));
     lines.push(Line::from(""));
     lines.push(Line::from(vec![
         Span::raw("  "),
-        Span::styled("[ Save & Start Glint ]", style::page_button_focused()),
+        Span::styled("[ Save & Start Docket ]", style::page_button_focused()),
     ]));
     lines.push(Line::from(Span::styled(
         "    Enter activates · Esc to go back · Ctrl-C to bail (state is preserved).".to_string(),

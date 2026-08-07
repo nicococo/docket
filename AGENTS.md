@@ -1,8 +1,8 @@
-# glint — Terminal Dashboard
+# docket — Terminal Dashboard
 
 ## What This Is
 
-glint is a keyboard-driven terminal dashboard (Rust + Ratatui) that
+docket is a keyboard-driven terminal dashboard (Rust + Ratatui) that
 displays clock, weather, calendar, news, email, stocks, forex (with
 crypto), system resources, an image gallery, and a vim-flavoured notes
 pad in a configurable grid layout. Cells can be single widgets or
@@ -39,7 +39,7 @@ src/
 ├── http.rs                  # Process-wide shared reqwest::Client (`shared()`)
 ├── clipboard.rs             # OSC-52 clipboard write helper
 ├── geolocation.rs           # IP / name-based location lookup (weather, clock)
-├── runtime_state.rs         # Per-process state persisted to ~/.config/glint/.runtime_state.toml
+├── runtime_state.rs         # Per-process state persisted to ~/.config/docket/.runtime_state.toml
 ├── cache/
 │   └── mod.rs               # Persistent on-disk cache (JSON + bytes). See Cache Layer.
 ├── config/
@@ -233,7 +233,7 @@ per-widget TOML flag (`summarize_with_llm = true`).
 
 ## Config System
 
-All config lives at `~/.config/glint/`:
+All config lives at `~/.config/docket/`:
 
 ```
 config.toml           — [global], [layout] grid, [[layout.cells]] placements
@@ -310,7 +310,7 @@ ctx.cache.invalidate(key) -> Result<()>   // clears both .json and .bin variants
 `ctx.cache` is already scoped to the widget's `(kind, instance)`. Pick
 any flat key namespace per widget (`articles`, `quotes-1d`, `messages`,
 `thumb-<hash>`). Files land at
-`~/.cache/glint/<kind>/<instance>/<key>.{json,bin}`. Writes are atomic
+`~/.cache/docket/<kind>/<instance>/<key>.{json,bin}`. Writes are atomic
 (temp + rename); a crash mid-write can't corrupt an existing entry.
 
 On startup the app runs `Cache::sweep_older_than(30d)` to drop orphan
@@ -345,7 +345,7 @@ widgets don't reinvent them.
 
 ### Shared HTTP client (src/http.rs)
 
-`crate::http::shared()` returns a process-wide `reqwest::Client` (glint
+`crate::http::shared()` returns a process-wide `reqwest::Client` (docket
 UA, 30s timeout, no cookies). Eleven call sites use it — news, weather,
 calendar (Google + Outlook), email (Gmail + Outlook), LLM providers,
 geolocation, OAuth flows. Per-request timeout overrides via
@@ -379,7 +379,7 @@ collector.
   text inherit from the terminal theme. Each colour scheme in
   `colorschemes.toml` overrides those defaults; per-widget `[colors]`
   blocks further override per pane.
-- **Cache**: persistent JSON + bytes under `~/.cache/glint/`; widgets
+- **Cache**: persistent JSON + bytes under `~/.cache/docket/`; widgets
   seed on construction, refresh in background, persist on success.
 - **Command routing**: focused widget gets priority; `:cmd` falls
   through to widgets in registration order. `widget_id:command` for
@@ -403,7 +403,7 @@ collector.
 - **Calendar**: merged multi-calendar timeline with per-calendar colour
   coding.
 - **Notes**: one `.md` file per note under
-  `~/.config/glint/notes/<instance>/`; user can hand-edit, back up via
+  `~/.config/docket/notes/<instance>/`; user can hand-edit, back up via
   git, or move between machines.
 - **Forex**: USD-pivot for all cross pairs (`R(a, b) = R(a, USD) / R(b, USD)`).
   Handles fiat-fiat, fiat-crypto, crypto-fiat, crypto-crypto uniformly.
@@ -413,7 +413,7 @@ collector.
 ```sh
 cargo build --features widgets-all          # debug build, all widgets
 cargo run                                    # debug binary with default config
-cargo run -- --init                          # seed ~/.config/glint/
+cargo run -- --init                          # seed ~/.config/docket/
 cargo run -- --setup                         # interactive wizard
 cargo run -- --auth <provider>               # OAuth / credential flow
 cargo test --features widgets-all            # full suite (~465 tests)
@@ -431,7 +431,7 @@ make install PREFIX=~/.local                 # build + copy to ~/.local/bin
 - Widget rendering is synchronous (Ratatui requirement) — data
   fetching is async and writes results into shared state.
 - Prefer `tracing` over `println!` / `eprintln!` — alt-screen mode
-  would corrupt the TUI; tracing writes to `~/.config/glint/glint.log`.
+  would corrupt the TUI; tracing writes to `~/.config/docket/docket.log`.
 - TOML config structs derive `serde::Deserialize` with `#[serde(default)]`
   for optional fields.
 - Test data providers with mock HTTP responses (`wiremock` is in

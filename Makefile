@@ -1,14 +1,14 @@
-# glint — terminal dashboard for stocks, calendar, news, and beyond.
+# docket — terminal dashboard for stocks, calendar, news, and beyond.
 #
-# Build + install the `glint` binary. Override PREFIX to redirect the
+# Build + install the `docket` binary. Override PREFIX to redirect the
 # install destination — `/usr/local/bin` by default (system-wide,
 # typically needs sudo), or `~/.local/bin` for a no-sudo per-user install.
 #
 # Common recipes:
-#   make build         # debug build at target/debug/glint
-#   make release       # release build at target/release/glint
-#   make install       # build + copy to $(PREFIX)/bin/glint
-#   make uninstall     # remove $(PREFIX)/bin/glint
+#   make build         # debug build at target/debug/docket
+#   make release       # release build at target/release/docket
+#   make install       # build + copy to $(PREFIX)/bin/docket
+#   make uninstall     # remove $(PREFIX)/bin/docket
 #   make clean         # cargo clean
 #   make test          # run the test suite
 #
@@ -20,7 +20,7 @@
 
 PREFIX ?= /usr/local
 BINDIR := $(PREFIX)/bin
-BIN := glint
+BIN := docket
 TARGET := target/release/$(BIN)
 SRC := $(shell find src -type f -name '*.rs') Cargo.toml Cargo.lock
 
@@ -51,7 +51,7 @@ install: release
 	@echo "If $(BINDIR) isn't on your \$$PATH yet, add it:"
 	@echo "  echo 'export PATH=\"$(BINDIR):\$$PATH\"' >> ~/.zshrc   # or ~/.bashrc"
 	@echo
-	@echo "Then run \`glint\` to launch. First run drops you into the setup wizard."
+	@echo "Then run \`docket\` to launch. First run drops you into the setup wizard."
 
 .PHONY: uninstall
 uninstall:

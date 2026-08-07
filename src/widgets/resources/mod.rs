@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 ntrospect0
+// Copyright (C) 2026 nicococo
 
 //! Resources widget — htop-style CPU / memory / process view.
 //! Backed by `sysinfo` (cross-platform; no FFI of our own).
@@ -70,7 +71,7 @@ use super::{AppContext, EventResult, Widget};
 /// and the header/CPU-bar/memory lines are accounted for.
 const SPARKLINE_MAX_ROWS: u16 = 10;
 
-/// Loaded from `~/.config/glint/resources.toml`.
+/// Loaded from `~/.config/docket/resources.toml`.
 #[derive(Debug, Clone, Deserialize)]
 pub struct ResourcesConfig {
     /// Background refresh cadence — used when the widget is *not* the

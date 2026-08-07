@@ -12,17 +12,17 @@ clone is config-only, and OAuth client registrations are global-only.
 
 ## Motivation
 
-One person runs glint in several contexts — a focused **work** dashboard, a
+One person runs docket in several contexts — a focused **work** dashboard, a
 stripped-down **travel** view, a **personal** layout — each wanting its own
 layout, widget set, theme, and (post multi-account) its own calendar/mail
-accounts. Today there is one config tree at `~/.config/glint/`, so switching
+accounts. Today there is one config tree at `~/.config/docket/`, so switching
 contexts means hand-editing or keeping copies.
 
 **Profiles** let you launch a named, fully-configured view:
 
 ```sh
-glint --profile work        # or: glint -p work
-glint                       # the "default" profile
+docket --profile work        # or: docket -p work
+docket                       # the "default" profile
 ```
 
 A profile is an isolated config tree. Resources that are *libraries* or
@@ -33,15 +33,15 @@ registrations — are shared globally so you define/register them once.
 
 Two tiers on one hierarchy:
 
-- **Global layer** (`~/.config/glint/`, the root) — app-level resources
+- **Global layer** (`~/.config/docket/`, the root) — app-level resources
   shared across every profile: the colorscheme *definitions* and the OAuth
   *client registrations* (the Azure / Google app, not any account).
-- **Per-profile layer** (`~/.config/glint/profiles/<name>/`) — persona data:
+- **Per-profile layer** (`~/.config/docket/profiles/<name>/`) — persona data:
   layout, widget configs, the *selected* theme, account tokens, CalDAV +
   IMAP creds, LLM API keys, notes, runtime/wizard state, cache, logs.
 
 ```
-~/.config/glint/                         ← GLOBAL layer (root)
+~/.config/docket/                         ← GLOBAL layer (root)
 ├── colorschemes.toml                    ← theme library (shared, layerable)
 ├── credentials/                         ← global, app-level (0700)
 │   ├── google_oauth_client.toml         ← app registration (shared; contains client_secret)
@@ -58,13 +58,13 @@ Two tiers on one hierarchy:
     │   │   ├── caldav.toml   imap.toml
     │   │   ├── anthropic_key.toml   openai_key.toml     ← LLM keys are per-profile
     │   ├── notes/<instance>/<id>.md
-    │   ├── glint.log
+    │   ├── docket.log
     │   ├── .runtime_state.toml
     │   └── .wizard_state.toml
     └── work/  travel/  …                ← same shape as default/
 ```
 
-Cache lives under `$XDG_CACHE_HOME/glint/profiles/<name>/`.
+Cache lives under `$XDG_CACHE_HOME/docket/profiles/<name>/`.
 
 ### Boundary table
 
@@ -99,14 +99,14 @@ cut.
 ### CLI surface
 
 - `--profile <NAME>` / `-p <NAME>` — select the profile (`-p` is free today).
-  Precedence: **`--profile` > `GLINT_PROFILE` env > `"default"`**.
+  Precedence: **`--profile` > `DOCKET_PROFILE` env > `"default"`**.
 - `--list-profiles` — print profiles under `profiles/`, marking default and
   active, then exit.
 - Global to every mode — composes with `--setup`, `--auth`, `--init`,
   `--clear-cache`, and launch. The profile is resolved and set **first**,
   before anything reads or writes config (see *Startup ordering*).
 - **Missing profile** on launch/auth: error, don't auto-create —
-  `profile 'work' not found. Create it with: glint --profile work --setup`.
+  `profile 'work' not found. Create it with: docket --profile work --setup`.
 - **Name rules:** `^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`; reject path separators,
   leading dash/dot. `default` is a normal, always-present, undeletable name.
   **Case-insensitive-filesystem guard:** macOS APFS/HFS+ fold case, so a
@@ -124,14 +124,14 @@ cut.
   deleted**.
 - First run (no config) seeds `profiles/default/` + the global layer, then
   the wizard for `default` — same UX, one dir deeper.
-- `glint --profile X --setup` for non-existent `X` **creates** it (seed
+- `docket --profile X --setup` for non-existent `X` **creates** it (seed
   defaults) and edits it.
 
 ### Setup wizard → Profile Manager
 
-- **Bare `glint --setup`** → the **Profile Manager**: lists profiles (default
+- **Bare `docket --setup`** → the **Profile Manager**: lists profiles (default
   marked) and offers **Edit / Create / Clone / Rename / Delete**.
-- **`glint --profile X --setup`** → edits `X` directly (creating it first if
+- **`docket --profile X --setup`** → edits `X` directly (creating it first if
   absent).
 - **Clone = config-only.** Cloning copies layout/widget/theme config but
   **not** credentials/tokens — the clone re-authorizes per provider. (Copying
@@ -151,7 +151,7 @@ cut.
 
 ### Authorize, per profile
 
-`glint --profile work --auth microsoft:exchange` writes the token to
+`docket --profile work --auth microsoft:exchange` writes the token to
 `profiles/work/credentials/microsoft_oauth_token.exchange.toml`, read through
 the **global** `microsoft_oauth_client.toml`. Multi-account, nested under a
 profile.
@@ -164,7 +164,7 @@ When the active profile ≠ `default`, surface its name in the running TUI
 
 ### Simultaneous profiles & lifecycle safety
 
-- Running `glint -p work` and `glint -p travel` in two terminals is
+- Running `docket -p work` and `docket -p travel` in two terminals is
   conflict-free for *launched* profiles: each resolves its profile once and
   all mutable per-profile state is isolated.
 - **The global layer is shared, so concurrent global writes must be atomic**
@@ -193,7 +193,7 @@ falls back to the flat root when `profiles/default/` doesn't exist but a root
 untouched, and a profiles binary can share the directory with an older flat
 binary safely — neither moves anything.
 
-**Opt-in migration — `glint --migrate-profiles`:**
+**Opt-in migration — `docket --migrate-profiles`:**
 
 1. Guard: bail if there's no root `config.toml`, or if `profiles/default/`
    already exists (nothing to do).
@@ -201,7 +201,7 @@ binary safely — neither moves anything.
    `profiles/.default.partial/`:
    - Per-profile files: `config.toml`, all root `*.toml` **except
      `colorschemes.toml`**, `.runtime_state.toml`, `.wizard_state.toml`,
-     `glint.log`, `notes/`.
+     `docket.log`, `notes/`.
    - **credentials** with a **deny-list**: copy *everything* under
      `credentials/` **except `*_oauth_client.toml`**. `std::fs::copy`
      preserves the 0600 file mode; the new `credentials/` is created 0700.
@@ -223,7 +223,7 @@ binary safely — neither moves anything.
 - **Composes with multi-account.** The 0.3.0 legacy-token read fallback is
   copied into `profiles/default/credentials/` and keeps resolving there.
 - `--config` mode is unaffected (explicit single-file mode).
-- **Notes:** `~/.glint/notes` adoption into the profile is handled at the
+- **Notes:** `~/.docket/notes` adoption into the profile is handled at the
   notes resolver (see below), independent of this copy.
 
 ## Technical design
@@ -233,8 +233,8 @@ binary safely — neither moves anything.
 Split `config::config_dir()` (`src/config/mod.rs:99`):
 
 ```rust
-pub fn glint_root() -> Result<PathBuf>;   // $XDG_CONFIG_HOME/glint | ~/.config/glint  (global layer)
-pub fn config_dir() -> Result<PathBuf>;   // glint_root()?/profiles/<active>           (per-profile)
+pub fn docket_root() -> Result<PathBuf>;   // $XDG_CONFIG_HOME/docket | ~/.config/docket  (global layer)
+pub fn config_dir() -> Result<PathBuf>;   // docket_root()?/profiles/<active>           (per-profile)
 ```
 
 `config_dir()` has one **legacy flat-layout fallback**: for the *default*
@@ -281,14 +281,14 @@ resolves under the active profile (the "no churn" claim is *true* but must be
    name.
 2. `config::set_active_profile(name)`.
 3. Run migration if the flat layout is present (acquire lock, stage, publish).
-4. `init_tracing()` → now `profiles/<name>/glint.log`.
+4. `init_tracing()` → now `profiles/<name>/docket.log`.
 5. Dispatch.
 
 ### Credentials tiering (no fallback)
 
 ```rust
 pub fn dir() -> Result<PathBuf>;          // profile creds:  config_dir()?/credentials   (0700)
-pub fn global_dir() -> Result<PathBuf>;   // client regs:    glint_root()?/credentials    (0700)
+pub fn global_dir() -> Result<PathBuf>;   // client regs:    docket_root()?/credentials    (0700)
 ```
 
 - **Client files** (`*_oauth_client.toml`): `global_dir()` **only**.
@@ -322,7 +322,7 @@ names.
 
 ### Colorschemes layering
 
-Theme load: parse `glint_root()/colorschemes.toml` → overlay
+Theme load: parse `docket_root()/colorschemes.toml` → overlay
 `config_dir()/colorschemes.toml` if present (insert/override by name) →
 resolve the selected theme from the merged map. `init_default_config` seeds
 the **root** `colorschemes.toml` (global); a per-profile override is created
@@ -331,7 +331,7 @@ only if the user adds one.
 ### Notes — make profile-aware (fix)
 
 `notes::store::resolve_root` (`store.rs:104`) currently defaults to
-`~/.glint/notes` (tier 2) — outside the config tree and **not** profile-aware,
+`~/.docket/notes` (tier 2) — outside the config tree and **not** profile-aware,
 so all profiles share notes today. Change the default to
 `config_dir()/notes` (now per-profile). A user-set absolute `notes_dir` stays
 honored and is documented as deliberately shared. Migration moves both old
@@ -340,7 +340,7 @@ note locations into `profiles/default/notes/` (above).
 ### Cache scoping + cleanup
 
 `cache::open_default` (`cache/mod.rs:65`) → add the profile segment
-(`…/glint/profiles/<active>/`). `--clear-cache` scopes to the active profile.
+(`…/docket/profiles/<active>/`). `--clear-cache` scopes to the active profile.
 **Profile delete also removes the profile's cache segment** (else large
 payloads orphan forever).
 
@@ -349,7 +349,7 @@ payloads orphan forever).
 `config::watcher::spawn` watches `config_dir()` `NonRecursive`, so it
 auto-targets the profile dir; a `profiles/` sibling causes no noise. Global
 colorscheme edits at the root are **not** live-watched in v1 (relaunch to
-apply); optionally also watch `glint_root()/colorschemes.toml` later.
+apply); optionally also watch `docket_root()/colorschemes.toml` later.
 
 ### Profile management ops (`config::profiles`, new)
 
@@ -367,7 +367,7 @@ apply); optionally also watch `glint_root()/colorschemes.toml` later.
 - `src/main.rs` — `Cli` (`--profile`/`-p`, `--list-profiles`), profile
   resolution + `set_active_profile` before `init_tracing`, dispatch,
   `--config`/`--profile` mutual exclusion.
-- `src/config/mod.rs` — `glint_root`, profile-aware `config_dir`,
+- `src/config/mod.rs` — `docket_root`, profile-aware `config_dir`,
   `ACTIVE_PROFILE` (read-only + panic-on-reset), split `init_default_config`
   (global seed vs profile seed), migration entry.
 - `src/config/migrate.rs` (new) — stage-and-publish migration + lock +
@@ -398,9 +398,9 @@ apply); optionally also watch `glint_root()/colorschemes.toml` later.
 ## Open decisions
 
 1. **Live-reload of global colorscheme edits** — watch
-   `glint_root()/colorschemes.toml` too, or require relaunch (current lean:
+   `docket_root()/colorschemes.toml` too, or require relaunch (current lean:
    relaunch).
-2. **Cache path shape** — `…/glint/profiles/<name>/` vs `…/glint-<name>/`.
+2. **Cache path shape** — `…/docket/profiles/<name>/` vs `…/docket-<name>/`.
 4. **Leftover flat files after migration** *(resolved)* — the CLI
    `--migrate-profiles` stays copy-only (safe for scripting), and the flat
    duplicates are removed only by an **explicit, consented** step: the
@@ -412,12 +412,12 @@ apply); optionally also watch `glint_root()/colorschemes.toml` later.
 
 ## Phased plan
 
-1. **Resolution + migration (platform).** `glint_root`/`config_dir` split,
+1. **Resolution + migration (platform).** `docket_root`/`config_dir` split,
    set-once `ACTIVE_PROFILE`, startup-ordering fix, stage-and-publish
    migration with lock + ambiguity guard. Default works end to end; existing
    installs migrate atomically. Tests assert every downstream resolver lands
    under the active profile.
-2. **CLI + operational scoping.** `--profile`/`-p`, `GLINT_PROFILE`,
+2. **CLI + operational scoping.** `--profile`/`-p`, `DOCKET_PROFILE`,
    `--list-profiles`, missing-profile errors, `--config` exclusivity,
    per-profile cache + log, notes profile-awareness.
 3. **Global layer.** `global_dir`/`client_path` (client global-only) +

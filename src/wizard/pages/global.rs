@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 ntrospect0
+// Copyright (C) 2026 nicococo
 
 //! Global config page. Theme + mouse_scroll + LLM provider are rendered
 //! as vertical option lists (consistent with the per-widget Choice

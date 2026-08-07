@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 ntrospect0
+// Copyright (C) 2026 nicococo
 
 //! Navigation primitives for the calendar widget: web deep-links (Google,
 //! Outlook), the bottom-row hint hit-test, month/week arithmetic, and the

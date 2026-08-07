@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 ntrospect0
+// Copyright (C) 2026 nicococo
 
 //! Single-source RSS provider for the feeds widget. Mirrors
 //! `news::provider::RssProvider` but extracts hero-image URLs from
@@ -49,6 +50,18 @@ pub struct FeedDefinition {
     pub url: String,
 }
 
+/// Result of a [`FeedsRssProvider::fetch`] round: the articles pulled from
+/// every feed that succeeded, plus the topic labels of feeds that failed
+/// this round (rate-limited, network error, bot-blocked, …). Reddit's RSS
+/// endpoint in particular rate-limits aggressively (HTTP 429) even at a
+/// 15-minute poll interval, so transient per-round failures are routine
+/// rather than exceptional — callers use `failed_topics` to keep last-round
+/// articles for those topics instead of silently dropping them.
+pub struct FetchOutcome {
+    pub articles: Vec<FeedArticle>,
+    pub failed_topics: std::collections::HashSet<String>,
+}
+
 pub struct FeedsRssProvider {
     http: reqwest::Client,
     feeds: Vec<FeedDefinition>,
@@ -62,13 +75,14 @@ impl FeedsRssProvider {
         }
     }
 
-    /// Fan-out RSS fetch across every activated feed. Per-feed errors
-    /// are logged + skipped; surviving articles are deduplicated by
-    /// URL and sorted newest-first.
-    pub async fn fetch(&self) -> Vec<FeedArticle> {
+    /// Fan-out RSS fetch across every activated feed. Per-feed errors are
+    /// logged and reported back via `failed_topics` rather than silently
+    /// contributing zero articles — the caller decides whether to keep
+    /// stale data for a topic that failed this round.
+    pub async fn fetch(&self) -> FetchOutcome {
         let futs = self.feeds.iter().map(|feed| async move {
             match self.fetch_feed(feed).await {
-                Ok(chunk) => chunk,
+                Ok(chunk) => (feed.topic.clone(), Some(chunk)),
                 Err(err) => {
                     tracing::warn!(
                         topic = %feed.topic,
@@ -76,33 +90,51 @@ impl FeedsRssProvider {
                         error = format!("{err:#}"),
                         "feeds: rss feed fetch failed"
                     );
-                    Vec::new()
+                    (feed.topic.clone(), None)
                 }
             }
         });
-        let chunks = futures::future::join_all(futs).await;
-        let mut all: Vec<FeedArticle> = chunks.into_iter().flatten().collect();
+        let results = futures::future::join_all(futs).await;
+        let mut all = Vec::new();
+        let mut failed_topics = std::collections::HashSet::new();
+        for (topic, chunk) in results {
+            match chunk {
+                Some(articles) => all.extend(articles),
+                None => {
+                    failed_topics.insert(topic);
+                }
+            }
+        }
         dedup_by_url(&mut all);
         all.sort_by_key(|a| std::cmp::Reverse(a.published));
-        all
+        FetchOutcome {
+            articles: all,
+            failed_topics,
+        }
     }
 
     async fn fetch_feed(&self, feed: &FeedDefinition) -> Result<Vec<FeedArticle>> {
+        // Full browser-shaped header set, mirroring
+        // `news::provider::RssProvider::fetch_feed` — Cloudflare's lighter
+        // bot-detection modes look at the whole request shape, not just
+        // User-Agent, and Reddit specifically penalizes the (now-removed)
+        // self-declaring "compatible; docket-tui; +url" crawler string.
         let bytes = self
             .http
             .get(&feed.url)
-            .header(
-                reqwest::header::USER_AGENT,
-                concat!(
-                    "Mozilla/5.0 (compatible; glint-tui/",
-                    env!("CARGO_PKG_VERSION"),
-                    "; +https://github.com/ntrospect0/glint) Gecko/20100101 Firefox/120.0",
-                ),
-            )
+            .header(reqwest::header::USER_AGENT, crate::http::BROWSER_USER_AGENT)
             .header(
                 reqwest::header::ACCEPT,
-                "application/rss+xml, application/xml;q=0.9, */*;q=0.5",
+                "application/rss+xml, application/atom+xml, application/xml;q=0.9, \
+                 text/xml;q=0.8, application/json;q=0.7, */*;q=0.5",
             )
+            .header(reqwest::header::ACCEPT_LANGUAGE, "en-US,en;q=0.9")
+            .header(reqwest::header::ACCEPT_ENCODING, "gzip, br, deflate")
+            .header("Sec-Fetch-Dest", "document")
+            .header("Sec-Fetch-Mode", "navigate")
+            .header("Sec-Fetch-Site", "none")
+            .header("Sec-Fetch-User", "?1")
+            .header(reqwest::header::UPGRADE_INSECURE_REQUESTS, "1")
             .send()
             .await
             .with_context(|| format!("GET {} failed", feed.url))?
@@ -178,7 +210,7 @@ fn entry_to_article(
     })
 }
 
-fn dedup_by_url(articles: &mut Vec<FeedArticle>) {
+pub(crate) fn dedup_by_url(articles: &mut Vec<FeedArticle>) {
     // Sources commonly syndicate the same article across multiple
     // topic feeds (e.g. an AI piece lands in both World and Tech)
     // sometimes with tracking query strings differing per feed. Strip

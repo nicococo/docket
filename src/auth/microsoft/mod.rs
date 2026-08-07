@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 ntrospect0
+// Copyright (C) 2026 nicococo
 
 pub mod flow;
 pub mod store;
@@ -7,7 +8,7 @@ pub mod store;
 pub use store::OAuthClientConfig;
 
 /// Microsoft Graph scopes. `Calendars.Read` powers the calendar widget;
-/// `Mail.Read` powers the email widget (read-only — glint never marks or
+/// `Mail.Read` powers the email widget (read-only — docket never marks or
 /// modifies server-side state). `User.Read` is required for `/me` to return
 /// the signed-in account address (without it the email widget's title row
 /// stays on "(loading…)"). `offline_access` produces a refresh token.

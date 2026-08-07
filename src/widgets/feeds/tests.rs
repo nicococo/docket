@@ -1,9 +1,65 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 ntrospect0
+// Copyright (C) 2026 nicococo
 
 //! Unit tests for the feeds widget. Split out of `mod.rs` per the repo standard.
 
 use super::*;
+
+fn article(topic: &str, url: &str, minutes_ago: i64) -> FeedArticle {
+    FeedArticle {
+        title: url.to_string(),
+        url: url.to_string(),
+        topic: topic.to_string(),
+        source: "src".to_string(),
+        published: chrono::Utc::now() - chrono::Duration::minutes(minutes_ago),
+        summary: None,
+        hero_image_url: None,
+        authors: vec![],
+    }
+}
+
+/// A topic whose feed failed this round must keep its previous articles
+/// instead of vanishing, while a topic that succeeded gets fully replaced
+/// by the fresh fetch.
+#[test]
+fn merge_with_stale_topics_keeps_previous_articles_for_failed_topics() {
+    let previous: Vec<Arc<FeedArticle>> = vec![
+        Arc::new(article("Reddit", "https://reddit/old", 60)),
+        Arc::new(article("WSJ", "https://wsj/old", 60)),
+    ];
+    let outcome = FetchOutcome {
+        articles: vec![article("WSJ", "https://wsj/new", 1)],
+        failed_topics: ["Reddit".to_string()].into_iter().collect(),
+    };
+
+    let merged = merge_with_stale_topics(outcome, &previous);
+
+    assert!(
+        merged.iter().any(|a| a.url == "https://reddit/old"),
+        "stale Reddit article should be carried forward, not dropped"
+    );
+    assert!(merged.iter().any(|a| a.url == "https://wsj/new"));
+    assert!(
+        !merged.iter().any(|a| a.url == "https://wsj/old"),
+        "successfully-refreshed topic should not keep its stale article"
+    );
+}
+
+/// When every feed succeeds, no stale articles are pulled in.
+#[test]
+fn merge_with_stale_topics_is_a_noop_when_nothing_failed() {
+    let previous: Vec<Arc<FeedArticle>> = vec![Arc::new(article("WSJ", "https://wsj/old", 60))];
+    let outcome = FetchOutcome {
+        articles: vec![article("WSJ", "https://wsj/new", 1)],
+        failed_topics: Default::default(),
+    };
+
+    let merged = merge_with_stale_topics(outcome, &previous);
+
+    assert_eq!(merged.len(), 1);
+    assert_eq!(merged[0].url, "https://wsj/new");
+}
 
 #[test]
 fn summary_length_cycles_short_medium_long() {

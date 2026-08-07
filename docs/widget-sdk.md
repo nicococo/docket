@@ -1,6 +1,6 @@
-# glint widget SDK
+# docket widget SDK
 
-A practical guide for building glint widgets — what the platform gives you, what conventions to follow, and where to look in the codebase for canonical examples.
+A practical guide for building docket widgets — what the platform gives you, what conventions to follow, and where to look in the codebase for canonical examples.
 
 This document is the living source of truth for **what the platform offers a widget**. When a new platform capability ships, it lands here. When a recurring widget pattern proves itself across multiple widgets and gets extracted, this is where the extracted version is documented.
 
@@ -15,11 +15,11 @@ This document is the living source of truth for **what the platform offers a wid
 3. [Default keybindings convention](#default-keybindings-convention)
 4. **Platform capabilities** ← grows over time
     - [Polling (`PollTracker`)](#polling-polltracker)
-    - [Text utilities (`glint::text`)](#text-utilities-glinttext)
-    - [Compact formatters (`glint::format`)](#compact-formatters-glintformat)
-    - [Credentials storage (`glint::credentials`)](#credentials-storage-glintcredentials)
-    - [Transient status (`glint::ui::status`)](#transient-status-glintuistatus)
-    - [Confirm modal (`glint::ui::modal`)](#confirm-modal-glintuimodal)
+    - [Text utilities (`docket::text`)](#text-utilities-dockettext)
+    - [Compact formatters (`docket::format`)](#compact-formatters-docketformat)
+    - [Credentials storage (`docket::credentials`)](#credentials-storage-docketcredentials)
+    - [Transient status (`docket::ui::status`)](#transient-status-docketuistatus)
+    - [Confirm modal (`docket::ui::modal`)](#confirm-modal-docketuimodal)
     - [Responsive views & Focus Zoom (`ViewTier`)](#responsive-views--focus-zoom-viewtier)
 5. [Best practices](#best-practices)
 6. [Where to look in the codebase](#where-to-look)
@@ -138,7 +138,7 @@ This is convention, not enforcement. Widgets remain free to bind however they wa
 | `←` / `→` / `h` / `l` | Cycle horizontal context (tabs, periods, panes) | Use when the widget has a horizontal axis worth cycling. |
 | `Enter` | **Primary in-place action** | Context-dependent: expand a list row (news, feeds), swap selection (forex), open the active note (notes). Never opens an external URL — that's too easy to mis-fire when the user meant "look at this inline." |
 | `e` / `Space` | Expand / collapse selected item | Alias for `Enter` in list widgets that have an inline expansion view. Both work. |
-| `o` | **Open externally** (browser, file, app) | The dedicated "leave glint" gesture. Used by stocks, forex, news, feeds. Should always be a *single key* away from the user's intent; never on `Enter`. |
+| `o` | **Open externally** (browser, file, app) | The dedicated "leave docket" gesture. Used by stocks, forex, news, feeds. Should always be a *single key* away from the user's intent; never on `Enter`. |
 | `r` | Force refresh | Bypasses the poll interval. |
 | `?` | Help overlay | Global; you don't bind this. |
 | `Tab` / `Shift+Tab` | Focus cycle | Global; you don't bind this. |
@@ -153,7 +153,7 @@ For widgets that let the user add or remove items from a persisted list (stocks 
 | Key | Action |
 |---|---|
 | `n` | New (create entity) — note, ticker, currency. Letter form preferred. |
-| `d` | Delete (with confirm modal — see [`glint::ui::modal`](#confirm-modal-glintuimodal)). |
+| `d` | Delete (with confirm modal — see [`docket::ui::modal`](#confirm-modal-docketuimodal)). |
 | `+` / `-` | Add to / remove from the **current list shape** (e.g. add a `:stock` lookup to the watchlist, remove the selected currency). Punctuation forms preserve muscle memory for widgets that started with them. |
 
 `n`/`d` and `+`/`-` are *not* mutually exclusive. The notes widget binds both pairs to its create/delete actions; either gesture works. New widgets should prefer the letter forms in their help text and keep `+`/`-` available as aliases when there's no risk of muscle-memory churn.
@@ -311,7 +311,7 @@ The trait hook returns `Option<_>` so opting out is the empty default — costs 
 
 ---
 
-### Text utilities (`glint::text`)
+### Text utilities (`docket::text`)
 
 **When to use:** any widget rendering free-form text — titles, summaries, message bodies, file paths, RSS descriptions. Use the shared helpers instead of writing your own `chars().count()`-based truncation or wrap; the shared versions are Unicode-width-aware (correct for CJK, emoji, combining marks) and consistent across widgets.
 
@@ -357,7 +357,7 @@ let text = sanitize_html("<p>Hello &amp; <b>world</b></p>");
 
 ---
 
-### Compact formatters (`glint::format`)
+### Compact formatters (`docket::format`)
 
 **When to use:** any widget rendering durations or "how long ago" labels — article publish times, data age, process uptime, last-fetch timestamps. Three variants, each tuned to a different display budget; pick the one that fits.
 
@@ -398,7 +398,7 @@ let up = uptime_label(secs);  // u64
 
 ---
 
-### Credentials storage (`glint::credentials`)
+### Credentials storage (`docket::credentials`)
 
 **When to use:** any time you need to persist a secret to disk — OAuth tokens, API keys, session cookies, paste-captured tokens, anything sensitive enough that "world-readable" would be a real problem.
 
@@ -409,7 +409,7 @@ Use the shared helpers instead of writing the atomic-write + `chmod 0600` dance 
 ```rust
 use crate::credentials;
 
-// All files live under ~/.config/glint/credentials/. You pass a
+// All files live under ~/.config/docket/credentials/. You pass a
 // basename; the module resolves the absolute path. The directory
 // is created with mode 0700 on first use (idempotent).
 
@@ -423,7 +423,7 @@ let token: Option<MyToken> = credentials::load("my_widget_token.toml")?;
 // Save with atomic write + chmod 0600 (Unix). Temp file is created
 // alongside the destination, perms tightened *before* the rename,
 // so the final inode is never visible at a wider mode — even if
-// glint crashes mid-write.
+// docket crashes mid-write.
 let path = credentials::save("my_widget_token.toml", &token)?;
 
 // Write a starter template iff the file is missing. Idempotent —
@@ -446,14 +446,14 @@ let wrote_new = credentials::write_template_if_missing(
 #### When *not* to use
 
 - **Non-secret config**: widget TOMLs (`stocks.toml`, `news.toml`, etc.) belong in the config dir, not credentials. They're meant to be world-readable; users edit them.
-- **System keyring integration**: this module writes plaintext-on-disk (chmod 0600). Future work to back specific files with macOS Keychain / Windows Credential Manager / `libsecret` would land as a `CredentialBackend` trait sitting on top of this module; see the [credential-storage roadmap](https://github.com/ntrospect0/glint/issues) once it's filed.
+- **System keyring integration**: this module writes plaintext-on-disk (chmod 0600). Future work to back specific files with macOS Keychain / Windows Credential Manager / `libsecret` would land as a `CredentialBackend` trait sitting on top of this module; see the [credential-storage roadmap](https://github.com/nicococo/docket/issues) once it's filed.
 - **Outside the credentials dir**: if you genuinely need to write a chmod-0600 file somewhere else (logs with secrets?), that's a different problem — talk through the use case in an issue first.
 
 **Reference example:** [`src/auth/google/store.rs`](../src/auth/google/store.rs) — `GoogleToken::{path, load, save}` are thin wrappers over `credentials::{path, load, save}`. Microsoft's token store and the auth wizard's template scaffolding follow the same shape.
 
 ---
 
-### Transient status (`glint::ui::status`)
+### Transient status (`docket::ui::status`)
 
 **When to use:** any widget that shows short-lived status messages — "Added AAPL to watchlist", "Save failed", "Copied to clipboard", visual pulse markers like the forex "📋 → ✅" indicator. The pattern: set a value with a TTL, render it while it's live, automatically clear once the TTL elapses.
 
@@ -515,7 +515,7 @@ The most common shape is `Option<TimedFeedback<String>>` for footer messages, bu
 
 ---
 
-### Confirm modal (`glint::ui::modal`)
+### Confirm modal (`docket::ui::modal`)
 
 **When to use:** any widget that needs a destructive-action confirmation overlay — "Remove ticker?", "Delete note?", "Drop folder?" The shared helper owns the *rendering* (centred rounded box, theme-aware title bar, target name in bold, action hint at the bottom) and the *key dispatch* (y/Y commits, anything else cancels). Widgets keep their own `Option<T>` state slot so the meaning of "what's being confirmed" stays widget-local.
 
@@ -560,7 +560,7 @@ if self.state.lock().expect("poisoned").confirm_remove.is_some() {
 
 - **Theme-aware title bar**: the title's background pulls from `theme.text_selected.fg` so it inherits the active scheme's accent color (e.g. Gruvbox orange, Nord cyan) instead of hardcoded yellow.
 - **Fixed 7-row height**: blank · target · blank · hint + borders. Widgets pass `max_width`; height isn't configurable to keep modals visually consistent across the dashboard.
-- **No-op on tiny parents**: if `parent.width < 30` or `parent.height < 9` the helper silently returns. Widgets that care about that case should surface a fallback inline (e.g. a status-line message via [`glint::ui::status`](#transient-status-glintuistatus)).
+- **No-op on tiny parents**: if `parent.width < 30` or `parent.height < 9` the helper silently returns. Widgets that care about that case should surface a fallback inline (e.g. a status-line message via [`docket::ui::status`](#transient-status-docketuistatus)).
 - **State stays widget-local**: the helper doesn't own your `Option<T>`. Set it / clear it from your widget's setter / cancel paths. The helper is just for the modal's presentation + key dispatch.
 
 #### When *not* to use
@@ -656,18 +656,18 @@ fn handle_key(&mut self, key) -> EventResult {
 
 **Shared primitives for Full-tier layouts** (don't reinvent these):
 
-- [`glint::widgets::view_tier`](../src/widgets/view_tier.rs) —
+- [`docket::widgets::view_tier`](../src/widgets/view_tier.rs) —
   `ViewTier::from_rect`, plus `inner_rows` / `inner_cols` (border-aware
   content dimensions) and `row_split` (give one section up to N rows, the
   remainder to another — e.g. a sparkline budget above a process list).
-- [`glint::ui::grid::CardGrid`](../src/ui/grid.rs) — responsive
+- [`docket::ui::grid::CardGrid`](../src/ui/grid.rs) — responsive
   card-row / card-grid layout (pinned-home strip, scrollable grid, or
   fixed-centered), with the render and click hit-test derived from one
   `layout()` call. Powers the clock and weather Full-tier city grids.
-- [`glint::ui::chart::range_bar`](../src/ui/chart/range_bar.rs) — a
+- [`docket::ui::chart::range_bar`](../src/ui/chart/range_bar.rs) — a
   labelled min–max range bar (the stocks/forex 52-week bar).
-- [`glint::text::truncate`](../src/text.rs) (Unicode-width aware) and the
-  big-digit / braille chart helpers under `glint::ui`.
+- [`docket::text::truncate`](../src/text.rs) (Unicode-width aware) and the
+  big-digit / braille chart helpers under `docket::ui`.
 
 **Degrade gracefully.** A `Full` rect can still be relatively short.
 Compute what fits and fall back to a smaller layout rather than clipping
@@ -735,7 +735,7 @@ These conventions emerged from building 11+ widgets. They aren't enforced — ju
 ### Persistence of runtime mutations
 
 - If your widget mutates a list at runtime (e.g., add ticker, remove currency), write back to the widget's TOML via [`config::rewrite_widget_top_level_string_array`](../src/config/mod.rs). Preserves comments and other settings.
-- Credentials go in `~/.config/glint/credentials/<widget>_<thing>.toml`, chmod `0600`. See [`auth/google/store.rs`](../src/auth/google/store.rs).
+- Credentials go in `~/.config/docket/credentials/<widget>_<thing>.toml`, chmod `0600`. See [`auth/google/store.rs`](../src/auth/google/store.rs).
 
 ### Don't fight the trait
 

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 ntrospect0
+// Copyright (C) 2026 nicococo
 
 //! 52-week range bar renderer shared by widgets that display a price
 //! relative to its annual high/low window. Provider-agnostic: all values

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 ntrospect0
+// Copyright (C) 2026 nicococo
 
 //! Stack widget — a layout cell that holds up to 3 widgets and shows
 //! one at a time, with a tab strip in the title bar for switching.

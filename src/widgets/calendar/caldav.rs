@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 ntrospect0
+// Copyright (C) 2026 nicococo
 
 //! CalDAV calendar provider (RFC 4791) — talks to Apple iCloud, Fastmail,
 //! Nextcloud, Synology, or any other server that speaks the standard.
@@ -13,7 +14,7 @@
 //!    `time-range` filter, then parse the returned iCalendar payloads.
 //!
 //! Authentication is HTTP Basic with the user's app-specific password
-//! (loaded from `~/.config/glint/credentials/caldav.toml`). Apple's
+//! (loaded from `~/.config/docket/credentials/caldav.toml`). Apple's
 //! issuance flow lives at https://appleid.apple.com.
 
 use std::io::BufReader;
@@ -79,7 +80,7 @@ impl CalDavProvider {
         let mut headers = HeaderMap::new();
         headers.insert(
             "User-Agent",
-            HeaderValue::from_static(concat!("glint-tui/", env!("CARGO_PKG_VERSION"))),
+            HeaderValue::from_static(concat!("docket-tui/", env!("CARGO_PKG_VERSION"))),
         );
         let client = reqwest::Client::builder()
             .default_headers(headers)
@@ -407,8 +408,11 @@ fn parse_calendar_query_response(xml: &str, calendar_label: &str) -> Vec<Event> 
 }
 
 /// Parse one or more iCalendar payloads via the `ical` crate, flatten the
-/// VEVENTs and translate them into glint `Event`s.
-fn parse_ics_events(ics: &str, calendar_label: &str) -> Vec<Event> {
+/// VEVENTs and translate them into docket `Event`s. `pub(super)` because
+/// the plain ICS-feed provider (`super::ics`) reuses this directly —
+/// CalDAV's `calendar-data` payload and a bare `.ics` HTTP response are
+/// both just iCalendar text.
+pub(super) fn parse_ics_events(ics: &str, calendar_label: &str) -> Vec<Event> {
     let reader = BufReader::new(ics.as_bytes());
     let parser = ical::IcalParser::new(reader);
     let mut out: Vec<Event> = Vec::new();

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 ntrospect0
+// Copyright (C) 2026 nicococo
 
 //! Hero image fetch + 24-hour byte cache + protocol-state builder.
 //!
@@ -29,13 +30,13 @@ use std::{
 
 /// Browser-shaped User-Agent for image fetches. Several news-site
 /// CDNs (notably `images.wsj.net`) 403 the default reqwest UA, so
-/// we present as a regular Firefox build with the ntrospect0/glint
+/// we present as a regular Firefox build with the ntrospect0/docket
 /// URL in the comment so any operator who inspects logs sees who
 /// we are.
 const USER_AGENT: &str = concat!(
-    "Mozilla/5.0 (compatible; glint-tui/",
+    "Mozilla/5.0 (compatible; docket-tui/",
     env!("CARGO_PKG_VERSION"),
-    "; +https://github.com/ntrospect0/glint) Gecko/20100101 Firefox/120.0",
+    "; +https://github.com/ntrospect0/docket) Gecko/20100101 Firefox/120.0",
 );
 
 use anyhow::{Context, Result};

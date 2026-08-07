@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 ntrospect0
+// Copyright (C) 2026 nicococo
 
 use std::time::Duration;
 
@@ -53,7 +54,7 @@ pub async fn run(client: &OAuthClientConfig, account: &str) -> Result<MicrosoftT
 
     let auth_url = build_auth_url(client, &redirect_uri, &state, &challenge);
 
-    eprintln!("Opening browser to authorize glint with Microsoft…");
+    eprintln!("Opening browser to authorize docket with Microsoft…");
     eprintln!("If it doesn't open, paste this URL manually:\n\n  {auth_url}\n");
     if let Err(err) = open::that(&auth_url) {
         tracing::warn!(error = %err, "failed to open browser automatically");

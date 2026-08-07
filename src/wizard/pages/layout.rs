@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 ntrospect0
+// Copyright (C) 2026 nicococo
 
 //! Layout page. Two-phase: first asks for the number of panes the user
 //! wants, then surfaces the preset layouts that match that count. The

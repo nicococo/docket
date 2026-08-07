@@ -1,25 +1,25 @@
-# Glint setup instructions
+# Docket setup instructions
 
-This file is the long-form companion to glint's interactive `--setup` wizard. The wizard collects the basics inline; the steps below cover the one-time provider setup (Google Cloud, Microsoft Azure, CalDAV) and the moving parts the TUI can't walk you through itself (browser tabs, third-party portals).
+This file is the long-form companion to docket's interactive `--setup` wizard. The wizard collects the basics inline; the steps below cover the one-time provider setup (Google Cloud, Microsoft Azure, CalDAV) and the moving parts the TUI can't walk you through itself (browser tabs, third-party portals).
 
-If you're stuck, see [Troubleshooting](#troubleshooting) at the bottom or open an issue at https://github.com/ntrospect0/glint/issues.
+If you're stuck, see [Troubleshooting](#troubleshooting) at the bottom or open an issue at https://github.com/nicococo/docket/issues.
 
 ---
 
 ## Why you have to create OAuth credentials yourself
 
-The Calendar and Email widgets use **OAuth 2.0** to read your calendar / mailbox. OAuth requires the application (in this case, glint) to identify itself to Google or Microsoft with a **Client ID** (and, for Google, a **Client Secret**).
+The Calendar and Email widgets use **OAuth 2.0** to read your calendar / mailbox. OAuth requires the application (in this case, docket) to identify itself to Google or Microsoft with a **Client ID** (and, for Google, a **Client Secret**).
 
 For commercial apps (Fantastical, Spark, Thunderbird), the developer goes through Google's / Microsoft's **verification process** — a multi-step review that requires a registered business, a published privacy policy, a brand-verified domain, and (for Gmail-level scopes) an annual security audit costing ~$4,500. Once verified, the developer ships one Client ID for all users.
 
-Glint is open-source, single-developer, and free. Two reasons we can't ship a single shared Client ID:
+Docket is open-source, single-developer, and free. Two reasons we can't ship a single shared Client ID:
 
 1. **OAuth secrets in OSS aren't really secret.** Google's terms forbid embedding client secrets in publicly readable code and will revoke clients found there.
 2. **All-users-one-app would get flagged.** Even unverified shared clients trip anomaly detection within days; everyone's calendar would go dark at once.
 
-So glint asks you to spin up **your own** OAuth credentials in 5–10 minutes. They're free, never leave your machine, and never re-prompted.
+So docket asks you to spin up **your own** OAuth credentials in 5–10 minutes. They're free, never leave your machine, and never re-prompted.
 
-If you'd rather skip OAuth entirely, glint also supports:
+If you'd rather skip OAuth entirely, docket also supports:
 
 - **CalDAV** for calendar (works with iCloud, Fastmail, Nextcloud, Synology, generic CalDAV servers) — uses an app password instead of OAuth. See [CalDAV](#caldav-icloud--fastmail--nextcloud) below.
 - **IMAP** for email (Gmail with app-password, iCloud, Fastmail, Yahoo, self-hosted). See [IMAP](#imap-gmail--icloud--fastmail--self-hosted) below.
@@ -28,18 +28,18 @@ If you'd rather skip OAuth entirely, glint also supports:
 
 ## Google: Calendar + Gmail
 
-You'll create a Google Cloud project, enable the two APIs glint uses, configure an OAuth consent screen, and create a Desktop OAuth client. The credentials get pasted into the wizard's "Authorize Google" page.
+You'll create a Google Cloud project, enable the two APIs docket uses, configure an OAuth consent screen, and create a Desktop OAuth client. The credentials get pasted into the wizard's "Authorize Google" page.
 
 ### One-time setup
 
-1. **Open https://console.cloud.google.com/** (sign in with the Google account whose calendar / mail you want glint to read).
-2. **Create a project.** Top-left project picker → *New Project*. Name it whatever you like (e.g. `glint`). Click *Create*.
+1. **Open https://console.cloud.google.com/** (sign in with the Google account whose calendar / mail you want docket to read).
+2. **Create a project.** Top-left project picker → *New Project*. Name it whatever you like (e.g. `docket`). Click *Create*.
 3. **Enable APIs.** Left sidebar → *APIs & Services* → *Library*.
    - Search for **"Google Calendar API"** → click → *Enable*.
    - Search for **"Gmail API"** → click → *Enable* (skip if you don't plan to use the email widget).
 4. **Configure the OAuth consent screen.** Left sidebar → *APIs & Services* → *OAuth consent screen*.
    - User type: pick **External** (the only choice unless you have a Google Workspace org). Click *Create*.
-   - App name: `glint` (or whatever you like).
+   - App name: `docket` (or whatever you like).
    - User support email + Developer contact email: your own email.
    - Skip the optional logo / domain fields. *Save and Continue*.
    - Scopes step: *Save and Continue* (we'll request scopes from the OAuth flow itself).
@@ -47,44 +47,44 @@ You'll create a Google Cloud project, enable the two APIs glint uses, configure 
    - *Back to Dashboard*. Leave the publishing status as "Testing" — you don't need to publish anything for personal use.
 5. **Create the OAuth client.** Left sidebar → *APIs & Services* → *Credentials* → *+ Create credentials* → *OAuth client ID*.
    - Application type: **Desktop app**.
-   - Name: `glint`.
+   - Name: `docket`.
    - Click *Create*.
-6. **Copy the credentials.** Google shows you a dialog with the **Client ID** (looks like `1234567-abcdef.apps.googleusercontent.com`) and **Client Secret** (a short random string). Keep this dialog open — you'll paste both into glint's wizard in a moment.
+6. **Copy the credentials.** Google shows you a dialog with the **Client ID** (looks like `1234567-abcdef.apps.googleusercontent.com`) and **Client Secret** (a short random string). Keep this dialog open — you'll paste both into docket's wizard in a moment.
 
 ### In the wizard
 
 1. Go to *Configure email* (or *Configure calendar*) → press **Space** on **Authorize Google**.
 2. Paste your Client ID and Client Secret into the inline form. Press Tab to move between fields.
 3. Press Enter on **[ Save & Authorize ]**. The wizard:
-   - Writes `~/.config/glint/credentials/google_oauth_client.toml` with `0600` perms.
+   - Writes `~/.config/docket/credentials/google_oauth_client.toml` with `0600` perms.
    - Opens your browser to Google's consent screen.
    - Listens on a temporary localhost port for the redirect.
-4. In the browser, sign in with the same Google account you added as a Test user. You'll see a warning that "Google hasn't verified this app" — that's expected for personal-use clients. Click *Continue* → *Continue* → tick the permissions glint asks for → *Continue*.
-5. The browser shows a success page; glint's wizard resumes automatically, the title row shows your email address, and the folder picker loads your Gmail labels.
+4. In the browser, sign in with the same Google account you added as a Test user. You'll see a warning that "Google hasn't verified this app" — that's expected for personal-use clients. Click *Continue* → *Continue* → tick the permissions docket asks for → *Continue*.
+5. The browser shows a success page; docket's wizard resumes automatically, the title row shows your email address, and the folder picker loads your Gmail labels.
 
 ### What's stored where
 
-- **Client credentials** → `~/.config/glint/credentials/google_oauth_client.toml` (your responsibility to back up if you reinstall).
-- **Access + refresh token** → `~/.config/glint/credentials/google_oauth_token.default.toml` (auto-refreshed; safe to delete to force re-auth). The `default` segment is the account label — see [Multiple calendar accounts](#multiple-calendar-accounts-same-provider) to add more.
+- **Client credentials** → `~/.config/docket/credentials/google_oauth_client.toml` (your responsibility to back up if you reinstall).
+- **Access + refresh token** → `~/.config/docket/credentials/google_oauth_token.default.toml` (auto-refreshed; safe to delete to force re-auth). The `default` segment is the account label — see [Multiple calendar accounts](#multiple-calendar-accounts-same-provider) to add more.
 
 ---
 
 ## Microsoft: Outlook calendar + mail
 
-You'll register an Azure app, configure it to accept loopback redirects (so the browser can hand the token back to glint), add the Graph API permissions glint uses, and copy the Application (client) ID into the wizard.
+You'll register an Azure app, configure it to accept loopback redirects (so the browser can hand the token back to docket), add the Graph API permissions docket uses, and copy the Application (client) ID into the wizard.
 
 Note: Microsoft uses **PKCE**, so there's no Client Secret to handle — just the Client ID.
 
 ### One-time setup
 
-1. **Open https://portal.azure.com/** (sign in with the Microsoft account whose calendar / mail you want glint to read — personal or work/school both work).
+1. **Open https://portal.azure.com/** (sign in with the Microsoft account whose calendar / mail you want docket to read — personal or work/school both work).
 2. **Open App registrations.** Search bar → type *Microsoft Entra ID* → click → left sidebar → *App registrations*.
 3. **New registration.**
-   - Name: `glint`.
+   - Name: `docket`.
    - Supported account types: **Accounts in any organizational directory and personal Microsoft accounts**.
    - Redirect URI: leave blank for now.
    - Click *Register*.
-4. **Copy the Application (client) ID** from the new app's overview page. You'll paste it into glint's wizard.
+4. **Copy the Application (client) ID** from the new app's overview page. You'll paste it into docket's wizard.
 5. **Authentication settings.** Left sidebar → *Authentication* → *Add a platform* → **Mobile and desktop applications**.
    - Tick **http://localhost** under the Custom redirect URIs list (the loopback option).
    - Click *Configure*.
@@ -98,12 +98,12 @@ Note: Microsoft uses **PKCE**, so there's no Client Secret to handle — just th
 
 1. Press **Space** on **Authorize Microsoft (Outlook calendar)** or **Authorize Microsoft (for Outlook)**.
 2. Paste the Application (client) ID into the inline form. Tab → Enter on [ Save & Authorize ].
-3. Browser opens to login.microsoftonline.com. Sign in, approve the permissions glint asked for. The browser shows a success page; glint resumes.
+3. Browser opens to login.microsoftonline.com. Sign in, approve the permissions docket asked for. The browser shows a success page; docket resumes.
 
 ### What's stored where
 
-- **Client config** → `~/.config/glint/credentials/microsoft_oauth_client.toml`.
-- **Access + refresh token** → `~/.config/glint/credentials/microsoft_oauth_token.default.toml`. The `default` segment is the account label — see [Multiple calendar accounts](#multiple-calendar-accounts-same-provider) to add more.
+- **Client config** → `~/.config/docket/credentials/microsoft_oauth_client.toml`.
+- **Access + refresh token** → `~/.config/docket/credentials/microsoft_oauth_token.default.toml`. The `default` segment is the account label — see [Multiple calendar accounts](#multiple-calendar-accounts-same-provider) to add more.
 
 ---
 
@@ -118,19 +118,19 @@ The setup wizard manages one **default** account per provider — the account yo
 Give the account a label and run the auth flow from a terminal:
 
 ```sh
-glint --auth microsoft:work       # an extra Outlook account labelled "work"
-glint --auth google:personal      # an extra Google account labelled "personal"
+docket --auth microsoft:work       # an extra Outlook account labelled "work"
+docket --auth google:personal      # an extra Google account labelled "personal"
 ```
 
-The provider name is `microsoft` or `google` (the same names the wizard uses — note `microsoft`, not `outlook`); the part after the `:` is your label. A bare `glint --auth microsoft` with no label authorizes the **default** account, exactly as the wizard does.
+The provider name is `microsoft` or `google` (the same names the wizard uses — note `microsoft`, not `outlook`); the part after the `:` is your label. A bare `docket --auth microsoft` with no label authorizes the **default** account, exactly as the wizard does.
 
-The browser opens as usual. If you're already signed into another account, choose **"Use another account"** (or use a private window) so you land on the right one. The token is written to `~/.config/glint/credentials/microsoft_oauth_token.<label>.toml` — one file per account. The shared `microsoft_oauth_client.toml` (your app registration) serves all of them, so you don't repeat the Azure / Google Cloud setup.
+The browser opens as usual. If you're already signed into another account, choose **"Use another account"** (or use a private window) so you land on the right one. The token is written to `~/.config/docket/credentials/microsoft_oauth_token.<label>.toml` — one file per account. The shared `microsoft_oauth_client.toml` (your app registration) serves all of them, so you don't repeat the Azure / Google Cloud setup.
 
 Keep labels simple — letters, digits, hyphens (e.g. `work`, `team-eu`). Avoid `:` in a label; it collides with the color-key format below.
 
 ### 2. Add a provider block per account
 
-Edit `~/.config/glint/calendar.toml` and add one `[[providers]]` block per account, each with an `account = "<label>"` field. Omit `account` (or set it to `"default"`) for the wizard-managed default account:
+Edit `~/.config/docket/calendar.toml` and add one `[[providers]]` block per account, each with an `account = "<label>"` field. Omit `account` (or set it to `"default"`) for the wizard-managed default account:
 
 ```toml
 # Default Outlook account (managed by the wizard; account omitted)
@@ -163,14 +163,14 @@ Use `/` between kind and label, not `:` — the first `:` in a color key separat
 
 ## CalDAV (iCloud / Fastmail / Nextcloud)
 
-CalDAV is the open standard for calendar sync; it bypasses OAuth in favour of an app-specific password. Glint already ships the credentials template — you just fill it in.
+CalDAV is the open standard for calendar sync; it bypasses OAuth in favour of an app-specific password. Docket already ships the credentials template — you just fill it in.
 
 ### Apple iCloud
 
 1. Go to https://appleid.apple.com and sign in.
 2. *Sign-In and Security* → *App-Specific Passwords* → *+ Generate*.
-3. Name it `glint` and copy the generated 4-block password (looks like `abcd-efgh-ijkl-mnop`).
-4. Edit `~/.config/glint/credentials/caldav.toml`:
+3. Name it `docket` and copy the generated 4-block password (looks like `abcd-efgh-ijkl-mnop`).
+4. Edit `~/.config/docket/credentials/caldav.toml`:
 
    ```toml
    server = "https://caldav.icloud.com"
@@ -192,7 +192,7 @@ Use your normal username + an app-specific password from the server's UI. Server
 
 ## IMAP (Gmail / iCloud / Fastmail / self-hosted)
 
-IMAP skips OAuth entirely — you provide host, port, username, and an app-specific password and glint connects directly. Works against any IMAP4rev1 server.
+IMAP skips OAuth entirely — you provide host, port, username, and an app-specific password and docket connects directly. Works against any IMAP4rev1 server.
 
 ### Per-provider hosts + app-password recipes
 
@@ -212,12 +212,12 @@ IMAP skips OAuth entirely — you provide host, port, username, and an app-speci
 1. *Configure email* → Provider → tick **IMAP**.
 2. Press **Space** on **Set up IMAP credentials**.
 3. Fill in the form: host, port (993 unless you know you need otherwise), username (usually your full email), app password. Press Enter on **[ Save & Authorize ]**.
-4. The wizard writes `~/.config/glint/credentials/imap.toml` with 0600 perms, then loads your mailbox folders so the folder picker populates.
-5. If the password is wrong, the folder picker stays on its "showing defaults" hint and `~/.config/glint/glint.log` has a `wizard: failed to fetch IMAP folders for picker` warning with the underlying error.
+4. The wizard writes `~/.config/docket/credentials/imap.toml` with 0600 perms, then loads your mailbox folders so the folder picker populates.
+5. If the password is wrong, the folder picker stays on its "showing defaults" hint and `~/.config/docket/docket.log` has a `wizard: failed to fetch IMAP folders for picker` warning with the underlying error.
 
 ### Manual setup (skipping the wizard)
 
-Drop a file at `~/.config/glint/credentials/imap.toml`:
+Drop a file at `~/.config/docket/credentials/imap.toml`:
 
 ```toml
 host = "imap.gmail.com"
@@ -234,14 +234,14 @@ provider = "imap"
 folders = ["INBOX"]
 ```
 
-Glint will connect lazily on the first fetch.
+Docket will connect lazily on the first fetch.
 
 ---
 
 ## LLM provider key (optional, for summaries)
 
 The news + email widgets can summarise expanded items using a
-configurable LLM. Glint ships two providers out of the box:
+configurable LLM. Docket ships two providers out of the box:
 **Anthropic (Claude)** and **OpenAI (GPT)**. You pick one — the
 widgets call whichever is active in `llm.toml`.
 
@@ -251,7 +251,7 @@ widgets call whichever is active in `llm.toml`.
 2. Either pick **Anthropic (Claude)** on the wizard's
    *Global → LLM provider* field and paste the key into the
    *Anthropic API key* field below it, or edit
-   `~/.config/glint/credentials/anthropic_key.toml`:
+   `~/.config/docket/credentials/anthropic_key.toml`:
 
    ```toml
    api_key = "sk-ant-..."
@@ -262,7 +262,7 @@ widgets call whichever is active in `llm.toml`.
 1. https://platform.openai.com/api-keys → *Create new secret key*.
 2. Either pick **OpenAI (GPT)** on the wizard's *Global → LLM
    provider* field and paste the key into the *OpenAI API key* field
-   below it, or edit `~/.config/glint/credentials/openai_key.toml`:
+   below it, or edit `~/.config/docket/credentials/openai_key.toml`:
 
    ```toml
    api_key = "sk-..."
@@ -290,16 +290,16 @@ news widget renders the raw RSS excerpt instead.
 
 ## Troubleshooting
 
-### Google: "Access blocked: glint has not completed the Google verification process"
+### Google: "Access blocked: docket has not completed the Google verification process"
 
-Expected for personal-use clients. You're seeing the unverified-app warning. Click *Advanced* → *Go to glint (unsafe)*. This isn't actually unsafe — *you* are the developer in this scenario, and only the test users you added (yourself) can sign in.
+Expected for personal-use clients. You're seeing the unverified-app warning. Click *Advanced* → *Go to docket (unsafe)*. This isn't actually unsafe — *you* are the developer in this scenario, and only the test users you added (yourself) can sign in.
 
 ### Microsoft: email widget shows "(loading…)" forever
 
 Your token is missing the `User.Read` Graph permission. Re-authorize:
 
 - **In the wizard:** open *Configure email* → Space on *Authorize Microsoft*.
-- **Outside the wizard:** `glint --auth microsoft`.
+- **Outside the wizard:** `docket --auth microsoft`.
 
 When the browser asks for permissions, make sure "View your basic profile" is part of the consent.
 
@@ -307,55 +307,55 @@ When the browser asks for permissions, make sure "View your basic profile" is pa
 
 The wizard re-reads the file on each attempt. Double-check:
 
-- File path is `~/.config/glint/credentials/<provider>_oauth_client.toml`.
+- File path is `~/.config/docket/credentials/<provider>_oauth_client.toml`.
 - Values are quoted: `client_id = "1234-abcdef.apps.googleusercontent.com"`.
 - Neither value still starts with `REPLACE_WITH_…`.
 
 ### "Folder picker shows '(showing defaults — list refreshes after you authorize)' but never updates"
 
-The post-OAuth fetch is non-blocking and runs synchronously on auth completion. If it didn't populate, check `~/.config/glint/glint.log` for a `wizard: failed to fetch …` warning. The most common cause is a token without the right scope; re-authorize to refresh.
+The post-OAuth fetch is non-blocking and runs synchronously on auth completion. If it didn't populate, check `~/.config/docket/docket.log` for a `wizard: failed to fetch …` warning. The most common cause is a token without the right scope; re-authorize to refresh.
 
 ### Calendar / email shows "Last fetch failed: …"
 
 Read the message — it carries the provider's error verbatim. Common causes:
 
 - **Token expired and refresh failed**: re-authorize.
-- **API quota**: only matters at very high call volumes; glint's defaults (60s calendar poll, 5min email poll) are well below any free-tier limit.
+- **API quota**: only matters at very high call volumes; docket's defaults (60s calendar poll, 5min email poll) are well below any free-tier limit.
 - **Network**: corporate proxies + loopback OAuth sometimes interact badly. Try from a non-corporate network or set `HTTPS_PROXY` if needed.
 
 ### I deleted my token file, now what?
 
-Re-run the wizard's Authorize step or `glint --auth <provider>`. Glint will open a fresh browser flow and write a new token.
+Re-run the wizard's Authorize step or `docket --auth <provider>`. Docket will open a fresh browser flow and write a new token.
 
 ### I want to start completely fresh
 
 ```bash
-rm -rf ~/.config/glint
-glint --setup
+rm -rf ~/.config/docket
+docket --setup
 ```
 
-This wipes everything — config, tokens, cache. The wizard seeds fresh defaults from glint's built-in templates.
+This wipes everything — config, tokens, cache. The wizard seeds fresh defaults from docket's built-in templates.
 
 ---
 
 ## Profiles
 
-Run glint in several isolated contexts — a focused **work** dashboard, a stripped-down **travel** view — each with its own layout, widgets, theme, and accounts:
+Run docket in several isolated contexts — a focused **work** dashboard, a stripped-down **travel** view — each with its own layout, widgets, theme, and accounts:
 
 ```sh
-glint --profile work        # or: glint -p work
-glint                       # the "default" profile
+docket --profile work        # or: docket -p work
+docket                       # the "default" profile
 ```
 
-Everything a profile owns — layout, widget configs, the selected theme, account tokens, notes, cache — is isolated under `~/.config/glint/profiles/<name>/`. Two things are **shared** across all profiles, so you define/register them once: the colorscheme **library** (`colorschemes.toml`) and the OAuth **client registrations** (`*_oauth_client.toml` — the Azure/Google *app*, not your account tokens). You can also select a profile with `GLINT_PROFILE=work` instead of the flag.
+Everything a profile owns — layout, widget configs, the selected theme, account tokens, notes, cache — is isolated under `~/.config/docket/profiles/<name>/`. Two things are **shared** across all profiles, so you define/register them once: the colorscheme **library** (`colorschemes.toml`) and the OAuth **client registrations** (`*_oauth_client.toml` — the Azure/Google *app*, not your account tokens). You can also select a profile with `DOCKET_PROFILE=work` instead of the flag.
 
 ### Managing profiles
 
-Run `glint --setup` and you land on the **Profile Manager** — it lists your profiles and lets you pick one to configure, or **create, clone, rename, and delete** them right there. Cloning copies a profile's configuration (not its credentials — you authorize the clone's accounts afterward). To jump straight into configuring one profile, use `glint --profile <name> --setup`.
+Run `docket --setup` and you land on the **Profile Manager** — it lists your profiles and lets you pick one to configure, or **create, clone, rename, and delete** them right there. Cloning copies a profile's configuration (not its credentials — you authorize the clone's accounts afterward). To jump straight into configuring one profile, use `docket --profile <name> --setup`.
 
 ### Upgrading from a pre-profiles install
 
-Your existing flat `~/.config/glint/` **keeps working as-is** — the default profile reads it in place, so nothing moves or is deleted until you choose. The first time you run `glint --setup`, glint notices the flat layout and offers to migrate:
+Your existing flat `~/.config/docket/` **keeps working as-is** — the default profile reads it in place, so nothing moves or is deleted until you choose. The first time you run `docket --setup`, docket notices the flat layout and offers to migrate:
 
 - **Migrate** (recommended) — moves your config into `profiles/default/`, tidies away the old flat duplicates, and unlocks creating and switching between multiple profiles.
 - **Keep flat** — stays single-profile for now; you can migrate any time (the prompt reappears on the next `--setup`).
@@ -367,13 +367,13 @@ Migration is non-destructive: your config is copied into `profiles/default/` *be
 Everything the Profile Manager does is also scriptable — handy for automation or headless setups:
 
 ```sh
-glint --list-profiles                     # list profiles (marks default + active)
-glint --new-profile work                  # create (then `glint --profile work --setup`)
-glint --new-profile staging --from work   # clone work's config (re-authorize accounts)
-glint --rename-profile old:new
-glint --delete-profile name               # not "default" or the active profile
-glint --migrate-profiles                  # copy a flat config into profiles/default/ (copy-only)
-glint --cleanup-flat-config               # remove leftover flat duplicates after migrating
+docket --list-profiles                     # list profiles (marks default + active)
+docket --new-profile work                  # create (then `docket --profile work --setup`)
+docket --new-profile staging --from work   # clone work's config (re-authorize accounts)
+docket --rename-profile old:new
+docket --delete-profile name               # not "default" or the active profile
+docket --migrate-profiles                  # copy a flat config into profiles/default/ (copy-only)
+docket --cleanup-flat-config               # remove leftover flat duplicates after migrating
 ```
 
 ---
@@ -381,7 +381,7 @@ glint --cleanup-flat-config               # remove leftover flat duplicates afte
 ## What lives where on disk
 
 ```
-~/.config/glint/                      # GLOBAL layer — shared across profiles
+~/.config/docket/                      # GLOBAL layer — shared across profiles
 ├── colorschemes.toml                 # named [schemes.*] palettes (the library)
 ├── credentials/                      # 0700-mode
 │   ├── google_oauth_client.toml      # OAuth app registrations (shared)
@@ -399,11 +399,11 @@ glint --cleanup-flat-config               # remove leftover flat duplicates afte
     │   │   ├── caldav.toml  imap.toml
     │   │   ├── anthropic_key.toml  openai_key.toml
     │   ├── notes/<instance>/<id>.md   # each note as a plain markdown file
-    │   └── .runtime_state.toml  .wizard_state.toml  glint.log
+    │   └── .runtime_state.toml  .wizard_state.toml  docket.log
     └── work/  travel/  …             # other profiles, same shape
 ```
 
-Every `.toml` is plain text — edit in your favourite editor and either restart glint or hit `:reload` from the runtime command bar. The wizard preserves keys it doesn't manage (custom feeds, topic keywords, per-widget color overrides, etc.) across `--setup` re-runs, and preserves other profiles' `[[providers]]` blocks it doesn't own.
+Every `.toml` is plain text — edit in your favourite editor and either restart docket or hit `:reload` from the runtime command bar. The wizard preserves keys it doesn't manage (custom feeds, topic keywords, per-widget color overrides, etc.) across `--setup` re-runs, and preserves other profiles' `[[providers]]` blocks it doesn't own.
 
 ---
 
@@ -411,4 +411,4 @@ Every `.toml` is plain text — edit in your favourite editor and either restart
 
 - `README.md` — install, keybindings, color schemes, multi-instance widgets, widget catalogue, external dependencies.
 - `AGENTS.md` — architecture overview for contributors and AI assistants.
-- https://github.com/ntrospect0/glint — source, issues, releases.
+- https://github.com/nicococo/docket — source, issues, releases.

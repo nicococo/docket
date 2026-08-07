@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 ntrospect0
+// Copyright (C) 2026 nicococo
 
 //! Forex widget — mirrors the Stocks widget's shape but for currency
 //! pairs. One configured **primary** currency (e.g. USD), an ordered
@@ -74,7 +75,7 @@ use provider::{ForexQuote, YahooForexProvider};
 // Configuration
 // ─────────────────────────────────────────────────────────────────────
 
-/// Loaded from `~/.config/glint/forex.toml`.
+/// Loaded from `~/.config/docket/forex.toml`.
 #[derive(Debug, Clone, Deserialize)]
 pub struct ForexConfig {
     /// ISO-4217 code of the primary currency. All list rows show how
@@ -925,7 +926,7 @@ impl ForexWidget {
     }
 
     /// Persist the current `watchlist` + `crypto_watchlist` arrays
-    /// back to `~/.config/glint/<forex|forex@instance>.toml`. Logs
+    /// back to `~/.config/docket/<forex|forex@instance>.toml`. Logs
     /// + surfaces status on failure.
     fn persist_lists(&self) -> bool {
         let fiat = self.config.watchlist.clone();

@@ -1,15 +1,16 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 ntrospect0
+// Copyright (C) 2026 nicococo
 
 //! Unit tests for the notes widget. Split out of `mod.rs` per the repo standard.
 
 use super::*;
 
 fn make_widget() -> NotesWidget {
-    // Keep tests off the user's real ~/.glint/notes (the new
+    // Keep tests off the user's real ~/.docket/notes (the new
     // default) by pointing the resolver at a per-process temp dir.
     let tmp = std::env::temp_dir().join(format!(
-        "glint-notes-mod-test-{}-{:?}",
+        "docket-notes-mod-test-{}-{:?}",
         std::process::id(),
         std::thread::current().id()
     ));
@@ -592,13 +593,13 @@ fn is_capturing_text_true_in_insert_mode() {
     );
 }
 
-/// Single shared TempHome guard for tests that touch ~/.config/glint/notes.
+/// Single shared TempHome guard for tests that touch ~/.config/docket/notes.
 /// Sets XDG_CONFIG_HOME to a per-test directory and removes it on drop.
 struct TempHome(std::path::PathBuf);
 impl TempHome {
     fn set() -> Self {
         let dir = std::env::temp_dir().join(format!(
-            "glint-notes-widget-test-{}-{:?}",
+            "docket-notes-widget-test-{}-{:?}",
             std::process::id(),
             std::thread::current().id()
         ));

@@ -668,6 +668,50 @@ dependencies = [
 ]
 
 [[package]]
+name = "docket-tui"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "arboard",
+ "async-trait",
+ "chrono",
+ "chrono-tz",
+ "clap",
+ "crossterm",
+ "dirs",
+ "feed-rs",
+ "futures",
+ "getrandom 0.2.17",
+ "html2text",
+ "ical",
+ "image",
+ "imap",
+ "lru",
+ "mail-parser",
+ "native-tls",
+ "notify",
+ "open",
+ "ratatui",
+ "ratatui-image",
+ "readability",
+ "reqwest 0.12.28",
+ "roxmltree",
+ "serde",
+ "serde_json",
+ "sha2",
+ "sysinfo",
+ "tokio",
+ "tokio-test",
+ "toml",
+ "tracing",
+ "tracing-subscriber",
+ "unicode-width",
+ "url",
+ "urlencoding",
+ "wiremock",
+]
+
+[[package]]
 name = "document-features"
 version = "0.2.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -978,50 +1022,6 @@ checksum = "ee8cfcc411d9adbbaba82fb72661cc1bcca13e8bba98b364e62b2dba8f960159"
 dependencies = [
  "color_quant",
  "weezl",
-]
-
-[[package]]
-name = "glint-tui"
-version = "0.5.0"
-dependencies = [
- "anyhow",
- "arboard",
- "async-trait",
- "chrono",
- "chrono-tz",
- "clap",
- "crossterm",
- "dirs",
- "feed-rs",
- "futures",
- "getrandom 0.2.17",
- "html2text",
- "ical",
- "image",
- "imap",
- "lru",
- "mail-parser",
- "native-tls",
- "notify",
- "open",
- "ratatui",
- "ratatui-image",
- "readability",
- "reqwest 0.12.28",
- "roxmltree",
- "serde",
- "serde_json",
- "sha2",
- "sysinfo",
- "tokio",
- "tokio-test",
- "toml",
- "tracing",
- "tracing-subscriber",
- "unicode-width",
- "url",
- "urlencoding",
- "wiremock",
 ]
 
 [[package]]

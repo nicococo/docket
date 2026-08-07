@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 ntrospect0
+// Copyright (C) 2026 nicococo
 
 pub mod provider;
 
@@ -43,7 +44,7 @@ use super::{AppContext, EventResult, ViewTier, Widget};
 
 use provider::{StockQuote, YahooFinanceProvider};
 
-/// Loaded from `~/.config/glint/stocks.toml`.
+/// Loaded from `~/.config/docket/stocks.toml`.
 #[derive(Debug, Clone, Deserialize)]
 pub struct StocksConfig {
     /// Index symbols pinned to the top (Yahoo: `^DJI`, `^GSPC`, `^IXIC`).
@@ -827,7 +828,7 @@ impl StocksWidget {
     }
 
     /// Persist the current `indices` + `watchlist` arrays back to
-    /// `~/.config/glint/<stocks|stocks@instance>.toml`, preserving any
+    /// `~/.config/docket/<stocks|stocks@instance>.toml`, preserving any
     /// other top-level scalars / `[colors]` block / comments. Logs +
     /// surfaces a status line on failure; never panics.
     fn persist_lists(&self) -> bool {

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 ntrospect0
+// Copyright (C) 2026 nicococo
 
 use anyhow::{Context, Result};
 use async_trait::async_trait;
@@ -8,7 +9,7 @@ use serde::Deserialize;
 
 use super::provider::{CalendarProvider, Event};
 
-/// Schema for `~/.config/glint/calendar.toml`.
+/// Schema for `~/.config/docket/calendar.toml`.
 #[derive(Debug, Clone, Deserialize, Default)]
 pub struct LocalCalendarFile {
     #[serde(default)]

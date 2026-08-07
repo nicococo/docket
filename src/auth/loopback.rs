@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 ntrospect0
+// Copyright (C) 2026 nicococo
 
 //! Provider-agnostic helpers for OAuth authorization-code flows that use a
 //! loopback redirect URI. Both `auth/google` and `auth/microsoft` build on
@@ -18,10 +19,10 @@ use tokio::{
 /// HTML shown to the user once the redirect lands. The browser stays on this
 /// tab until they close it.
 const SUCCESS_HTML: &str = r#"<!doctype html>
-<html><head><meta charset="utf-8"><title>glint — authorized</title>
+<html><head><meta charset="utf-8"><title>docket — authorized</title>
 <style>body{font-family:system-ui,sans-serif;max-width:32rem;margin:5rem auto;padding:0 2rem;color:#222}h1{margin:0 0 .5rem}</style>
 </head><body>
-<h1>glint is now connected.</h1>
+<h1>docket is now connected.</h1>
 <p>You can close this tab and return to your terminal.</p>
 </body></html>"#;
 

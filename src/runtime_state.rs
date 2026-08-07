@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 ntrospect0
+// Copyright (C) 2026 nicococo
 
 //! Runtime state — tiny user-state file separate from config.toml.
 //!
-//! Holds things that change as the user *uses* glint (rather than
+//! Holds things that change as the user *uses* docket (rather than
 //! things the user explicitly *configures*). Today: which tab is
 //! visible inside each stack. Lives at
-//! `~/.config/glint/.runtime_state.toml` (dot-prefixed to keep it
+//! `~/.config/docket/.runtime_state.toml` (dot-prefixed to keep it
 //! out of casual `ls` listings alongside the user-authored TOMLs).
 //!
 //! Failures are non-fatal in both directions:
@@ -135,7 +136,7 @@ pub struct ClockEntry {
 /// Per-stocks-instance persisted state.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct StocksEntry {
-    /// Ticker the user had highlighted when glint exited
+    /// Ticker the user had highlighted when docket exited
     /// (e.g. `"AAPL"`, `"^GSPC"`). `None` defaults to the first
     /// row on next launch. Restored only when the symbol is still
     /// in the configured indices / watchlist — drops the entry
@@ -179,7 +180,7 @@ fn default_version() -> u32 {
     RUNTIME_STATE_VERSION
 }
 
-/// Absolute path to the state file under `$XDG_CONFIG_HOME/glint/`.
+/// Absolute path to the state file under `$XDG_CONFIG_HOME/docket/`.
 pub fn state_path() -> Result<PathBuf> {
     Ok(config_dir()?.join(RUNTIME_STATE_FILENAME))
 }
@@ -234,7 +235,7 @@ pub fn clear() -> Result<()> {
     }
 }
 
-/// Atomic write to `~/.config/glint/.runtime_state.toml`. Writes via
+/// Atomic write to `~/.config/docket/.runtime_state.toml`. Writes via
 /// a sibling temp file + rename so a crash mid-write can't corrupt an
 /// existing state file. Errors log + return — callers should not
 /// abort on a failed save.
@@ -314,7 +315,7 @@ mod tests {
         // wizard's post-finalize hook calls it unconditionally on every
         // run, including the first.
         let dir = std::env::temp_dir().join(format!(
-            "glint-runtime-state-clear-test-{}-{}",
+            "docket-runtime-state-clear-test-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)

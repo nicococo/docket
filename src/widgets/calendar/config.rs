@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 ntrospect0
+// Copyright (C) 2026 nicococo
 
 //! Configuration schema for the calendar widget — TOML on-disk shape,
 //! defaults, the wizard descriptor, and the wizard-side TOML
@@ -40,6 +41,10 @@ pub enum ProviderKind {
     Caldav,
     #[serde(alias = "microsoft", alias = "ms365")]
     Outlook,
+    /// Plain `.ics` HTTP(S) feed — no CalDAV discovery, no OAuth. See
+    /// `super::ics`.
+    #[serde(alias = "ical", alias = "webcal")]
+    Ics,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -132,7 +137,9 @@ pub struct ProviderEntry {
     /// alongside a personal one). Omitted ⇒ the `"default"` account. The
     /// label names which `…_oauth_token.<account>.toml` to use and, when
     /// non-default, becomes this entry's `source` so colors don't collide.
-    /// Only Google and Outlook are account-aware today.
+    /// Google and Outlook are OAuth-account-aware; `ics` reuses the same
+    /// field as the feed label matched against `credentials/ics.toml`'s
+    /// `[[feeds]]` entries (omitted ⇒ the feed labeled `"default"`).
     #[serde(default)]
     pub account: Option<String>,
     /// Google IDs, Outlook IDs, or CalDAV URLs. Empty = the provider's default
@@ -217,8 +224,9 @@ pub fn wizard_descriptor() -> crate::wizard::descriptor::WizardDescriptor {
                 help: "Each ticked source becomes a [[providers]] block in \
                        calendar.toml. Google + Outlook need their OAuth \
                        handshake (next two fields). CalDAV credentials \
-                       live in credentials/caldav.toml. Local needs no \
-                       setup — uses [[events]] entries in calendar.toml.",
+                       live in credentials/caldav.toml, ICS feed URLs in \
+                       credentials/ics.toml. Local needs no setup — uses \
+                       [[events]] entries in calendar.toml.",
                 required: false,
                 kind: WizardFieldKind::MultiChoice {
                     options: vec![
@@ -236,6 +244,15 @@ pub fn wizard_descriptor() -> crate::wizard::descriptor::WizardDescriptor {
                             value: "caldav",
                             label: "CalDAV (iCloud, Fastmail, Nextcloud, …)",
                             help: None,
+                        },
+                        ChoiceOption {
+                            value: "ics",
+                            label: "ICS feed URL (e.g. Google's \"Secret address in iCal format\")",
+                            help: Some(
+                                "Read-only, no OAuth — paste a feed URL into \
+                                 credentials/ics.toml. Updates lag a few \
+                                 hours behind the real calendar.",
+                            ),
                         },
                         ChoiceOption {
                             value: "local",
@@ -308,6 +325,7 @@ pub(super) fn load_calendar_from_toml(
                     "google" => "google",
                     "outlook" | "microsoft" | "ms365" => "outlook",
                     "caldav" | "apple" | "icloud" => "caldav",
+                    "ics" | "ical" | "webcal" => "ics",
                     "local" => "local",
                     _ => continue,
                 };
@@ -405,6 +423,7 @@ fn existing_provider_blocks_by_kind(text: &str) -> HashMap<String, Vec<String>> 
             "google" => "google",
             "outlook" | "microsoft" | "ms365" => "outlook",
             "caldav" | "apple" | "icloud" => "caldav",
+            "ics" | "ical" | "webcal" => "ics",
             "local" => "local",
             _ => continue,
         };

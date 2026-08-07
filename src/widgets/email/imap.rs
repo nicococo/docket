@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 ntrospect0
+// Copyright (C) 2026 nicococo
 
 //! IMAP-backed email provider. Sits alongside [`gmail::GmailProvider`]
 //! and [`outlook::OutlookEmailProvider`]; users who don't want to deal
-//! with OAuth (or whose provider isn't Google/Microsoft) point glint
+//! with OAuth (or whose provider isn't Google/Microsoft) point docket
 //! at any IMAP server with an app-specific password.
 //!
 //! The `imap` crate is synchronous; we wrap every call in
@@ -30,7 +31,7 @@ use super::html_strip;
 use super::provider::{EmailMessage, EmailProvider};
 
 /// Credentials + connection config for a single IMAP account, loaded
-/// from `~/.config/glint/credentials/imap.toml` (or
+/// from `~/.config/docket/credentials/imap.toml` (or
 /// `imap_<instance>.toml` for multi-instance email).
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ImapCredentials {
@@ -213,9 +214,12 @@ fn fetch_recent_sync(
         return Ok(Vec::new());
     }
 
-    // IMAP SEARCH SINCE uses a date string in the form "1-Jan-2026".
+    // IMAP SEARCH SINCE uses a date string in the form "1-Jan-2026". `OR
+    // SINCE … UNSEEN` pulls in everything from the last `latest_days`
+    // window *plus* any older unread mail that would otherwise silently
+    // disappear from the widget once it aged out of the window.
     let since_str = since.format("%-d-%b-%Y").to_string();
-    let search_query = format!("SINCE {since_str}");
+    let search_query = format!("OR SINCE {since_str} UNSEEN");
     let uids = session
         .uid_search(&search_query)
         .with_context(|| format!("imap: UID SEARCH {search_query:?} failed"))?;
@@ -237,8 +241,14 @@ fn fetch_recent_sync(
         .collect::<Vec<_>>()
         .join(",");
 
+    // BODY.PEEK[] (not BODY[]) — per RFC 3501, a plain BODY[<section>]
+    // fetch implicitly sets \Seen on the server as a side effect of
+    // reading it, which would silently mark every fetched message read
+    // on every poll. .PEEK fetches the identical content without that
+    // side effect; read/unread is only ever changed explicitly now, via
+    // `EmailProvider::set_seen`.
     let fetches = session
-        .uid_fetch(&uid_set, "(UID FLAGS INTERNALDATE BODY[])")
+        .uid_fetch(&uid_set, "(UID FLAGS INTERNALDATE BODY.PEEK[])")
         .context("imap: UID FETCH failed")?;
 
     let mut out: Vec<EmailMessage> = Vec::with_capacity(uids.len());
@@ -288,6 +298,8 @@ fn fetch_recent_sync(
             server_unread,
             plain_body,
             web_url: None,
+            account: String::new(),
+            imap_uid: fetched.uid,
         });
     }
 
@@ -297,6 +309,101 @@ fn fetch_recent_sync(
     out.sort_by_key(|m| std::cmp::Reverse(m.received));
     let _ = session.logout();
     Ok(out)
+}
+
+/// Find the account's Trash folder. Prefers the RFC 6154 special-use
+/// `\Trash` attribute (Gmail always sends this on a plain `LIST`; most
+/// modern IMAP servers do too) and falls back to a handful of common
+/// literal names for servers that don't advertise special-use.
+fn find_trash_folder(session: &mut ConcreteSession) -> Result<Option<String>> {
+    let mailboxes = session
+        .list(Some(""), Some("*"))
+        .context("imap: LIST failed")?;
+    for mb in mailboxes.iter() {
+        let is_trash = mb.attributes().iter().any(|a| {
+            matches!(a, imap::types::NameAttribute::Custom(c) if c.eq_ignore_ascii_case("\\Trash"))
+        });
+        if is_trash {
+            return Ok(Some(mb.name().to_string()));
+        }
+    }
+    const FALLBACK_NAMES: &[&str] = &[
+        "[Gmail]/Trash",
+        "Trash",
+        "Deleted Items",
+        "Deleted Messages",
+        "INBOX.Trash",
+    ];
+    for mb in mailboxes.iter() {
+        if FALLBACK_NAMES
+            .iter()
+            .any(|n| n.eq_ignore_ascii_case(mb.name()))
+        {
+            return Ok(Some(mb.name().to_string()));
+        }
+    }
+    Ok(None)
+}
+
+/// Move one message to Trash — recoverable delete. Prefers the `MOVE`
+/// extension (RFC 6851, single atomic command; Gmail supports it) when
+/// the server advertises it; otherwise falls back to the classic
+/// COPY + mark-\Deleted + expunge dance. Prefers a UID-scoped `UID
+/// EXPUNGE` (RFC 4315/UIDPLUS) over a bare `EXPUNGE` when available, so
+/// a stray `\Deleted` flag on an unrelated message in the same folder
+/// (set by another client, mid-sync) doesn't get silently purged too.
+fn move_to_trash_sync(creds: &ImapCredentials, folder: &str, uid: u32) -> Result<()> {
+    let mut session = connect_concrete(creds)?;
+    session
+        .select(folder)
+        .with_context(|| format!("imap: SELECT {folder:?} failed"))?;
+
+    let caps = session.capabilities().context("imap: CAPABILITY failed")?;
+    let supports_move = caps.has_str("MOVE");
+    let supports_uidplus = caps.has_str("UIDPLUS");
+
+    let trash = find_trash_folder(&mut session)?
+        .ok_or_else(|| anyhow!("no Trash folder found on this account"))?;
+
+    let uid_str = uid.to_string();
+    if supports_move {
+        session
+            .uid_mv(&uid_str, &trash)
+            .with_context(|| format!("imap: UID MOVE {uid} -> {trash} failed"))?;
+    } else {
+        session
+            .uid_copy(&uid_str, &trash)
+            .with_context(|| format!("imap: UID COPY {uid} -> {trash} failed"))?;
+        session
+            .uid_store(&uid_str, "+FLAGS (\\Deleted)")
+            .with_context(|| format!("imap: UID STORE {uid} +Deleted failed"))?;
+        if supports_uidplus {
+            session
+                .uid_expunge(&uid_str)
+                .with_context(|| format!("imap: UID EXPUNGE {uid} failed"))?;
+        } else {
+            session.expunge().context("imap: EXPUNGE failed")?;
+        }
+    }
+    let _ = session.logout();
+    Ok(())
+}
+
+fn set_seen_sync(creds: &ImapCredentials, folder: &str, uid: u32, seen: bool) -> Result<()> {
+    let mut session = connect_concrete(creds)?;
+    session
+        .select(folder)
+        .with_context(|| format!("imap: SELECT {folder:?} failed"))?;
+    let query = if seen {
+        "+FLAGS (\\Seen)"
+    } else {
+        "-FLAGS (\\Seen)"
+    };
+    session
+        .uid_store(uid.to_string(), query)
+        .with_context(|| format!("imap: UID STORE {uid} {query} failed"))?;
+    let _ = session.logout();
+    Ok(())
 }
 
 #[async_trait]
@@ -328,6 +435,22 @@ impl EmailProvider for ImapProvider {
 
     fn account_address(&self) -> Option<&str> {
         None
+    }
+
+    async fn set_seen(&self, folder: &str, uid: u32, seen: bool) -> Result<()> {
+        let creds = self.creds.clone();
+        let folder = folder.to_string();
+        tokio::task::spawn_blocking(move || set_seen_sync(&creds, &folder, uid, seen))
+            .await
+            .context("imap set_seen task panicked")?
+    }
+
+    async fn move_to_trash(&self, folder: &str, uid: u32) -> Result<()> {
+        let creds = self.creds.clone();
+        let folder = folder.to_string();
+        tokio::task::spawn_blocking(move || move_to_trash_sync(&creds, &folder, uid))
+            .await
+            .context("imap move_to_trash task panicked")?
     }
 }
 

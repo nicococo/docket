@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 ntrospect0
+// Copyright (C) 2026 nicococo
 
 use anyhow::{Context, Result};
 use async_trait::async_trait;
@@ -109,14 +110,7 @@ impl RssProvider {
         let bytes = self
             .http
             .get(&feed.url)
-            .header(
-                reqwest::header::USER_AGENT,
-                concat!(
-                    "Mozilla/5.0 (compatible; glint-tui/",
-                    env!("CARGO_PKG_VERSION"),
-                    "; +https://github.com/ntrospect0/glint) Gecko/20100101 Firefox/120.0",
-                ),
-            )
+            .header(reqwest::header::USER_AGENT, crate::http::BROWSER_USER_AGENT)
             .header(
                 reqwest::header::ACCEPT,
                 "application/rss+xml, application/atom+xml, application/xml;q=0.9, \

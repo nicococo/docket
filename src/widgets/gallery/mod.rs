@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 ntrospect0
+// Copyright (C) 2026 nicococo
 
 //! Gallery widget — rotating inline image slideshow.
 //!
@@ -353,7 +354,7 @@ impl GalleryWidget {
             let has_globs = images.iter().any(|s| s.contains('*'));
             let self_signal = loader_signal_tx.clone();
             std::thread::Builder::new()
-                .name("glint-gallery-loader".into())
+                .name("docket-gallery-loader".into())
                 .spawn(move || {
                     let mut picker = picker;
                     let mut last_rescan = Instant::now();
@@ -1062,7 +1063,7 @@ fn load_image(path: &std::path::Path) -> Result<DynamicImage> {
 ///
 /// JPEG was picked over PNG because thumbs at 1600 px long-side are visually
 /// indistinguishable at terminal-grid resolution and the size difference is
-/// 3-5×. Files land at `~/.cache/glint/gallery/<instance>/thumb-<sha>.bin`.
+/// 3-5×. Files land at `~/.cache/docket/gallery/<instance>/thumb-<sha>.bin`.
 fn load_thumb(cache: &ScopedCache, path: &Path) -> Result<DynamicImage> {
     let cache_key = thumb_cache_key(path);
     let src_mtime = std::fs::metadata(path).ok().and_then(|m| m.modified().ok());
@@ -1373,7 +1374,7 @@ pub fn wizard_descriptor() -> crate::wizard::descriptor::WizardDescriptor {
         display_name: "Gallery",
         blurb: "Rotating inline image slideshow with optional periodic \
                 directory rescan. Decoded thumbnails are cached under \
-                ~/.cache/glint/gallery/ so subsequent launches are fast.",
+                ~/.cache/docket/gallery/ so subsequent launches are fast.",
         load_from_toml: None,
         render_toml: None,
         fields: vec![
@@ -1383,7 +1384,7 @@ pub fn wizard_descriptor() -> crate::wizard::descriptor::WizardDescriptor {
                 help: "Each entry is a literal path (\"~/Pictures/cover.png\") \
                        or a simple glob (\"~/Pictures/*\", \"/photos/*.jpg\"). \
                        `~/` expands to $HOME. Failed loads skip with a \
-                       glint.log warning. Patterns that resolve to more than \
+                       docket.log warning. Patterns that resolve to more than \
                        60 files are truncated — narrow the glob if you want \
                        different images in rotation.",
                 required: false,

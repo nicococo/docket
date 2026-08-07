@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 ntrospect0
+// Copyright (C) 2026 nicococo
 
 //! Per-calendar color assignment. Resolves `(source, calendar_id)`
 //! pairs to a Ratatui `Color` using (in order): explicit overrides
@@ -136,5 +137,6 @@ pub(super) fn provider_kind_label(kind: ProviderKind) -> &'static str {
         ProviderKind::Google => "google",
         ProviderKind::Outlook => "outlook",
         ProviderKind::Caldav => "caldav",
+        ProviderKind::Ics => "ics",
     }
 }

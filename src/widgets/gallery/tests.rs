@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 ntrospect0
+// Copyright (C) 2026 nicococo
 
 //! Unit tests for the gallery widget. Split out of `mod.rs` per the repo standard.
 
@@ -122,7 +123,7 @@ fn expand_pattern_globs_image_files_in_directory() {
     // The non-image must be filtered out.
     use image::{Rgb, RgbImage};
     let dir = std::env::temp_dir().join(format!(
-        "glint-gallery-glob-test-{}-{}",
+        "docket-gallery-glob-test-{}-{}",
         std::process::id(),
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -161,7 +162,7 @@ fn normalize_images_entry_auto_globs_a_real_directory() {
     // Bare directory → trailing `/*` appended so the entry behaves
     // as "every image in this directory" without the user typing it.
     let dir = std::env::temp_dir().join(format!(
-        "glint-gallery-normalize-test-{}-{}",
+        "docket-gallery-normalize-test-{}-{}",
         std::process::id(),
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -203,7 +204,7 @@ fn expand_pattern_handles_missing_dir() {
 #[test]
 fn expand_all_patterns_dedups_across_entries() {
     let dir = std::env::temp_dir().join(format!(
-        "glint-gallery-dedup-{}-{}",
+        "docket-gallery-dedup-{}-{}",
         std::process::id(),
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -238,7 +239,7 @@ fn load_thumb_round_trips_through_cache() {
     use image::{Rgb, RgbImage};
     let mut tmp = std::env::temp_dir();
     tmp.push(format!(
-        "glint-gallery-test-{}-{}.png",
+        "docket-gallery-test-{}-{}.png",
         std::process::id(),
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -350,7 +351,7 @@ fn missing_image_does_not_panic_construction() {
     // path shows "(image unavailable)". Constructor must not
     // panic; that's the contract the test guards.
     let cfg = GalleryConfig {
-        images: vec!["/tmp/glint-gallery-does-not-exist-12345.png".to_string()],
+        images: vec!["/tmp/docket-gallery-does-not-exist-12345.png".to_string()],
         rotation_secs: 0,
         ..GalleryConfig::default()
     };

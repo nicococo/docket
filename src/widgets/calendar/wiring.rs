@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 ntrospect0
+// Copyright (C) 2026 nicococo
 
 //! Provider wiring for the calendar widget — turns the configured
 //! `[[providers]]` list into a single `Arc<dyn CalendarProvider>`
@@ -21,6 +22,7 @@ use chrono::{DateTime, Local};
 use super::caldav::{CalDavCredentials, CalDavProvider};
 use super::config::{CalendarConfig, ProviderEntry, ProviderKind};
 use super::google::GoogleCalendarProvider;
+use super::ics::{IcsCredentials, IcsProvider};
 use super::local::{LocalCalendarFile, LocalCalendarProvider};
 use super::outlook::OutlookCalendarProvider;
 use super::provider::{CalendarProvider, Event};
@@ -116,10 +118,11 @@ fn build_entry(
             };
             build_caldav_entry(urls).map(|p| (p, source))
         }
+        ProviderKind::Ics => build_ics_entry(entry).map(|p| (p, source)),
     }
 }
 
-/// The `glint … --auth …` command to suggest for a provider + account.
+/// The `docket … --auth …` command to suggest for a provider + account.
 ///
 /// The `--auth` target is `microsoft` for the default account, `microsoft:work`
 /// for a named one. Crucially, when a non-default profile is active the command
@@ -134,9 +137,9 @@ fn auth_command(provider: &str, account: &str) -> String {
     };
     let profile = crate::config::active_profile();
     if profile == crate::config::DEFAULT_PROFILE {
-        format!("glint --auth {target}")
+        format!("docket --auth {target}")
     } else {
-        format!("glint --profile {profile} --auth {target}")
+        format!("docket --profile {profile} --auth {target}")
     }
 }
 
@@ -146,7 +149,7 @@ fn build_outlook_entry(
 ) -> Result<Arc<dyn CalendarProvider>, String> {
     let client = MicrosoftClientConfig::load().map_err(|err| {
         tracing::warn!(error = %err, "microsoft_oauth_client.toml missing or invalid");
-        "Drop microsoft_oauth_client.toml in ~/.config/glint/credentials/".to_string()
+        "Drop microsoft_oauth_client.toml in ~/.config/docket/credentials/".to_string()
     })?;
     let account = entry.account_label();
     let token = MicrosoftToken::load_account(account)
@@ -174,7 +177,7 @@ fn build_google_entry(
 ) -> Result<Arc<dyn CalendarProvider>, String> {
     let client = GoogleClientConfig::load().map_err(|err| {
         tracing::warn!(error = %err, "google_oauth_client.toml missing or invalid");
-        "Drop google_oauth_client.toml in ~/.config/glint/credentials/".to_string()
+        "Drop google_oauth_client.toml in ~/.config/docket/credentials/".to_string()
     })?;
     let account = entry.account_label();
     let token = match GoogleToken::load_account(account) {
@@ -202,13 +205,37 @@ fn build_caldav_entry(urls: Vec<String>) -> Result<Arc<dyn CalendarProvider>, St
     let creds = match CalDavCredentials::load() {
         Ok(Some(c)) => c,
         Ok(None) => {
-            return Err("Fill in ~/.config/glint/credentials/caldav.toml to connect CalDAV".into());
+            return Err("Fill in ~/.config/docket/credentials/caldav.toml to connect CalDAV".into());
         }
         Err(err) => return Err(format!("CalDAV credentials unreadable: {err}")),
     };
     CalDavProvider::new(creds, urls)
         .map(|p| Arc::new(p) as Arc<dyn CalendarProvider>)
         .map_err(|err| format!("CalDAV init failed: {err}"))
+}
+
+fn build_ics_entry(entry: &ProviderEntry) -> Result<Arc<dyn CalendarProvider>, String> {
+    let creds = match IcsCredentials::load() {
+        Ok(Some(c)) => c,
+        Ok(None) => {
+            return Err(
+                "Fill in ~/.config/docket/credentials/ics.toml to connect an ICS feed".into(),
+            );
+        }
+        Err(err) => return Err(format!("ICS credentials unreadable: {err}")),
+    };
+    let label = entry.account_label();
+    let feed = creds
+        .feeds
+        .iter()
+        .find(|f| f.label == label)
+        .ok_or_else(|| {
+            format!(
+                "no ics feed labeled {label:?} in credentials/ics.toml (add \
+                 `account = \"{label}\"` there, or to this [[providers]] entry, to match)"
+            )
+        })?;
+    Ok(Arc::new(IcsProvider::new(feed.url.clone(), feed.label.clone())) as Arc<dyn CalendarProvider>)
 }
 
 /// Meta-provider that fans `fetch_range` calls out to every wrapped provider

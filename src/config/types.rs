@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 ntrospect0
+// Copyright (C) 2026 nicococo
 
 use serde::{
     de::{self, Visitor},
@@ -60,7 +61,7 @@ pub struct GlobalConfig {
     #[serde(default = "default_stack_hidden_poll_ratio")]
     pub stack_hidden_poll_ratio: u32,
 
-    /// Bottom-of-screen status bar (`glint vX.Y.Z │ clock │ Focus │
+    /// Bottom-of-screen status bar (`docket vX.Y.Z │ clock │ Focus │
     /// Scheme │ hints`). `true` (default) shows the row; `false` hides
     /// it and gives the row back to the widget grid. Discoverability
     /// of `?`/`q`/Tab still flows through the help overlay either way.

@@ -1,13 +1,13 @@
-# Contributing to glint
+# Contributing to docket
 
-Thanks for your interest in glint. Issues, PRs, and design discussion
+Thanks for your interest in docket. Issues, PRs, and design discussion
 are all welcome.
 
 ## Quick start
 
 ```sh
-git clone <your-fork-url> glint
-cd glint
+git clone <your-fork-url> docket
+cd docket
 make test          # full suite, ~460 tests
 make build         # debug binary
 cargo run -- --setup   # interactive wizard, useful for end-to-end testing
@@ -28,7 +28,7 @@ widget registry.
 
 ## Licensing of your contributions
 
-glint is licensed under **GPL v3 or later** (see [LICENSE](LICENSE)).
+docket is licensed under **GPL v3 or later** (see [LICENSE](LICENSE)).
 Two things every contributor needs to understand and accept by
 submitting a PR:
 
@@ -61,7 +61,7 @@ merge.
 
 ### 2. Relicensing grant
 
-**By contributing to glint, you agree that the project's maintainer
+**By contributing to docket, you agree that the project's maintainer
 (currently the original author) may relicense the project — including
 your contributions — under terms different from GPL v3, at the
 maintainer's sole discretion.** This includes (but is not limited to)
@@ -87,7 +87,7 @@ disagreement at merge time.
 
 ## How features get scoped
 
-glint is pre-launch v0.2 and shipping with deliberate restraint:
+docket is pre-launch v0.2 and shipping with deliberate restraint:
 
 - **Widgets are independently optional.** Each widget compiles in
   only when its Cargo feature is enabled. New widgets are purely

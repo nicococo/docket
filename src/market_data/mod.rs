@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 ntrospect0
+// Copyright (C) 2026 nicococo
 
 //! Provider-agnostic market-data primitives plus the Yahoo Finance
 //! adapter. Houses the [`Period`] timeframe enum (shared by every

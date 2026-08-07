@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 ntrospect0
+// Copyright (C) 2026 nicococo
 
 //! Generic per-widget setup page. Drives entirely from the widget's
 //! `WizardDescriptor` so adding a new widget to the wizard is a matter of
@@ -1077,7 +1078,7 @@ fn render_oauth_status(
     focused: bool,
 ) {
     // Token-on-disk check is the canonical source of truth — the user
-    // may have run `glint --auth <provider>` from another terminal
+    // may have run `docket --auth <provider>` from another terminal
     // outside this wizard session.
     let has_token = provider_has_token(provider);
     let session_status = app.state.auth_status.get(provider);
@@ -1111,7 +1112,7 @@ fn render_oauth_status(
         let hint = if has_token {
             "Press Space to re-authorize (e.g. after revoking access)."
         } else {
-            "Press Space to authorize — glint opens a browser tab and waits for the redirect."
+            "Press Space to authorize — docket opens a browser tab and waits for the redirect."
         };
         lines.push(Line::from(vec![
             Span::raw(FIELD_BODY_INDENT),
