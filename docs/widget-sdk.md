@@ -64,10 +64,6 @@ impl Widget for HelloWidget {
 pub fn build(ctx: &WidgetCtx) -> Box<dyn Widget> {
     Box::new(HelloWidget { id: format!("hello@{}", ctx.instance) })
 }
-
-pub fn wizard_descriptor() -> crate::wizard::descriptor::WizardDescriptor {
-    crate::wizard::descriptor::WizardDescriptor::defer_to_toml(KIND)
-}
 ```
 
 Plus three small additions outside the widget module:
@@ -82,7 +78,6 @@ Plus three small additions outside the widget module:
         factory: super::hello::build,
         default_in_first_run: false,
         auth_requirements: &[],
-        wizard: super::hello::wizard_descriptor,
     },
     ```
 
@@ -136,9 +131,9 @@ This is convention, not enforcement. Widgets remain free to bind however they wa
 |---|---|---|
 | `↑` / `↓` / `j` / `k` | Move selection up / down | Vim aliases on letters; arrows for non-vim muscle memory. |
 | `←` / `→` / `h` / `l` | Cycle horizontal context (tabs, periods, panes) | Use when the widget has a horizontal axis worth cycling. |
-| `Enter` | **Primary in-place action** | Context-dependent: expand a list row (news, feeds), swap selection (forex), open the active note (notes). Never opens an external URL — that's too easy to mis-fire when the user meant "look at this inline." |
+| `Enter` | **Primary in-place action** | Context-dependent: expand a list row (news, feeds), open the active note (notes). Never opens an external URL — that's too easy to mis-fire when the user meant "look at this inline." |
 | `e` / `Space` | Expand / collapse selected item | Alias for `Enter` in list widgets that have an inline expansion view. Both work. |
-| `o` | **Open externally** (browser, file, app) | The dedicated "leave docket" gesture. Used by stocks, forex, news, feeds. Should always be a *single key* away from the user's intent; never on `Enter`. |
+| `o` | **Open externally** (browser, file, app) | The dedicated "leave docket" gesture. Used by news, feeds, calendar, email. Should always be a *single key* away from the user's intent; never on `Enter`. |
 | `r` | Force refresh | Bypasses the poll interval. |
 | `?` | Help overlay | Global; you don't bind this. |
 | `Tab` / `Shift+Tab` | Focus cycle | Global; you don't bind this. |
@@ -148,13 +143,13 @@ This is convention, not enforcement. Widgets remain free to bind however they wa
 
 ### List-management gestures
 
-For widgets that let the user add or remove items from a persisted list (stocks watchlist, forex watchlist, notes, feeds topics-at-runtime):
+For widgets that let the user add or remove items from a persisted list (notes, feeds topics-at-runtime):
 
 | Key | Action |
 |---|---|
-| `n` | New (create entity) — note, ticker, currency. Letter form preferred. |
+| `n` | New (create entity) — e.g. a note. Letter form preferred. |
 | `d` | Delete (with confirm modal — see [`docket::ui::modal`](#confirm-modal-docketuimodal)). |
-| `+` / `-` | Add to / remove from the **current list shape** (e.g. add a `:stock` lookup to the watchlist, remove the selected currency). Punctuation forms preserve muscle memory for widgets that started with them. |
+| `+` / `-` | Add to / remove from the **current list shape**. Punctuation forms preserve muscle memory for widgets that started with them. |
 
 `n`/`d` and `+`/`-` are *not* mutually exclusive. The notes widget binds both pairs to its create/delete actions; either gesture works. New widgets should prefer the letter forms in their help text and keep `+`/`-` available as aliases when there's no risk of muscle-memory churn.
 
@@ -163,10 +158,8 @@ For widgets that let the user add or remove items from a persisted list (stocks 
 | Key | Action |
 |---|---|
 | `s` | Run / cycle a summary (news, feeds). LLM-backed. |
-| `y` | Yank selected value to clipboard. |
+| `y` | Yank selected value to clipboard (notes). |
 | `x` | Clear a transient state (a `:lookup` row, a stale message). |
-| `c` | Cycle a display mode (stocks: %/$, forex: reset amount). |
-| `1`–`9` | Select graph period / numbered tab directly (stocks, forex). |
 
 ### Modifiers
 
@@ -203,7 +196,7 @@ If your widget needs a key bound differently from this table, the rules:
 
 1. **Document the deviation in the widget's `keybindings()`** so the help overlay surfaces it. Don't quietly diverge.
 2. **Don't deviate on `Ctrl+C` / `Ctrl+\` / `Shift+<letter>`.** Those are global contracts.
-3. **If you bind `Enter` to something other than the in-place primary action, you should have a very specific reason.** Forex binds `Enter` to "swap selected to primary" — that IS the in-place primary action (it doesn't navigate away, doesn't open anything external), so it follows the spirit.
+3. **If you bind `Enter` to something other than the in-place primary action, you should have a very specific reason.** The rebind must still count as "in-place" — it doesn't navigate away, doesn't open anything external — or it breaks the spirit of the convention.
 4. **Add aliases instead of replacing.** When iterating, keep the old binding as an alias for one or two releases so muscle memory doesn't break out from under users. Notes binds both `n`/`+` and `d`/`-`; either form works.
 
 ---
@@ -212,7 +205,7 @@ If your widget needs a key bound differently from this table, the rules:
 
 ### Polling (`PollTracker`)
 
-**When to use:** your widget periodically pulls data from the network or a slow source (RSS feeds, network quotes, weather, mail, calendar).
+**When to use:** your widget periodically pulls data from the network or a slow source (RSS feeds, mail, calendar).
 
 **Why a platform helper:** every data-fetching widget was reinventing the same 4-line `last_attempt + Duration` debounce. We extracted it to [`src/polling.rs`](../src/polling.rs) so the cache-age clamp, "is_due" semantics, and forward-looking deadline-scheduler hook live in one place.
 
@@ -288,7 +281,7 @@ Implement it; you get those wins for free when they ship.
 It's a debounce primitive, not a fetcher framework. If your widget:
 
 - Has multi-tier policy (e.g., **email** has a fast retry while account address is being resolved, then switches to the configured mail interval): own **two** trackers and pick between them. See [`src/widgets/email/mod.rs`](../src/widgets/email/mod.rs)'s `account_poll` + `mail_poll`.
-- Owns a richer decision tree (e.g., **weather**'s `NextAction { Locate | Fetch | Wait }`): use a tracker *inside* the decision tree's "should I fetch?" branch. See [`src/widgets/weather/mod.rs`](../src/widgets/weather/mod.rs).
+- Owns a richer decision tree (locate → fetch → wait, or similar): use a tracker *inside* the decision tree's "should I fetch?" branch.
 - Is push-driven (IMAP IDLE, WebSocket, SSE): you probably don't need a tracker. Implement `update()` however you like and skip `poll_snapshot`.
 
 The trait hook returns `Option<_>` so opting out is the empty default — costs nothing.
@@ -307,7 +300,7 @@ The trait hook returns `Option<_>` so opting out is the empty default — costs 
 | `next_due_at() -> Option<Instant>` | Monotonic instant of the next scheduled fetch. Reserved for future scheduler. |
 | `snapshot() -> PollSnapshot` | Read-only copy for the platform trait hook. |
 
-**Reference example:** [`src/widgets/stocks/mod.rs`](../src/widgets/stocks/mod.rs) — single tracker, straightforward use.
+**Reference example:** [`src/widgets/resources/mod.rs`](../src/widgets/resources/mod.rs) — single tracker, straightforward use.
 
 ---
 
@@ -393,7 +386,6 @@ let up = uptime_label(secs);  // u64
 
 **Reference examples:**
 - `relative_time_label` — [`src/widgets/feeds/mod.rs`](../src/widgets/feeds/mod.rs) and [`src/widgets/news/mod.rs`](../src/widgets/news/mod.rs).
-- `short_duration_label` — [`src/widgets/weather/mod.rs`](../src/widgets/weather/mod.rs) (data age in the meta row).
 - `uptime_label` — [`src/widgets/resources/mod.rs`](../src/widgets/resources/mod.rs).
 
 ---
@@ -425,16 +417,14 @@ let token: Option<MyToken> = credentials::load("my_widget_token.toml")?;
 // so the final inode is never visible at a wider mode — even if
 // docket crashes mid-write.
 let path = credentials::save("my_widget_token.toml", &token)?;
-
-// Write a starter template iff the file is missing. Idempotent —
-// re-running doesn't clobber the user's filled-in version. Used
-// by the wizard's `:setup` flow to drop placeholders the user
-// then edits.
-let wrote_new = credentials::write_template_if_missing(
-    "my_widget_oauth_client.toml",
-    "client_id = \"REPLACE_WITH_YOUR_CLIENT_ID\"\n",
-)?;
 ```
+
+A brand-new credential file (e.g. an OAuth client registration) that
+needs a placeholder starter template seeded on first run belongs
+alongside the existing ones in `config::seed_global_layer` /
+`config::seed_profile_dir` (`src/config/mod.rs`) — that's what
+`docket --init` calls, and it's the single place all default-seeded
+files (config TOML *and* credentials templates) come from.
 
 #### Behavior notes
 
@@ -445,17 +435,17 @@ let wrote_new = credentials::write_template_if_missing(
 
 #### When *not* to use
 
-- **Non-secret config**: widget TOMLs (`stocks.toml`, `news.toml`, etc.) belong in the config dir, not credentials. They're meant to be world-readable; users edit them.
+- **Non-secret config**: widget TOMLs (`calendar.toml`, `news.toml`, etc.) belong in the config dir, not credentials. They're meant to be world-readable; users edit them.
 - **System keyring integration**: this module writes plaintext-on-disk (chmod 0600). Future work to back specific files with macOS Keychain / Windows Credential Manager / `libsecret` would land as a `CredentialBackend` trait sitting on top of this module; see the [credential-storage roadmap](https://github.com/nicococo/docket/issues) once it's filed.
 - **Outside the credentials dir**: if you genuinely need to write a chmod-0600 file somewhere else (logs with secrets?), that's a different problem — talk through the use case in an issue first.
 
-**Reference example:** [`src/auth/google/store.rs`](../src/auth/google/store.rs) — `GoogleToken::{path, load, save}` are thin wrappers over `credentials::{path, load, save}`. Microsoft's token store and the auth wizard's template scaffolding follow the same shape.
+**Reference example:** [`src/auth/google/store.rs`](../src/auth/google/store.rs) — `GoogleToken::{path, load, save}` are thin wrappers over `credentials::{path, load, save}`. Microsoft's token store follows the same shape.
 
 ---
 
 ### Transient status (`docket::ui::status`)
 
-**When to use:** any widget that shows short-lived status messages — "Added AAPL to watchlist", "Save failed", "Copied to clipboard", visual pulse markers like the forex "📋 → ✅" indicator. The pattern: set a value with a TTL, render it while it's live, automatically clear once the TTL elapses.
+**When to use:** any widget that shows short-lived status messages — "Note deleted", "Save failed", "Copied to clipboard". The pattern: set a value with a TTL, render it while it's live, automatically clear once the TTL elapses.
 
 #### API
 
@@ -496,7 +486,7 @@ async fn update(&mut self, _ctx: &AppContext) -> Result<()> {
 
 #### Generic over the value type
 
-The most common shape is `Option<TimedFeedback<String>>` for footer messages, but the wrapper is generic. The forex widget uses `Option<TimedFeedback<usize>>` to track the row index whose copy icon should briefly flash "✅" after a clipboard yank — same machinery, different payload.
+The most common shape is `Option<TimedFeedback<String>>` for footer messages, but the wrapper is generic — e.g. `Option<TimedFeedback<usize>>` to track a row index that should briefly flash after an action, same machinery, different payload.
 
 #### Behavior notes
 
@@ -509,15 +499,13 @@ The most common shape is `Option<TimedFeedback<String>>` for footer messages, bu
 - **Persistent status** (e.g., "OAuth required" while a token is missing). Those aren't transient — they're a function of state, not time.
 - **Animations** with multiple frames or per-tick updates. `TimedFeedback` is set-once-and-forget. For pulsing / progress bars, manage the time yourself.
 
-**Reference examples:**
-- `Option<TimedFeedback<String>>` for footer messages — [`src/widgets/stocks/mod.rs`](../src/widgets/stocks/mod.rs), [`src/widgets/forex/mod.rs`](../src/widgets/forex/mod.rs), [`src/widgets/feeds/mod.rs`](../src/widgets/feeds/mod.rs).
-- `Option<TimedFeedback<usize>>` for "which row just got copied" pulse — [`src/widgets/forex/mod.rs`](../src/widgets/forex/mod.rs) (`copy_feedback`).
+**Reference example:** `Option<TimedFeedback<String>>` for footer messages — [`src/widgets/feeds/mod.rs`](../src/widgets/feeds/mod.rs).
 
 ---
 
 ### Confirm modal (`docket::ui::modal`)
 
-**When to use:** any widget that needs a destructive-action confirmation overlay — "Remove ticker?", "Delete note?", "Drop folder?" The shared helper owns the *rendering* (centred rounded box, theme-aware title bar, target name in bold, action hint at the bottom) and the *key dispatch* (y/Y commits, anything else cancels). Widgets keep their own `Option<T>` state slot so the meaning of "what's being confirmed" stays widget-local.
+**When to use:** any widget that needs a destructive-action confirmation overlay — "Delete note?", "Move to Trash?", "Drop folder?" The shared helper owns the *rendering* (centred rounded box, theme-aware title bar, target name in bold, action hint at the bottom) and the *key dispatch* (y/Y commits, anything else cancels). Widgets keep their own `Option<T>` state slot so the meaning of "what's being confirmed" stays widget-local.
 
 #### API
 
@@ -538,7 +526,7 @@ if let Some(target) = self.state.lock().expect("poisoned").confirm_remove.clone(
         inner,                              // parent area for centring
         &self.theme,
         ConfirmModal {
-            title: " Remove ticker? ",      // including leading + trailing spaces
+            title: " Delete note? ",        // including leading + trailing spaces
             target: &target,                // shown in bold inside the modal
             hint: None,                     // None → default "[y] confirm · any other key cancels"
             max_width: 48,                  // 48 / 54 — widget's preference
@@ -569,7 +557,7 @@ if self.state.lock().expect("poisoned").confirm_remove.is_some() {
 - **Inline forms** (paste a cookie / type a path). The body shape here is target-name-as-static-text — no text entry. For input modals, build directly with `Block` + `Paragraph` and your own state machine.
 - **Persistent overlays**. This modal expects the user to act and dismiss on the same render cycle. Long-lived dialogs (e.g. "loading…") aren't the right fit.
 
-**Reference example:** [`src/widgets/stocks/mod.rs`](../src/widgets/stocks/mod.rs) — `render_confirm_modal` collapses to a 7-line call into `crate::ui::modal::render` and the key dispatch becomes a 3-line `match` over `ConfirmChoice`. Notes and forex follow the same pattern.
+**Reference example:** [`src/widgets/notes/mod.rs`](../src/widgets/notes/mod.rs) — `render_confirm_modal` collapses to a 7-line call into `crate::ui::modal::render` and the key dispatch becomes a 3-line `match` over `ConfirmChoice`. Calendar and email follow the same pattern.
 
 ---
 
@@ -660,14 +648,17 @@ fn handle_key(&mut self, key) -> EventResult {
   `ViewTier::from_rect`, plus `inner_rows` / `inner_cols` (border-aware
   content dimensions) and `row_split` (give one section up to N rows, the
   remainder to another — e.g. a sparkline budget above a process list).
-- [`docket::ui::grid::CardGrid`](../src/ui/grid.rs) — responsive
-  card-row / card-grid layout (pinned-home strip, scrollable grid, or
-  fixed-centered), with the render and click hit-test derived from one
-  `layout()` call. Powers the clock and weather Full-tier city grids.
-- [`docket::ui::chart::range_bar`](../src/ui/chart/range_bar.rs) — a
-  labelled min–max range bar (the stocks/forex 52-week bar).
 - [`docket::text::truncate`](../src/text.rs) (Unicode-width aware) and the
   big-digit / braille chart helpers under `docket::ui`.
+
+> A prior revision of this doc also pointed at `docket::ui::grid::CardGrid`
+> and `docket::ui::chart::range_bar` — both were dead code left behind by
+> the widgets that used them (Clock, Weather, Stocks, Forex, Gallery) and
+> were removed along with those widgets. If you're building a
+> multi-column card grid or a labelled min–max range bar again, there's
+> no shared primitive for it today; write it locally first and only lift
+> it out once a second widget needs the same shape (see the
+> [convergence-signal rule](#convergence-signal)).
 
 **Degrade gracefully.** A `Full` rect can still be relatively short.
 Compute what fits and fall back to a smaller layout rather than clipping
@@ -678,15 +669,14 @@ plain grid, then a compact two-row grid as vertical space shrinks).
 ([`src/widgets/calendar/mod.rs`](../src/widgets/calendar/mod.rs)) is the
 most complete — zoomed Day/Week views with a 3-month reference block, a
 zoomed wall-calendar Month view with per-day event dots, and click
-hit-tests kept in sync with every layout. Weather and clock show
-`CardGrid`-based multi-column Full grids; email and news show split
+hit-tests kept in sync with every layout. Email and news show split
 reading panes.
 
 ---
 
 ## Best practices
 
-These conventions emerged from building 11+ widgets. They aren't enforced — just the patterns that consistently work well.
+These conventions emerged from building docket's widgets (both the six shipped today and several since retired). They aren't enforced — just the patterns that consistently work well.
 
 ### Theming
 
@@ -702,7 +692,7 @@ These conventions emerged from building 11+ widgets. They aren't enforced — ju
 
 ### Mouse hit-testing
 
-- Capture screen-absolute rects (and per-row hit ranges) into widget state *during render*, then consult them in `handle_mouse`. Avoid re-running layout math on every click. Examples: `feeds`'s `list_rows`, `tab_rects`; `forex`'s `row_hits`.
+- Capture screen-absolute rects (and per-row hit ranges) into widget state *during render*, then consult them in `handle_mouse`. Avoid re-running layout math on every click. Example: `feeds`'s `list_rows`, `tab_rects`.
 - Route scroll wheel by cursor position (inside list → navigate, inside details → scroll content) rather than always doing the same thing.
 - For layouts you *recompute* in the hit-test rather than cache (e.g. a large grid), put the geometry in **one shared helper** the renderer and hit-test both call — never two copies of the maths that can drift. See `calendar`'s `month_full_layout`.
 - Return `Handled` only when the click actually changed something. The app repaints on every *acting* mouse event but skips inert ones (a click on empty space, a scroll at its limit), so an honest `Handled`/`Ignored` keeps the dashboard from doing needless full repaints.
@@ -712,18 +702,18 @@ These conventions emerged from building 11+ widgets. They aren't enforced — ju
 - Branch your render on `ViewTier::from_rect(area)`; put richer rendering under `ViewTier::Full` and leave the smaller tiers **byte-for-byte unchanged**. Prove it with a `non_full_tier_*_unchanged` render test.
 - Never detect "am I zoomed?" — a zoom frame is just a large rect. Ask only how big your rect is.
 - Handlers have no `area` (keys) or only the current one (mouse): stash the last-rendered tier in a field (`last_full`) during render and read it in `handle_key` / `handle_mouse`.
-- Reach for the shared primitives — `CardGrid`, `range_bar`, `row_split` / `inner_rows` — before hand-rolling grid maths. Full section: [Responsive views & Focus Zoom](#responsive-views--focus-zoom-viewtier).
+- Reach for the shared primitives — `row_split` / `inner_rows` — before hand-rolling grid maths. Full section: [Responsive views & Focus Zoom](#responsive-views--focus-zoom-viewtier).
 
 ### Confirm modals
 
 - Pattern: `Option<String>` field on state representing "pending confirmation," matched on `y/Y` (commit) vs any-other-key (cancel).
 - Render with `Clear` first, then a 5–7 row centered `Block` with `BorderType::Rounded`.
 - The title bar background pulls from `self.theme.text_selected.fg.unwrap_or(Color::Yellow)` — never hardcoded.
-- Examples: [`notes`](../src/widgets/notes/mod.rs), [`stocks`](../src/widgets/stocks/mod.rs), [`forex`](../src/widgets/forex/mod.rs).
+- Examples: [`notes`](../src/widgets/notes/mod.rs), [`calendar`](../src/widgets/calendar/mod.rs), [`email`](../src/widgets/email/mod.rs).
 
 ### Status feedback with TTL
 
-- For transient messages ("Added AAPL", "Save failed"), store `Option<(String, Instant)>` on state; check `elapsed() >= 2.5s` in render and clear when expired.
+- For transient messages ("Note deleted", "Save failed"), store `Option<(String, Instant)>` on state; check `elapsed() >= 2.5s` in render and clear when expired.
 - The footer hint replaces with the status message while it's live, then reverts.
 
 ### Caching
@@ -734,7 +724,7 @@ These conventions emerged from building 11+ widgets. They aren't enforced — ju
 
 ### Persistence of runtime mutations
 
-- If your widget mutates a list at runtime (e.g., add ticker, remove currency), write back to the widget's TOML via [`config::rewrite_widget_top_level_string_array`](../src/config/mod.rs). Preserves comments and other settings.
+- If your widget mutates a list at runtime, write back to the widget's TOML yourself — there's no shared helper for this today (the one that existed, `config::rewrite_widget_top_level_string_array`, was removed along with its only callers). See `config::load_widget_toml_for_instance` for the read side.
 - Credentials go in `~/.config/docket/credentials/<widget>_<thing>.toml`, chmod `0600`. See [`auth/google/store.rs`](../src/auth/google/store.rs).
 
 ### Don't fight the trait
@@ -751,19 +741,16 @@ When you want to copy a pattern, these are the canonical references:
 
 | Pattern | Reference widget |
 |---|---|
-| Simple data list with polling | [`stocks`](../src/widgets/stocks/mod.rs) |
+| Simple data list with polling | [`resources`](../src/widgets/resources/mod.rs) |
 | Two-tier polling policy | [`email`](../src/widgets/email/mod.rs) (`account_poll` + `mail_poll`) |
-| Decision-tree fetch logic | [`weather`](../src/widgets/weather/mod.rs) (`NextAction`) |
 | RSS feed aggregation | [`news`](../src/widgets/news/mod.rs), [`feeds`](../src/widgets/feeds/mod.rs) |
 | LLM summarization w/ length toggle | [`feeds`](../src/widgets/feeds/mod.rs) |
-| Inline image rendering | [`gallery`](../src/widgets/gallery/mod.rs), [`feeds`](../src/widgets/feeds/mod.rs) |
+| Inline image rendering | [`feeds`](../src/widgets/feeds/mod.rs) (article thumbnails) |
 | OAuth token storage | [`auth/google/store.rs`](../src/auth/google/store.rs) |
-| Confirm-removal modal | [`notes`](../src/widgets/notes/mod.rs), [`stocks`](../src/widgets/stocks/mod.rs) |
+| Confirm-removal modal | [`notes`](../src/widgets/notes/mod.rs) |
 | Mouse hit-testing with wrapped rows | [`feeds`](../src/widgets/feeds/mod.rs) |
 | Adaptive horizontal/vertical layout | [`feeds`](../src/widgets/feeds/mod.rs) |
-| Editable inline cell | [`forex`](../src/widgets/forex/mod.rs) (`editing_amount`) |
 | Stack composition (multi-widget tab strip) | [`stack`](../src/widgets/stack.rs) — platform layer |
-| Wizard descriptor (declarative setup) | every widget's `wizard_descriptor()` fn |
 
 ---
 
@@ -771,9 +758,9 @@ When you want to copy a pattern, these are the canonical references:
 
 The current extraction sprint is complete — the high-confidence cluster candidates surfaced in audits 1–2 have all landed (see § Platform capabilities above). The remaining items are tracked but waiting on either pain signal or design clarity:
 
-1. **`ScopedCache::load_within<T>(key, ttl)`** — convenience wrapper over `load + entry.age() < ttl`. Manually computed today in `feeds`, `gallery`, and planned `news` cache flows. ~40 LOC saved across 3 sites; easy lift when one of those widgets needs more cache work.
+1. **`ScopedCache::load_within<T>(key, ttl)`** — convenience wrapper over `load + entry.age() < ttl`. Manually computed today in `feeds`'s cache flows. Easy lift when another widget needs the same shape.
 2. **Spawn-refresh skeleton** — every polling widget has the same `lock → mark inflight → spawn → fetch → lock → write data` shape. Theoretical biggest win (~200 LOC) but the highest abstraction risk — the variance across result types and state shapes makes a clean generic non-obvious. **Don't reach for this** until a new widget shows up demanding a "common shape" we don't already have.
-3. **Selection trait (`SelectableList`)** — `move_selection(delta)` + clamp, currently duplicated across 5 widgets. The variance (scroll-reset behavior, primary-row skip in forex, list-then-transient layering in stocks) means a single trait either becomes too prescriptive or too loose to pay for itself. **Likely doesn't ship.**
+3. **Selection trait (`SelectableList`)** — `move_selection(delta)` + clamp, duplicated across the list-shaped widgets. Variance in scroll-reset behavior and list-then-transient layering means a single trait either becomes too prescriptive or too loose to pay for itself. **Likely doesn't ship.**
 4. **`apply_config` macro** — every widget's `apply_config` does the same deserialize → clone(theme, cache, …) → `*self = Self::with_config(...)` dance. ~100 LOC could collapse, but macros hurt readability and stack-trace clarity. **Likely doesn't ship.**
 
 Future lifts should be driven by *new* widget pain, not by scanning the existing tree for more things to consolidate. Per the [convergence-signal rule](#convergence-signal), the bar is 3+ widgets with mostly-identical shape and clear variance points — none of the remaining items hit that bar cleanly without active pressure.

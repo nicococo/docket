@@ -29,6 +29,11 @@ const BIT_AT: [[u32; SUB_COLS_PER_CHAR]; SUB_ROWS_PER_CHAR] =
 /// Plot the y-value series `points` into `rows × cols` chars (one char = 4×2
 /// sub-pixels). `(min, max)` is the visible y-range; values outside the range
 /// are clamped. Returns `rows` strings, each `cols` chars wide.
+///
+/// Line-only variant of [`render_series_filled`] — no current widget uses
+/// it (resources' CPU-history chart wants the filled area look), but it's
+/// a real, tested primitive kept available for a future line-chart widget.
+#[allow(dead_code)]
 #[allow(clippy::needless_range_loop)] // index-driven on purpose: we set bitmap[y][x] each iter.
 pub fn render_series(points: &[f64], rows: u16, cols: u16, min: f64, max: f64) -> Vec<String> {
     let rows = rows as usize;

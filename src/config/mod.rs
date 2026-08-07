@@ -45,58 +45,6 @@ where
     load_widget_toml(&stem)
 }
 
-/// Rewrite a top-level array assignment (`<key> = ["a", "b", ...]`) in a
-/// widget's TOML file, preserving comments + other settings verbatim.
-/// Missing keys are appended before the first `[table]` header.
-/// Operates atomically via a sibling `*.tmp` rename.
-///
-/// Used by runtime list mutations (stocks watchlist add/remove, forex
-/// crypto add/remove). The wizard's [`crate::wizard::toml_merge`] does
-/// the actual text munging; this is a thin wrapper that handles I/O
-/// and string-array formatting.
-pub fn rewrite_widget_top_level_string_array(
-    kind: &str,
-    instance: &str,
-    key: &str,
-    items: &[String],
-) -> Result<()> {
-    let stem = crate::widgets::widget_config_stem(kind, instance);
-    let path = config_dir()?.join(format!("{stem}.toml"));
-    let original = if path.exists() {
-        std::fs::read_to_string(&path)
-            .with_context(|| format!("failed to read {}", path.display()))?
-    } else {
-        // No file yet — start from empty so the helper can append the
-        // array as a fresh first line.
-        String::new()
-    };
-    let literal = format_string_array_literal(items);
-    let updated = crate::wizard::toml_merge::merge_top_level_scalars(&original, &[(key, literal)]);
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
-            .with_context(|| format!("failed to mkdir {}", parent.display()))?;
-    }
-    let tmp = path.with_extension("toml.tmp");
-    std::fs::write(&tmp, updated).with_context(|| format!("failed to write {}", tmp.display()))?;
-    std::fs::rename(&tmp, &path)
-        .with_context(|| format!("failed to rename {} -> {}", tmp.display(), path.display()))?;
-    Ok(())
-}
-
-/// Render a `Vec<String>` as a single-line TOML array literal:
-/// `["AAPL", "MSFT"]`. Quotes inside an entry are escaped with a
-/// backslash. Empty list renders as `[]`.
-fn format_string_array_literal(items: &[String]) -> String {
-    if items.is_empty() {
-        return "[]".to_string();
-    }
-    let parts: Vec<String> = items
-        .iter()
-        .map(|s| format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\"")))
-        .collect();
-    format!("[{}]", parts.join(", "))
-}
-
 /// The default profile name. Always exists; cannot be deleted.
 pub const DEFAULT_PROFILE: &str = "default";
 
@@ -124,9 +72,8 @@ pub fn set_active_profile(name: impl Into<String>) {
 }
 
 /// Point the per-profile config dir at an explicit directory, bypassing
-/// profile resolution. Used by `--config <FILE>` (single-file mode) and by
-/// the wizard's Profile Manager, which re-targets it to edit a chosen
-/// profile. Re-settable (unlike the active profile).
+/// profile resolution. Used by `--config <FILE>` (single-file mode).
+/// Re-settable (unlike the active profile).
 pub fn set_config_dir_override(dir: PathBuf) {
     if let Ok(mut w) = CONFIG_DIR_OVERRIDE.write() {
         *w = Some(dir);
@@ -168,8 +115,8 @@ pub fn docket_root() -> Result<PathBuf> {
 }
 
 /// The active profile's config directory — `<docket_root>/profiles/<active>`.
-/// Every per-profile path (widget configs, credentials, runtime/wizard
-/// state, notes, log) resolves under this. An explicit `--config` override
+/// Every per-profile path (widget configs, credentials, runtime state,
+/// notes, log) resolves under this. An explicit `--config` override
 /// short-circuits to that file's directory.
 pub fn config_dir() -> Result<PathBuf> {
     if let Ok(guard) = CONFIG_DIR_OVERRIDE.read() {
@@ -181,8 +128,7 @@ pub fn config_dir() -> Result<PathBuf> {
 }
 
 /// The on-disk directory for a named profile, **ignoring** any config-dir
-/// override. The wizard's Profile Manager uses this to target a chosen
-/// profile. Named profiles are `profiles/<name>/`; the default profile has a
+/// override. Named profiles are `profiles/<name>/`; the default profile has a
 /// legacy flat-layout fallback:
 ///
 /// If the default profile hasn't been migrated (no `profiles/default/`) but a
@@ -228,10 +174,6 @@ pub fn load(override_path: Option<&Path>) -> Result<Config> {
 /// Default `config.toml` contents written by `--init`.
 pub const DEFAULT_CONFIG_TOML: &str = include_str!("defaults/config.toml");
 
-pub const DEFAULT_CLOCK_TOML: &str = include_str!("defaults/clock.toml");
-
-pub const DEFAULT_WEATHER_TOML: &str = include_str!("defaults/weather.toml");
-
 pub const DEFAULT_NEWS_TOML: &str = include_str!("defaults/news.toml");
 
 pub const DEFAULT_COLORSCHEMES_TOML: &str = include_str!("defaults/colorschemes.toml");
@@ -249,8 +191,6 @@ pub const DEFAULT_MICROSOFT_CLIENT_TEMPLATE: &str = include_str!("defaults/crede
 pub const DEFAULT_CALDAV_TEMPLATE: &str = include_str!("defaults/credentials/caldav.toml");
 
 pub const DEFAULT_ICS_TEMPLATE: &str = include_str!("defaults/credentials/ics.toml");
-
-pub const DEFAULT_STOCKS_TOML: &str = include_str!("defaults/stocks.toml");
 
 pub const DEFAULT_CALENDAR_TOML: &str = include_str!("defaults/calendar.toml");
 
@@ -289,11 +229,8 @@ pub(crate) fn seed_profile_dir(dir: &Path) -> Result<()> {
     std::fs::create_dir_all(dir)
         .with_context(|| format!("failed to create profile dir {}", dir.display()))?;
     seed(&dir.join("config.toml"), DEFAULT_CONFIG_TOML)?;
-    seed(&dir.join("clock.toml"), DEFAULT_CLOCK_TOML)?;
-    seed(&dir.join("weather.toml"), DEFAULT_WEATHER_TOML)?;
     seed(&dir.join("calendar.toml"), DEFAULT_CALENDAR_TOML)?;
     seed(&dir.join("news.toml"), DEFAULT_NEWS_TOML)?;
-    seed(&dir.join("stocks.toml"), DEFAULT_STOCKS_TOML)?;
     seed(&dir.join("llm.toml"), DEFAULT_LLM_TOML)?;
 
     let creds = dir.join("credentials");
@@ -348,7 +285,7 @@ mod tests {
     fn default_config_parses() {
         let cfg: Config = toml::from_str(DEFAULT_CONFIG_TOML).expect("default config should parse");
         assert_eq!(cfg.version, 1);
-        assert_eq!(cfg.layout.cells.len(), 5);
+        assert_eq!(cfg.layout.cells.len(), 2);
         assert_eq!(cfg.global.command_key, ":");
     }
 
@@ -356,7 +293,7 @@ mod tests {
     fn minimal_config_uses_defaults() {
         let cfg: Config = toml::from_str("").expect("empty config should parse");
         assert_eq!(cfg.version, 1);
-        assert_eq!(cfg.layout.cells.len(), 5);
+        assert_eq!(cfg.layout.cells.len(), 2);
     }
 
     #[test]
@@ -472,42 +409,6 @@ mod tests {
         let cfg = load(Some(Path::new("/nonexistent/docket/config.toml")))
             .expect("missing file should not error");
         assert_eq!(cfg.version, 1);
-    }
-
-    #[test]
-    fn format_string_array_literal_quotes_and_escapes() {
-        assert_eq!(format_string_array_literal(&[]), "[]");
-        assert_eq!(
-            format_string_array_literal(&["AAPL".into(), "MSFT".into()]),
-            r#"["AAPL", "MSFT"]"#
-        );
-        assert_eq!(
-            format_string_array_literal(&[r#"weird"name"#.into()]),
-            r#"["weird\"name"]"#
-        );
-    }
-
-    #[test]
-    fn array_literal_round_trips_through_merge_helper() {
-        // Sanity: an existing stocks-shaped TOML retains comments and
-        // sibling keys when the watchlist array is rewritten.
-        let original = r#"indices = ["^DJI", "^GSPC"]
-watchlist = ["AAPL", "MSFT"]
-
-# Press `j` on a selected ticker to open this URL.
-jump_url_template = "https://example.com/{ticker}"
-"#;
-        let updated = crate::wizard::toml_merge::merge_top_level_scalars(
-            original,
-            &[(
-                "watchlist",
-                format_string_array_literal(&["NVDA".into(), "TSLA".into()]),
-            )],
-        );
-        assert!(updated.contains(r#"watchlist = ["NVDA", "TSLA"]"#));
-        assert!(updated.contains(r#"indices = ["^DJI", "^GSPC"]"#));
-        assert!(updated.contains("# Press `j`"));
-        assert!(updated.contains("jump_url_template"));
     }
 
     #[test]

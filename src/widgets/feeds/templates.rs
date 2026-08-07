@@ -2,50 +2,44 @@
 // Copyright (C) 2026 ntrospect0
 // Copyright (C) 2026 nicococo
 
-//! Starter templates surfaced by the feeds widget's `--setup` wizard.
+//! Starter templates for the feeds widget. When an instance has no
+//! `[[feeds]]` blocks configured (a brand-new `feeds.toml`), the
+//! widget seeds itself from the WSJ template so there's something to
+//! render immediately — see the fallback in `feeds::build`.
 //!
 //! Each template TOML lives at `src/widgets/feeds/templates/<id>.toml`
-//! and is embedded into the binary at build time via `include_str!`.
-//! At wizard time we parse the embedded TOMLs into [`Template`] values
-//! and offer them as Choice options. The selected template's catalogue
-//! is then copied into the freshly-generated `feeds@<instance>.toml`.
-//!
-//! Templates are *not* a runtime concept — the widget itself reads the
-//! per-instance `[[feeds]]` blocks directly. Templates exist purely to
-//! give the wizard something to seed a fresh file from.
+//! and is embedded into the binary at build time via `include_str!`,
+//! parsed into [`Template`] values on demand.
 //!
 //! Adding a new built-in template: drop a new TOML in
-//! `src/widgets/feeds/templates/`, add a matching `include_str!` line
-//! to [`BUILTIN_TEMPLATES`] below, and ship a release. A future phase
-//! will additionally scan `~/.config/docket/templates/` so power users
-//! can add custom templates without recompiling.
+//! `src/widgets/feeds/templates/` and add a matching `include_str!`
+//! line to [`BUILTIN_TEMPLATES`] below.
 
 use serde::Deserialize;
 
 /// One starter template parsed from a TOML file.
 #[derive(Debug, Clone, Deserialize)]
 pub struct Template {
-    /// Stable id matching the wizard's Choice option value. Lowercase
-    /// ASCII, no whitespace. Surfaced to users as the wizard radio's
-    /// `label` (via `display_name`), not the `value`.
+    /// Stable id used to look the template up via [`by_id`]. Lowercase
+    /// ASCII, no whitespace.
     pub id: String,
 
-    /// Human-readable name. Becomes the generated instance TOML's
-    /// `display_name = "..."` value (which the runtime uses for the
-    /// title bar, dashboard label, and LLM summarizer prompt).
+    /// Human-readable name. Reserved for a future flow that scaffolds a
+    /// fresh instance TOML from a template (would seed `display_name =
+    /// "..."`, which the runtime uses for the title bar, dashboard
+    /// label, and LLM summarizer prompt).
+    #[allow(dead_code)]
     pub display_name: String,
 
-    /// Preferred `Shift+<letter>` shortcut letters seeded into the
-    /// generated instance TOML's `shortcuts = [...]` line.
+    /// Preferred `Shift+<letter>` shortcut letters. Reserved for the
+    /// same future scaffolding flow as `display_name`.
+    #[allow(dead_code)]
     pub default_shortcut_prefs: Vec<char>,
 
-    /// Per-instance command aliases seeded into the generated
-    /// instance TOML's `commands = [...]` line. The runtime
-    /// recognizes `:<alias>`, `:<alias>-summary`, and
-    /// `:<alias>-refresh` for each alias. Empty for source
-    /// templates that don't ship a short name (e.g. the WSJ
-    /// template ships `["wsj"]`; an "Empty" template would have
-    /// no defaults).
+    /// Per-instance command aliases (`:<alias>`, `:<alias>-summary`,
+    /// `:<alias>-refresh`). Reserved for the same future scaffolding
+    /// flow as `display_name`.
+    #[allow(dead_code)]
     #[serde(default)]
     pub default_commands: Vec<String>,
 
@@ -61,16 +55,15 @@ pub struct Template {
 pub struct TemplateFeed {
     pub topic: String,
     pub url: String,
-    /// Whether to write this feed live (`true`) or commented out
-    /// (`false`) when the wizard generates a fresh instance TOML.
+    /// Whether this is one of the feeds seeded into a fresh instance
+    /// when no `[[feeds]]` blocks are configured yet.
     #[serde(default)]
     pub default: bool,
 }
 
-/// Every compiled-in template, in wizard display order. Each entry is
-/// `(id, raw_toml)`; we parse on demand rather than at static-init time
-/// so a malformed template only crashes the wizard step, not the whole
-/// binary.
+/// Every compiled-in template. Each entry is `(id, raw_toml)`; parsed
+/// on demand rather than at static-init time so a malformed template
+/// only fails the lookup that needed it, not the whole binary.
 const BUILTIN_TEMPLATES: &[(&str, &str)] = &[
     ("wsj", include_str!("templates/wsj.toml")),
     (
@@ -93,8 +86,8 @@ pub fn all() -> Vec<Template> {
 }
 
 /// Look up a single template by id (case-insensitive). Returns
-/// `None` for unknown ids so the wizard can fall back to WSJ rather
-/// than panic on a stale Choice value.
+/// `None` for unknown ids so callers can fall back to WSJ rather
+/// than panic on an unrecognized id.
 pub fn by_id(id: &str) -> Option<Template> {
     all().into_iter().find(|t| t.id.eq_ignore_ascii_case(id))
 }

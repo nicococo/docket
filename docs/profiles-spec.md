@@ -1,13 +1,24 @@
 # Profiles — functional & technical spec
 
-Status: **implemented — 0.4.0**
+Status: **implemented — 0.4.0** (glint). Profile resolution, the
+global/per-profile layering, migration, and the CLI surface described
+below are all still live in docket. **The interactive setup wizard
+this spec was written against — including the "Profile Manager" wizard
+page and `.wizard_state.toml` — was removed** (see `README.md` →
+Origins, `CHANGELOG.md` → `[0.1.0]`). Every profile-management
+operation the wizard's Profile Manager offered (create / clone /
+rename / delete / list) already had a non-interactive CLI equivalent
+(`--new-profile`, `--rename-profile`, `--delete-profile`,
+`--list-profiles`) and those are what's live today — see the sections
+below marked *(historical)* for what the wizard used to do.
+
 Revised after an adversarial review and dogfooding: migration is
 **opt-in and non-destructive** (a flat config is read in place; a stray
 run can't wipe it), profile resolution has a hard set-once invariant,
 clone is config-only, and OAuth client registrations are global-only.
 
 > Version note: shipped as **0.4.0** — it touches the CLI surface, the
-> on-disk layout, a one-time migration, and the setup wizard, so it's a minor
+> on-disk layout, and a one-time migration, so it's a minor
 > release rather than a patch.
 
 ## Motivation
@@ -38,7 +49,7 @@ Two tiers on one hierarchy:
   *client registrations* (the Azure / Google app, not any account).
 - **Per-profile layer** (`~/.config/docket/profiles/<name>/`) — persona data:
   layout, widget configs, the *selected* theme, account tokens, CalDAV +
-  IMAP creds, LLM API keys, notes, runtime/wizard state, cache, logs.
+  IMAP creds, LLM API keys, notes, runtime state, cache, logs.
 
 ```
 ~/.config/docket/                         ← GLOBAL layer (root)
@@ -50,7 +61,7 @@ Two tiers on one hierarchy:
 └── profiles/
     ├── default/                         ← PER-PROFILE layer
     │   ├── config.toml                  ← layout + selected theme + globals
-    │   ├── clock.toml  stocks.toml  calendar.toml  feeds@<instance>.toml  llm.toml
+    │   ├── calendar.toml  news.toml  feeds@<instance>.toml  llm.toml
     │   ├── colorschemes.toml            ← OPTIONAL per-profile scheme overrides/additions
     │   ├── credentials/                 ← per-profile, account-level (0700)
     │   │   ├── google_oauth_token.<account>.toml
@@ -59,8 +70,7 @@ Two tiers on one hierarchy:
     │   │   ├── anthropic_key.toml   openai_key.toml     ← LLM keys are per-profile
     │   ├── notes/<instance>/<id>.md
     │   ├── docket.log
-    │   ├── .runtime_state.toml
-    │   └── .wizard_state.toml
+    │   └── .runtime_state.toml
     └── work/  travel/  …                ← same shape as default/
 ```
 
@@ -75,7 +85,7 @@ Cache lives under `$XDG_CACHE_HOME/docket/profiles/<name>/`.
 | Layout, widget configs, **selected theme** (`config.toml`) | Per-profile | The dashboard itself. |
 | Account **tokens**, CalDAV, **IMAP** creds | Per-profile | Persona identity; composes with multi-account labels. |
 | **LLM API keys** (`anthropic_key.toml`, `openai_key.toml`) | Per-profile | Allows work-billed vs personal. |
-| Notes, runtime state, wizard state | Per-profile | Persona content/state. |
+| Notes, runtime state | Per-profile | Persona content/state. |
 | Cache, logs | Per-profile | Avoids cross-profile data bleed / interleaved logs. |
 
 ### Layered override semantics
@@ -102,11 +112,11 @@ cut.
   Precedence: **`--profile` > `DOCKET_PROFILE` env > `"default"`**.
 - `--list-profiles` — print profiles under `profiles/`, marking default and
   active, then exit.
-- Global to every mode — composes with `--setup`, `--auth`, `--init`,
+- Global to every mode — composes with `--auth`, `--init`,
   `--clear-cache`, and launch. The profile is resolved and set **first**,
   before anything reads or writes config (see *Startup ordering*).
 - **Missing profile** on launch/auth: error, don't auto-create —
-  `profile 'work' not found. Create it with: docket --profile work --setup`.
+  `profile 'work' not found. Create it with: docket --new-profile work`.
 - **Name rules:** `^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`; reject path separators,
   leading dash/dot. `default` is a normal, always-present, undeletable name.
   **Case-insensitive-filesystem guard:** macOS APFS/HFS+ fold case, so a
@@ -123,16 +133,22 @@ cut.
 - No `--profile`/env → `default`, which **always exists** and **cannot be
   deleted**.
 - First run (no config) seeds `profiles/default/` + the global layer, then
-  the wizard for `default` — same UX, one dir deeper.
-- `docket --profile X --setup` for non-existent `X` **creates** it (seed
-  defaults) and edits it.
+  launches directly — no interactive step.
+- `docket --new-profile X` creates a non-existent profile `X` (seeding
+  defaults); `--from <src>` clones another profile's config instead of
+  seeding fresh (see *Clone = config-only* below, still true).
 
-### Setup wizard → Profile Manager
+### Profile management (historical: this was the wizard's Profile Manager page)
 
-- **Bare `docket --setup`** → the **Profile Manager**: lists profiles (default
-  marked) and offers **Edit / Create / Clone / Rename / Delete**.
-- **`docket --profile X --setup`** → edits `X` directly (creating it first if
-  absent).
+The interactive **Profile Manager** wizard page described in the rest of
+this section no longer exists. Its operations are now plain CLI flags,
+implemented in `src/config/profiles.rs` and dispatched in `src/main.rs`:
+`--list-profiles`, `--new-profile <name> [--from <src>]`,
+`--rename-profile OLD:NEW`, `--delete-profile <name>`. The design
+decisions below (config-only clone, refuse-if-running guards, global
+vs. per-profile write targeting) still hold — only the UI changed from
+an interactive wizard page to direct flags.
+
 - **Clone = config-only.** Cloning copies layout/widget/theme config but
   **not** credentials/tokens — the clone re-authorizes per provider. (Copying
   tokens was cut: after a clone both copies share one refresh token, and the
@@ -143,11 +159,10 @@ cut.
   recursive remove of `profiles/<name>/` **and** its cache segment, with
   confirmation. Both **refuse if the target profile is running** (a pid
   lockfile in the profile dir, see *Lifecycle safety*).
-- Wizard writes land in the **active profile** dir. The one page that writes
-  a **global** resource is OAuth **client** capture (`*_oauth_client.toml` →
-  root); it surfaces a one-line "this app registration is shared across all
-  profiles" so the global effect isn't a surprise. The resulting **token**
-  lands in the profile. `.wizard_state.toml` is per-profile.
+- All profile-scoped writes land in the **active profile** dir. OAuth
+  **client** capture (`*_oauth_client.toml`) is the one thing that writes
+  to the **global** root instead — the resulting **token** still lands in
+  the profile.
 
 ### Authorize, per profile
 
@@ -200,7 +215,7 @@ binary safely — neither moves anything.
 2. **Copy** the per-profile portion of the flat root into
    `profiles/.default.partial/`:
    - Per-profile files: `config.toml`, all root `*.toml` **except
-     `colorschemes.toml`**, `.runtime_state.toml`, `.wizard_state.toml`,
+     `colorschemes.toml`**, `.runtime_state.toml`,
      `docket.log`, `notes/`.
    - **credentials** with a **deny-list**: copy *everything* under
      `credentials/` **except `*_oauth_client.toml`**. `std::fs::copy`
@@ -267,7 +282,7 @@ that mutate `XDG_CONFIG_HOME` are already `#[ignore]`d.
 
 This keeps `config_dir()` zero-arg, so its downstream callers
 (`config_path`, `load_widget_toml*`, `credentials::dir`,
-`runtime_state::state_path`, `wizard::storage::state_path`, the watcher, the
+`runtime_state::state_path`, the watcher, the
 logger, notes) need no signature churn — but each gets a test asserting it
 resolves under the active profile (the "no churn" claim is *true* but must be
 *verified*, not assumed).
@@ -296,12 +311,14 @@ pub fn global_dir() -> Result<PathBuf>;   // client regs:    docket_root()?/cred
 
 Because there's no fallback, the audit is simple but **must cover every call
 site, not just `credentials::load`/`path`**. The review found sites that
-build paths manually and would bypass tiering:
+build paths manually and would bypass tiering (historical — `registry.rs`'s
+`needs_credential_capture` no longer exists; it existed only to feed the
+wizard's credential-capture flow and was removed along with the wizard):
 
-- `registry.rs:316` `needs_credential_capture` → `dir().join(spec.filename)`
-  — for a **client** spec this must read `global_dir()`, else every
-  non-default profile wrongly reports "client missing." Route client specs
-  through `global_dir()`.
+- `needs_credential_capture` → `dir().join(spec.filename)` — for a
+  **client** spec this must read `global_dir()`, else every non-default
+  profile wrongly reports "client missing." Route client specs through
+  `global_dir()`.
 - `registry.rs:175` `fetch_imap_folders` → `dir().join("imap.toml")` — IMAP
   is per-profile, so `dir()` is correct; no change, but in scope for the
   audit.
@@ -314,11 +331,12 @@ wherever a `*_oauth_client.toml` is read or existence-checked.
 Per-profile writes have a single writer, but **global files
 (`colorschemes.toml`, client regs) can be written by two processes at once**.
 The current atomic-write helpers use **fixed** temp names
-(`finalize.rs:387` `…toml.wizard.tmp`, `credentials.rs:118` `…toml.tmp`) —
-two writers collide. Adopt the cache layer's scheme (`cache/mod.rs:289`:
-pid + atomic counter in the temp name) for global writes, and make migration
-+ global seeding atomic the same way. Per-profile writes can keep the fixed
-names.
+(`credentials.rs:118` `…toml.tmp`; the wizard's own `…toml.wizard.tmp`
+temp name no longer applies — that write path was removed with the
+wizard) — two writers collide. Adopt the cache layer's scheme
+(`cache/mod.rs:289`: pid + atomic counter in the temp name) for global
+writes, and make migration + global seeding atomic the same way.
+Per-profile writes can keep the fixed names.
 
 ### Colorschemes layering
 
@@ -375,14 +393,14 @@ apply); optionally also watch `docket_root()/colorschemes.toml` later.
 - `src/config/profiles.rs` (new) — list/create/clone(config-only)/rename/delete + liveness lock.
 - `src/credentials.rs` — `global_dir`, `client_path`, pid+counter temp for
   global writes.
-- `src/auth/registry.rs` — `needs_credential_capture` routes client specs to
-  `global_dir`.
 - `src/widgets/notes/store.rs` — profile-aware default root.
 - theme/colorschemes loader — layered merge.
 - `src/cache/mod.rs` — profile cache segment + delete cleanup hook.
-- `src/wizard/app.rs`, `src/wizard/pages/profiles.rs` (new),
-  `src/wizard/finalize.rs` — Profile Manager, "client reg is global" notice,
-  global writes atomic.
+- (historical, removed with the wizard) `src/wizard/app.rs`,
+  `src/wizard/pages/profiles.rs`, `src/wizard/finalize.rs` — used to
+  implement the Profile Manager page; superseded by the
+  `--new-profile`/`--rename-profile`/`--delete-profile`/`--list-profiles`
+  CLI flags in `src/main.rs` + `src/config/profiles.rs`.
 - `INSTRUCTIONS.md`, `README.md`, `CHANGELOG.md` — docs + migration note.
 
 ## Non-goals (v1)
@@ -404,11 +422,13 @@ apply); optionally also watch `docket_root()/colorschemes.toml` later.
 4. **Leftover flat files after migration** *(resolved)* — the CLI
    `--migrate-profiles` stays copy-only (safe for scripting), and the flat
    duplicates are removed only by an **explicit, consented** step: the
-   `--setup` migration prompt (which migrates *and* removes the duplicates) or
-   the `--cleanup-flat-config` CLI. Both run the tested
-   `remove_flat_originals`, which only ever removes files that already exist in
-   `profiles/default/`, keeping the global layer + `profiles/` tree. Never
-   auto-deletes (that caused the 2026-06-30 data-loss incident).
+   `--cleanup-flat-config` CLI (run after `--migrate-profiles`). It runs the
+   tested `remove_flat_originals`, which only ever removes files that already
+   exist in `profiles/default/`, keeping the global layer + `profiles/` tree.
+   Never auto-deletes (that caused the 2026-06-30 data-loss incident). A
+   wizard prompt that combined migrate+cleanup into one interactive step
+   used to exist too; it was removed with the wizard, so the two-command
+   sequence is now the only path.
 
 ## Phased plan
 
@@ -421,9 +441,11 @@ apply); optionally also watch `docket_root()/colorschemes.toml` later.
    `--list-profiles`, missing-profile errors, `--config` exclusivity,
    per-profile cache + log, notes profile-awareness.
 3. **Global layer.** `global_dir`/`client_path` (client global-only) +
-   call-site audit (incl. `needs_credential_capture`); colorschemes layered
+   call-site audit; colorschemes layered
    merge; atomic global writes; split seeding.
-4. **Profile Manager.** Wizard front menu + create/clone(config-only)/rename/
-   delete/edit with liveness guards and the "client reg is global" notice.
+4. **Profile management CLI.** create/clone(config-only)/rename/
+   delete/list with liveness guards and the "client reg is global" notice.
+   (Originally a wizard front-menu page; the wizard was later removed and
+   these became plain CLI flags — see *Profile management* above.)
 5. **Polish + docs.** Active-profile indicator, INSTRUCTIONS/README/CHANGELOG,
    migration note.

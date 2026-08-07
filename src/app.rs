@@ -1575,15 +1575,11 @@ mod tests {
         let area = Rect::new(0, 0, 100, 40);
         assert_eq!(
             widget_at(&app, area, 5, 2).map(|(id, _)| id),
-            Some("clock".to_string())
-        );
-        assert_eq!(
-            widget_at(&app, area, 80, 2).map(|(id, _)| id),
             Some("calendar".to_string())
         );
         assert_eq!(
-            widget_at(&app, area, 50, 35).map(|(id, _)| id),
-            Some("stocks".to_string())
+            widget_at(&app, area, 80, 2).map(|(id, _)| id),
+            Some("news".to_string())
         );
         // Status bar row — last row of the area — should be unfocusable.
         assert!(widget_at(&app, area, 50, 39).is_none());
@@ -1596,34 +1592,22 @@ mod tests {
         let mut app = App::new(config);
         assert_eq!(
             app.focus_order,
-            vec![
-                "clock".to_string(),
-                "calendar".to_string(),
-                "weather".to_string(),
-                "news".to_string(),
-                "stocks".to_string(),
-            ]
+            vec!["calendar".to_string(), "news".to_string()]
         );
-        assert_eq!(app.focused_widget(), Some("clock"));
-        app.cycle_focus(true);
         assert_eq!(app.focused_widget(), Some("calendar"));
-        app.cycle_focus(true);
-        assert_eq!(app.focused_widget(), Some("weather"));
         app.cycle_focus(true);
         assert_eq!(app.focused_widget(), Some("news"));
         app.cycle_focus(true);
-        assert_eq!(app.focused_widget(), Some("stocks"));
-        app.cycle_focus(true);
-        assert_eq!(app.focused_widget(), Some("clock"));
+        assert_eq!(app.focused_widget(), Some("calendar"));
         app.cycle_focus(false);
-        assert_eq!(app.focused_widget(), Some("stocks"));
+        assert_eq!(app.focused_widget(), Some("news"));
     }
 
     #[cfg(feature = "widgets-all")]
     #[test]
     fn multi_instance_widgets_register_under_composed_ids() {
-        // Two clocks (home + office) + one stocks should yield three widgets
-        // with ids "clock@home", "clock@office", "stocks".
+        // Two calendars (home + office) + one news should yield three
+        // widgets with ids "calendar@home", "calendar@office", "news".
         use crate::config::layout::{GridCell, LayoutConfig};
         let mut config = Config::default();
         config.layout = LayoutConfig {
@@ -1631,7 +1615,7 @@ mod tests {
             rows: vec![50, 50],
             cells: vec![
                 GridCell {
-                    widget: Some("clock@home".into()),
+                    widget: Some("calendar@home".into()),
                     widgets: None,
                     col: 0,
                     row: 0,
@@ -1639,7 +1623,7 @@ mod tests {
                     row_span: 1,
                 },
                 GridCell {
-                    widget: Some("clock@office".into()),
+                    widget: Some("calendar@office".into()),
                     widgets: None,
                     col: 1,
                     row: 0,
@@ -1647,7 +1631,7 @@ mod tests {
                     row_span: 1,
                 },
                 GridCell {
-                    widget: Some("stocks".into()),
+                    widget: Some("news".into()),
                     widgets: None,
                     col: 0,
                     row: 1,
@@ -1658,26 +1642,29 @@ mod tests {
         };
         let app = App::new(config);
         let ids: Vec<&str> = app.manager.ids().iter().map(String::as_str).collect();
-        assert!(ids.contains(&"clock@home"), "got {ids:?}");
-        assert!(ids.contains(&"clock@office"), "got {ids:?}");
-        assert!(ids.contains(&"stocks"), "got {ids:?}");
+        assert!(ids.contains(&"calendar@home"), "got {ids:?}");
+        assert!(ids.contains(&"calendar@office"), "got {ids:?}");
+        assert!(ids.contains(&"news"), "got {ids:?}");
         assert_eq!(ids.len(), 3, "no extra widgets registered: {ids:?}");
 
-        // Two clocks should claim *different* letters from the
-        // ['c', 'l', 'o', 'k'] preference list — the second falls through
-        // to 'l' because 'c' is taken.
+        // Two calendars should claim *different* letters from the
+        // shortcut preference list — the second falls through once the
+        // first letter is taken.
         let home_letter = app
             .shortcuts
             .iter()
-            .find_map(|(k, (parent, _child))| (parent == "clock@home").then_some(*k));
+            .find_map(|(k, (parent, _child))| (parent == "calendar@home").then_some(*k));
         let office_letter = app
             .shortcuts
             .iter()
-            .find_map(|(k, (parent, _child))| (parent == "clock@office").then_some(*k));
-        assert!(home_letter.is_some(), "clock@home should have a shortcut");
+            .find_map(|(k, (parent, _child))| (parent == "calendar@office").then_some(*k));
+        assert!(
+            home_letter.is_some(),
+            "calendar@home should have a shortcut"
+        );
         assert!(
             office_letter.is_some(),
-            "clock@office should have a shortcut"
+            "calendar@office should have a shortcut"
         );
         assert_ne!(home_letter, office_letter);
     }
@@ -1685,28 +1672,49 @@ mod tests {
     #[cfg(feature = "widgets-all")]
     #[test]
     fn shortcuts_resolve_preference_conflicts_by_load_order() {
-        let app = App::new(Config::default());
-        // Registration order in App::new is stocks, clock, weather,
-        // calendar, news — so stocks gets 's', clock gets 'c', weather
-        // 'w', calendar falls through 'c' (taken) to 'd', news 'n'.
+        // Two calendar instances compete for the same first-choice
+        // letter ('c') — the second falls through to its next
+        // preference ('d') since load order is registration order.
+        use crate::config::layout::{GridCell, LayoutConfig};
+        let mut config = Config::default();
+        config.layout = LayoutConfig {
+            columns: vec![50, 50],
+            rows: vec![100],
+            cells: vec![
+                GridCell {
+                    widget: Some("calendar@a".into()),
+                    widgets: None,
+                    col: 0,
+                    row: 0,
+                    col_span: 1,
+                    row_span: 1,
+                },
+                GridCell {
+                    widget: Some("calendar@b".into()),
+                    widgets: None,
+                    col: 1,
+                    row: 0,
+                    col_span: 1,
+                    row_span: 1,
+                },
+            ],
+        };
+        let app = App::new(config);
         let parent = |k: &char| app.shortcuts.get(k).map(|(p, _)| p.as_str());
-        assert_eq!(parent(&'s'), Some("stocks"));
-        assert_eq!(parent(&'c'), Some("clock"));
-        assert_eq!(parent(&'w'), Some("weather"));
+        assert_eq!(parent(&'c'), Some("calendar@a"));
         assert_eq!(
             parent(&'d'),
-            Some("calendar"),
-            "calendar should fall through to 'd' since clock claimed 'c'"
+            Some("calendar@b"),
+            "calendar@b should fall through to 'd' since calendar@a claimed 'c'"
         );
-        assert_eq!(parent(&'n'), Some("news"));
     }
 
     #[cfg(feature = "widgets-all")]
     #[test]
     fn stack_cell_shortcuts_walk_into_children() {
-        // A stack containing clock + weather should yield shortcuts
+        // A stack containing calendar + news should yield shortcuts
         // whose `parent_id` is the stack's synthetic id but whose
-        // `child_id` is the kind ("clock"/"weather"), so the
+        // `child_id` is the kind ("calendar"/"news"), so the
         // dispatcher can flip the stack and focus it in one step.
         use crate::config::layout::{GridCell, LayoutConfig};
         let mut config = Config::default();
@@ -1715,7 +1723,7 @@ mod tests {
             rows: vec![100],
             cells: vec![GridCell {
                 widget: None,
-                widgets: Some(vec!["clock".into(), "weather".into()]),
+                widgets: Some(vec!["calendar".into(), "news".into()]),
                 col: 0,
                 row: 0,
                 col_span: 1,
@@ -1726,26 +1734,25 @@ mod tests {
 
         // Stack must be registered under its synthetic id.
         let ids: Vec<&str> = app.manager.ids().iter().map(String::as_str).collect();
-        assert_eq!(ids, vec!["stack:clock+weather"]);
+        assert_eq!(ids, vec!["stack:calendar+news"]);
 
         // Both child kinds must end up addressable via Shift+letter.
-        let clock_short = app.shortcuts.iter().find_map(|(letter, (parent, child))| {
-            (parent == "stack:clock+weather" && child.as_deref() == Some("clock"))
+        let calendar_short = app.shortcuts.iter().find_map(|(letter, (parent, child))| {
+            (parent == "stack:calendar+news" && child.as_deref() == Some("calendar"))
                 .then_some(*letter)
         });
-        let weather_short = app.shortcuts.iter().find_map(|(letter, (parent, child))| {
-            (parent == "stack:clock+weather" && child.as_deref() == Some("weather"))
-                .then_some(*letter)
+        let news_short = app.shortcuts.iter().find_map(|(letter, (parent, child))| {
+            (parent == "stack:calendar+news" && child.as_deref() == Some("news")).then_some(*letter)
         });
         assert!(
-            clock_short.is_some(),
-            "clock-inside-stack should claim a letter"
+            calendar_short.is_some(),
+            "calendar-inside-stack should claim a letter"
         );
         assert!(
-            weather_short.is_some(),
-            "weather-inside-stack should claim a letter"
+            news_short.is_some(),
+            "news-inside-stack should claim a letter"
         );
-        assert_ne!(clock_short, weather_short);
+        assert_ne!(calendar_short, news_short);
     }
 
     #[test]
@@ -1780,11 +1787,11 @@ mod tests {
     fn zoom_enter_sets_zoom_target() {
         let mut app = App::new(Config::default());
         assert!(app.zoom_target.is_none());
-        assert_eq!(app.focused_widget(), Some("clock"));
+        assert_eq!(app.focused_widget(), Some("calendar"));
         app.zoom_enter();
         assert_eq!(
             app.zoom_target.as_ref().map(|z| z.parent_id.as_str()),
-            Some("clock")
+            Some("calendar")
         );
     }
 
@@ -1793,9 +1800,9 @@ mod tests {
     #[test]
     fn exit_zoom_clears_target_and_restores_focus() {
         let mut app = App::new(Config::default());
-        // Move focus to calendar (index 1), then zoom.
+        // Move focus to news (index 1), then zoom.
         app.cycle_focus(true);
-        assert_eq!(app.focused_widget(), Some("calendar"));
+        assert_eq!(app.focused_widget(), Some("news"));
         app.zoom_enter();
         assert!(app.zoom_target.is_some());
         // Advance focus without exiting zoom — simulates what a retarget call might do.
@@ -1803,7 +1810,7 @@ mod tests {
         app.exit_zoom();
         assert!(app.zoom_target.is_none());
         // exit_zoom restores focus_idx to the zoomed widget's position.
-        assert_eq!(app.focused_widget(), Some("calendar"));
+        assert_eq!(app.focused_widget(), Some("news"));
     }
 
     /// Pressing `z` while already zoomed exits zoom (no nested zoom).
@@ -1839,7 +1846,7 @@ mod tests {
     fn retarget_zoom_cycle_wraps() {
         let mut app = App::new(Config::default());
         app.zoom_enter();
-        // focus_order for default config should be [clock, calendar, weather, news, stocks].
+        // focus_order for default config should be [calendar, news].
         let n = app.focus_order.len();
         assert!(n > 1);
         let start_id = app.zoom_target.as_ref().unwrap().parent_id.clone();
@@ -1871,11 +1878,11 @@ mod tests {
     #[test]
     fn zoom_target_for_leaf_widget_has_no_child() {
         let app = App::new(Config::default());
-        let zt = app.zoom_target_for_widget_id("clock".into());
-        assert_eq!(zt.parent_id, "clock");
+        let zt = app.zoom_target_for_widget_id("calendar".into());
+        assert_eq!(zt.parent_id, "calendar");
         assert!(
             zt.child_id.is_none(),
-            "clock is not a composite; child_id should be None"
+            "calendar is not a composite; child_id should be None"
         );
     }
 

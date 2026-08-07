@@ -46,8 +46,8 @@ use ratatui::layout::Rect;
 /// the naming is the point.
 ///
 /// Available to widget authors; the built-ins ended up computing inner
-/// dimensions via [`crate::ui::grid::CardGrid`] or inline, so this stays
-/// provided-but-unused (hence `#[allow(dead_code)]`).
+/// dimensions inline, so this stays provided-but-unused (hence
+/// `#[allow(dead_code)]`).
 #[allow(dead_code)]
 pub(crate) fn inner_rows(area: Rect) -> u16 {
     area.height.saturating_sub(2)

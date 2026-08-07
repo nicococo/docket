@@ -48,6 +48,7 @@ impl Gradient {
         Gradient::Fade,
     ];
 
+    #[allow(dead_code)] // reserved for a future gradient-name status line.
     pub fn label(self) -> &'static str {
         match self {
             Gradient::Normal => "normal",
@@ -64,9 +65,10 @@ impl Gradient {
     }
 
     /// TOML value string (matches the `#[serde(rename_all = "snake_case")]`
-    /// deserialize names), for writing the choice back into `clock.toml` /
-    /// `calendar.toml`. Note `label()` uses a hyphen (`hue-shift`) for display
-    /// — this is the on-disk form (`hue_shift`).
+    /// deserialize names), for writing the choice back into `calendar.toml`.
+    /// Note `label()` uses a hyphen (`hue-shift`) for display — this is the
+    /// on-disk form (`hue_shift`).
+    #[allow(dead_code)] // reserved for a future write-back-to-TOML feature.
     pub fn persist_key(self) -> &'static str {
         match self {
             Gradient::Normal => "normal",

@@ -29,22 +29,15 @@ path = "src/main.rs"
 default = ["widgets-all"]
 
 # Each widget gates its widget-exclusive dependencies through the matching
-# `dep:` entry below, so `--no-default-features --features "widget-clock"`
-# really does compile out everything email / gallery / news / etc. pull in.
-# Shared infra (chrono, reqwest, tokio, ratatui, anyhow, serde, sha2, …)
-# stays unconditional — gating it would either need every widget to opt in
-# or break the wizard / runtime, neither of which is worth the LOC.
-widget-clock = []
-widget-weather = []
+# `dep:` entry below, so `--no-default-features --features "widget-calendar"`
+# really does compile out everything email / news / etc. pull in. Shared
+# infra (chrono, reqwest, tokio, ratatui, anyhow, serde, sha2, …) stays
+# unconditional — gating it would either need every widget to opt in or
+# break the runtime, neither of which is worth the LOC.
 widget-calendar = ["dep:roxmltree", "dep:ical"]
 widget-news = ["dep:feed-rs", "dep:readability", "dep:url"]
-widget-stocks = []
-# Forex reuses Stocks' Yahoo `Period` mapping verbatim, so enabling
-# widget-forex implicitly pulls in widget-stocks.
-widget-forex = ["widget-stocks"]
 widget-email = ["dep:imap", "dep:native-tls", "dep:mail-parser", "dep:html2text"]
 widget-resources = ["dep:sysinfo"]
-widget-gallery = ["dep:image", "dep:ratatui-image"]
 widget-notes = []
 # Feeds depends on news's sanitize_summary helper and renders article
 # images via ratatui-image, so it pulls both widget-news and the image
@@ -52,15 +45,10 @@ widget-notes = []
 # Barron's, MarketWatch, …).
 widget-feeds = ["widget-news", "dep:image", "dep:ratatui-image"]
 widgets-all = [
-  "widget-clock",
-  "widget-weather",
   "widget-calendar",
   "widget-news",
-  "widget-stocks",
-  "widget-forex",
   "widget-email",
   "widget-resources",
-  "widget-gallery",
   "widget-notes",
   "widget-feeds",
 ]

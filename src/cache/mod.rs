@@ -197,6 +197,9 @@ impl ScopedCache {
     /// A throwaway scope under a freshly-generated subdir of the system temp
     /// dir. Used by widget unit tests so they don't pollute the user's real
     /// cache and don't collide with each other across parallel runs.
+    /// `cfg(test)`-only call sites make this look unused under a plain
+    /// `cargo build`, which doesn't compile test code.
+    #[allow(dead_code)]
     pub fn ephemeral() -> Self {
         let dir = std::env::temp_dir().join(format!(
             "docket-ephemeral-{}-{}",

@@ -2,11 +2,9 @@
 // Copyright (C) 2026 ntrospect0
 // Copyright (C) 2026 nicococo
 
-//! Profile discovery + name helpers.
-//!
-//! The mutating lifecycle ops (create / clone / rename / delete) land with
-//! the setup-wizard Profile Manager; this module currently provides the
-//! read-side primitives the CLI (`--list-profiles`) and those ops will share.
+//! Profile discovery, creation, and lifecycle helpers — backs the
+//! `--list-profiles` / `--new-profile` / `--rename-profile` /
+//! `--delete-profile` CLI flags.
 
 use std::path::{Path, PathBuf};
 

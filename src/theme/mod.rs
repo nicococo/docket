@@ -18,8 +18,8 @@
 //!     variant; unfocused stays plain. Stacks use the same pair for the
 //!     active tab while inactive tabs fall through to `text.dim`.
 //!   - `metadata.focused` / `metadata.unfocused` — right-aligned suffix on
-//!     the title row (Weather's location, Email's account, News's article
-//!     count). Dimmed when the pane isn't focused.
+//!     the title row (Email's account, News's article count). Dimmed when
+//!     the pane isn't focused.
 //!   - `text.plain` / `text.brilliant` (default body / emphasized body)
 //!   - `text.selected` (yellow-orange — selected tab, "[Today]")
 //!   - `text.focused`  (cyan — focused entity within a widget)

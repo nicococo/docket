@@ -7,14 +7,8 @@ pub use view_tier::ViewTier;
 
 #[cfg(feature = "widget-calendar")]
 pub mod calendar;
-#[cfg(feature = "widget-clock")]
-pub mod clock;
 #[cfg(feature = "widget-email")]
 pub mod email;
-#[cfg(feature = "widget-forex")]
-pub mod forex;
-#[cfg(feature = "widget-gallery")]
-pub mod gallery;
 #[cfg(feature = "widget-news")]
 pub mod news;
 #[cfg(feature = "widget-notes")]
@@ -23,10 +17,6 @@ pub mod registry;
 #[cfg(feature = "widget-resources")]
 pub mod resources;
 pub mod stack;
-#[cfg(feature = "widget-stocks")]
-pub mod stocks;
-#[cfg(feature = "widget-weather")]
-pub mod weather;
 #[cfg(feature = "widget-feeds")]
 pub mod feeds;
 
@@ -115,13 +105,13 @@ pub trait Widget: Send + Sync {
     fn display_name(&self) -> &str;
 
     /// Stable kind string shared by every instance of this widget type
-    /// (e.g. `"clock"`, `"stocks"`). Matches the `KIND` constant in the
+    /// (e.g. `"calendar"`, `"news"`). Matches the `KIND` constant in the
     /// widget module and the descriptor in `widgets::registry`.
     #[allow(dead_code)] // reserved for per-kind command routing.
     fn kind(&self) -> &str;
 
     /// Instance suffix; `"main"` is the canonical instance.
-    #[allow(dead_code)] // exposed for diagnostics / wizard introspection.
+    #[allow(dead_code)] // exposed for diagnostics.
     fn instance(&self) -> &str {
         "main"
     }

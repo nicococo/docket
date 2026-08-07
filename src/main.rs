@@ -18,30 +18,25 @@ mod config;
 mod credentials;
 mod event;
 mod format;
-mod geolocation;
 mod http;
 mod llm;
-mod market_data;
 mod polling;
 mod runtime_state;
 mod text;
 mod theme;
 mod ui;
 mod widgets;
-mod wizard;
 mod zoom;
 
-/// docket — terminal dashboard for stocks, calendar, news, and beyond.
+/// docket — terminal dashboard for calendar, news, email, and getting things done.
 #[derive(Parser, Debug)]
 #[command(name = "docket", version, about, long_about = None)]
 struct Cli {
     /// Create ~/.config/docket/ and seed default config files, then exit.
+    /// Idempotent — existing files are left untouched, so it's also the
+    /// right thing to run after upgrading to pick up any new default files.
     #[arg(long)]
     init: bool,
-
-    /// Launch the interactive setup wizard (plain stdin/stdout — no TUI), then exit.
-    #[arg(long)]
-    setup: bool,
 
     /// Run an authentication flow for the given provider, then exit.
     /// Registered names: see `auth::registry::PROVIDERS`. Unknown names
@@ -171,7 +166,7 @@ fn main() -> Result<()> {
             config::profiles::create(name, cli.from.as_deref())?;
             match cli.from.as_deref() {
                 Some(src) => println!("Created profile {name:?} (cloned config from {src:?}). Re-authorize its accounts with `docket --profile {name} --auth <provider>`."),
-                None => println!("Created profile {name:?}. Configure it with `docket --profile {name} --setup`."),
+                None => println!("Created profile {name:?}. Edit ~/.config/docket/profiles/{name}/config.toml to configure it."),
             }
             return Ok(());
         }
@@ -229,51 +224,34 @@ fn main() -> Result<()> {
         if let Some(target) = cli.clear_cache_forced.as_deref() {
             run_clear_cache(target, false)?;
         }
-        if cli.setup {
-            // The wizard is fully synchronous — it does plain stdin/stdout
-            // text prompts and never touches the tokio runtime. The runtime
-            // already exists at this point; we just don't use it here.
-            //
-            // Seed any missing default config files first. `init_default_config`
-            // is idempotent: existing files are left untouched, so it's safe
-            // to call here even when the user is just re-running the wizard.
-            // Without this, fresh installs hit the theme picker with no
-            // colorschemes.toml on disk and the scheme list is empty.
-            config::init_default_config()?;
-            // Bare `--setup` opens the Profile Manager first; an explicit
-            // `--profile X --setup` edits X directly.
-            return wizard::run(cli.profile.is_none());
-        }
         if let Some(target) = cli.auth.as_deref() {
             return run_auth(target).await;
         }
 
         // A non-default profile must already exist to launch into — don't
-        // silently first-run-create it. `--profile X --setup` creates it.
+        // silently first-run-create it. `--profile X --new-profile` (or
+        // `--init` after setting DOCKET_PROFILE) creates it.
         if cli.config.is_none()
             && config::active_profile() != config::DEFAULT_PROFILE
             && !looks_initialized()
         {
             let p = config::active_profile();
             return Err(anyhow!(
-                "profile {p:?} not found. Create it with: docket --profile {p} --setup"
+                "profile {p:?} not found. Create it with: docket --new-profile {p}"
             ));
         }
 
-        // First-run UX: drop into the setup wizard before opening the TUI.
+        // First-run UX: seed default config files before opening the TUI.
         // `--config <path>` opts out — the user explicitly named a file.
         if cli.config.is_none() && !looks_initialized() {
             eprintln!(
-                "No config detected at ~/.config/docket/config.toml — launching the setup wizard."
+                "No config detected at ~/.config/docket/config.toml — writing defaults."
             );
-            eprintln!("(You can re-run `docket --setup` later to make changes.)");
+            eprintln!(
+                "Edit that file (or the per-widget TOMLs alongside it) to customize your dashboard."
+            );
             eprintln!();
             config::init_default_config()?;
-            // First run (no config) — go straight into the wizard for the
-            // default profile; the Manager would only list "default".
-            wizard::run(false)?;
-            eprintln!();
-            eprintln!("Launching docket…");
         }
 
         app::run(cli.config).await
@@ -282,7 +260,7 @@ fn main() -> Result<()> {
 
 /// True when `~/.config/docket/config.toml` exists. Path-resolution failures
 /// (no home dir, etc.) report `true` so an unusual environment doesn't
-/// block launch on a wizard prompt.
+/// block launch behind a first-run config-seed step.
 fn looks_initialized() -> bool {
     config::config_path().map(|p| p.exists()).unwrap_or(true)
 }

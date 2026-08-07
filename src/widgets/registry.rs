@@ -12,11 +12,10 @@
 //!    `widgets::mod` on it.
 //! 4. Append a `WidgetDescriptor` to [`WIDGETS`] below.
 //!
-//! No edits to `app.rs`, `main.rs`, or the wizard driver required.
-//! Registration, first-run defaults, and auth prompts all walk `WIDGETS`.
+//! No edits to `app.rs` or `main.rs` required.
+//! Registration and first-run defaults all walk `WIDGETS`.
 
 use crate::auth::registry::AuthRequirement;
-use crate::wizard::descriptor::WizardDescriptor;
 
 use super::{Widget, WidgetCtx, WidgetFactory};
 
@@ -30,61 +29,20 @@ pub struct WidgetDescriptor {
     pub factory: WidgetFactory,
 
     /// Whether this widget appears in the empty-layout fallback grid. Set
-    /// to `false` for auxiliary widgets that the user should opt into via
-    /// the wizard or by editing `config.toml`.
+    /// to `false` for auxiliary widgets that the user should opt into by
+    /// editing `config.toml`.
     pub default_in_first_run: bool,
 
     /// OAuth providers this widget may call. Widgets with multiple backends
     /// (calendar's google / microsoft / caldav / local) list every provider
-    /// they could need; the user picks one at wizard time. Fully offline
-    /// widgets leave this empty.
-    #[allow(dead_code)] // surfaced by the wizard's auth-prompt step.
+    /// they could need. Fully offline widgets leave this empty.
+    #[allow(dead_code)] // reserved for a future auth-setup prompt.
     pub auth_requirements: &'static [AuthRequirement],
-
-    /// Wizard descriptor — the declarative setup-page schema the wizard
-    /// driver uses to render this widget's configuration UI. Widgets that
-    /// haven't been migrated to the schema yet return a `defer_to_toml`
-    /// descriptor that points the user at the widget's TOML file.
-    #[allow(dead_code)] // consumed by the wizard driver.
-    pub wizard: fn() -> WizardDescriptor,
 }
 
 /// The full set of widgets compiled into this build. Order is significant
-/// — it sets the empty-layout fallback registration order and the wizard's
-/// step ordering.
+/// — it sets the empty-layout fallback registration order.
 pub const WIDGETS: &[WidgetDescriptor] = &[
-    #[cfg(feature = "widget-stocks")]
-    WidgetDescriptor {
-        kind: super::stocks::KIND,
-        factory: super::stocks::build,
-        default_in_first_run: true,
-        auth_requirements: &[],
-        wizard: super::stocks::wizard_descriptor,
-    },
-    #[cfg(feature = "widget-forex")]
-    WidgetDescriptor {
-        kind: super::forex::KIND,
-        factory: super::forex::build,
-        default_in_first_run: false,
-        auth_requirements: &[],
-        wizard: super::forex::wizard_descriptor,
-    },
-    #[cfg(feature = "widget-clock")]
-    WidgetDescriptor {
-        kind: super::clock::KIND,
-        factory: super::clock::build,
-        default_in_first_run: true,
-        auth_requirements: &[],
-        wizard: super::clock::wizard_descriptor,
-    },
-    #[cfg(feature = "widget-weather")]
-    WidgetDescriptor {
-        kind: super::weather::KIND,
-        factory: super::weather::build,
-        default_in_first_run: true,
-        auth_requirements: &[],
-        wizard: super::weather::wizard_descriptor,
-    },
     #[cfg(feature = "widget-calendar")]
     WidgetDescriptor {
         kind: super::calendar::KIND,
@@ -100,7 +58,6 @@ pub const WIDGETS: &[WidgetDescriptor] = &[
                 scope_hints: &["Calendars.Read"],
             },
         ],
-        wizard: super::calendar::wizard_descriptor,
     },
     #[cfg(feature = "widget-news")]
     WidgetDescriptor {
@@ -108,7 +65,6 @@ pub const WIDGETS: &[WidgetDescriptor] = &[
         factory: super::news::build,
         default_in_first_run: true,
         auth_requirements: &[],
-        wizard: super::news::wizard_descriptor,
     },
     #[cfg(feature = "widget-email")]
     WidgetDescriptor {
@@ -125,7 +81,6 @@ pub const WIDGETS: &[WidgetDescriptor] = &[
                 scope_hints: &["Mail.Read"],
             },
         ],
-        wizard: super::email::wizard_descriptor,
     },
     #[cfg(feature = "widget-resources")]
     WidgetDescriptor {
@@ -133,15 +88,6 @@ pub const WIDGETS: &[WidgetDescriptor] = &[
         factory: super::resources::build,
         default_in_first_run: false,
         auth_requirements: &[],
-        wizard: super::resources::wizard_descriptor,
-    },
-    #[cfg(feature = "widget-gallery")]
-    WidgetDescriptor {
-        kind: super::gallery::KIND,
-        factory: super::gallery::build,
-        default_in_first_run: false,
-        auth_requirements: &[],
-        wizard: super::gallery::wizard_descriptor,
     },
     #[cfg(feature = "widget-notes")]
     WidgetDescriptor {
@@ -149,7 +95,6 @@ pub const WIDGETS: &[WidgetDescriptor] = &[
         factory: super::notes::build,
         default_in_first_run: false,
         auth_requirements: &[],
-        wizard: super::notes::wizard_descriptor,
     },
     #[cfg(feature = "widget-feeds")]
     WidgetDescriptor {
@@ -157,7 +102,6 @@ pub const WIDGETS: &[WidgetDescriptor] = &[
         factory: super::feeds::build,
         default_in_first_run: false,
         auth_requirements: &[],
-        wizard: super::feeds::wizard_descriptor,
     },
 ];
 
@@ -216,19 +160,13 @@ mod tests {
         assert!(find("definitely-not-a-real-widget").is_none());
     }
 
-    /// Five-widget smoke test for the default-features dashboard. Mirrors
+    /// Core-widget smoke test for the default-features dashboard. Mirrors
     /// the seed layout in `config::DEFAULT_CONFIG_TOML` — if either drifts,
     /// the empty-config first-run experience breaks.
-    #[cfg(all(
-        feature = "widget-clock",
-        feature = "widget-weather",
-        feature = "widget-calendar",
-        feature = "widget-news",
-        feature = "widget-stocks",
-    ))]
+    #[cfg(all(feature = "widget-calendar", feature = "widget-news"))]
     #[test]
     fn core_widgets_are_present() {
-        for kind in ["clock", "weather", "calendar", "news", "stocks"] {
+        for kind in ["calendar", "news"] {
             assert!(
                 find(kind).is_some(),
                 "core widget {kind} missing from registry"

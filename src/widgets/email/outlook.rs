@@ -92,7 +92,7 @@ impl OutlookEmailProvider {
             tracing::warn!(
                 status = %status,
                 body = %body,
-                "outlook /me returned non-success — most often a missing User.Read scope; re-authorize via the wizard's Authorize Microsoft step"
+                "outlook /me returned non-success — most often a missing User.Read scope; re-authorize with `docket --auth microsoft`"
             );
             return;
         }
@@ -348,13 +348,13 @@ impl OutlookEmailProvider {
         }
     }
 
-    /// Public folder-listing entry point used by the wizard to populate
-    /// its checkbox picker. Walks just the top-level mail folders
-    /// (`/me/mailFolders`) — deep recursion isn't worth the latency for
-    /// a one-shot setup picker, and most users only surface top-level
-    /// folders (Inbox, Sent Items, …). Returns `(value, label)` pairs
-    /// where both halves are the folder's display name (what email.toml
-    /// expects).
+    /// Folder-listing entry point reserved for a future folder picker.
+    /// Walks just the top-level mail folders (`/me/mailFolders`) — deep
+    /// recursion isn't worth the latency for a one-shot picker, and most
+    /// users only surface top-level folders (Inbox, Sent Items, …).
+    /// Returns `(value, label)` pairs where both halves are the folder's
+    /// display name (what email.toml expects).
+    #[allow(dead_code)] // surfaced by a future folder picker.
     pub async fn list_folders_for_picker(&self) -> Result<Vec<(String, String)>> {
         let token = self.access_token().await?;
         let url = format!("{GRAPH_BASE}/me/mailFolders?$top=100&includeHiddenFolders=true");

@@ -4,6 +4,33 @@ All notable changes to docket are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions track
 the `Cargo.toml` `version` field.
 
+## [0.1.0] — docket fork
+
+docket is a hard fork of [glint](https://github.com/ntrospect0/glint)
+(see the README's Origins section) — this version resets from glint's
+`0.5.0` line as a new, standalone, more opinionated project. Everything
+below `[0.1.0]` is glint's history, kept for provenance.
+
+### Removed
+
+- **Five widgets**: Stocks, Forex, Clock, Weather, Gallery — and their
+  Cargo features, default TOML seeds, and the now-dead supporting code
+  each one alone justified (`market_data`, `geolocation`, chart-axis /
+  braille-render helpers only they used). docket's remaining widget set
+  is Calendar, News, Email, Resources, Notes, Feeds.
+- **The interactive setup wizard** (`docket --setup`, ~9.7k lines under
+  `src/wizard/`). First run now seeds default config files directly to
+  disk via `docket --init` — no interactive flow. Non-interactive
+  `--new-profile` / `--rename-profile` / `--delete-profile` /
+  `--list-profiles` already covered profile lifecycle management and
+  are unaffected.
+
+### Changed
+
+- Default `[layout]` (both the seeded `config.toml` and the built-in
+  Rust fallback) is now a simple two-pane Calendar + News grid instead
+  of the old five-widget Clock/Calendar/Weather/News/Stocks layout.
+
 ## [0.5.0] — unreleased
 
 **Focus Zoom + responsive widget views.** Press `z` to enlarge the focused

@@ -6,18 +6,17 @@
 
 //! Transient status feedback with a TTL.
 //!
-//! Widgets that surface short-lived "Added AAPL to watchlist" /
-//! "Save failed" / "Copied to clipboard" messages in their footer
-//! all need the same shape: a value, the instant it was set, and a
-//! TTL after which it should vanish. Before this module the pattern
-//! was open-coded as `Option<(String, Instant)>` in `feeds`, `forex`,
-//! and `stocks`, with each widget hand-rolling the elapsed-check.
+//! Widgets that surface short-lived "Note deleted" / "Save failed" /
+//! "Copied to clipboard" messages in their footer all need the same
+//! shape: a value, the instant it was set, and a TTL after which it
+//! should vanish. Before this module the pattern was open-coded as
+//! `Option<(String, Instant)>` in each widget that needed it, hand-
+//! rolling the elapsed-check every time.
 //!
 //! [`TimedFeedback`] is generic over the value type. The most common
 //! shape is `Option<TimedFeedback<String>>` for a status message,
 //! but `Option<TimedFeedback<usize>>` works equally well for things
-//! like the forex widget's "row index that was copied to clipboard"
-//! pulse marker.
+//! like a "row index that was copied to clipboard" pulse marker.
 //!
 //! See `docs/widget-sdk.md` § Transient status (TimedFeedback).
 

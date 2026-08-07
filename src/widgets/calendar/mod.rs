@@ -16,8 +16,7 @@ mod wiring;
 
 #[allow(unused_imports)]
 pub use config::{
-    wizard_descriptor, CalDavConfig, CalendarConfig, CalendarView, FirstDayOfWeek, ProviderEntry,
-    ProviderKind, KIND,
+    CalDavConfig, CalendarConfig, CalendarView, FirstDayOfWeek, ProviderEntry, ProviderKind, KIND,
 };
 use colors::CalendarColors;
 use config::VIEW_TABS;

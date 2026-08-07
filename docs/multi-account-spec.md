@@ -1,6 +1,16 @@
 # Multi-account support — design spec
 
-Status: **implemented in 0.3.0**
+Status: **implemented in 0.3.0** (glint). The multi-account
+credential/token layer, calendar `account` field, and `docket --auth
+<provider>:<account>` CLI syntax described below are all still live in
+docket. **Phase 4 and the "What the setup wizard does / doesn't do"
+section describe the interactive setup wizard, which docket removed**
+(see `README.md` → Origins, `CHANGELOG.md` → `[0.1.0]`) — those parts
+are kept below only as a historical record of what was built, not as
+current behavior. Without a wizard, manually-added `[[providers]]`
+blocks in `calendar.toml` are never rebuilt out from under you by
+anything — the round-trip-preservation problem Phase 4 solved doesn't
+exist anymore.
 
 User-facing setup lives in INSTRUCTIONS.md → *Multiple calendar
 accounts*; this doc is the design rationale.
@@ -147,7 +157,7 @@ label. This keeps color keys a 2-tuple and adds no field to `Event`.
   two Outlook entries "just work" once each carries a distinct token and
   source.
 
-### Phase 4 — Make the wizard round-trip preserve manual accounts (required)
+### Phase 4 (historical — wizard removed in docket) — Make the wizard round-trip preserve manual accounts (required)
 
 The wizard's `calendar.toml` round-trip in
 `src/widgets/calendar/config.rs` is hard-keyed by canonical kind and
@@ -174,7 +184,7 @@ removes *all* Google blocks; leaving Outlook ticked keeps *both* the
 default and `work` blocks untouched. Add a round-trip test that a
 two-account file survives a wizard save unchanged.
 
-## What the setup wizard does / doesn't do
+## What the setup wizard did / didn't do (historical — wizard removed in docket)
 
 For the record, so the boundary is explicit:
 

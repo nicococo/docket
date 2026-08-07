@@ -116,20 +116,6 @@ where
     Ok(path)
 }
 
-/// Write a raw string (not necessarily TOML) to the credentials
-/// directory iff the file is missing. Used for first-launch
-/// scaffolding of `*_oauth_client.toml` template files. Returns
-/// `Ok(true)` when the template was written, `Ok(false)` when the
-/// file already existed (the caller's expected idempotent path).
-pub fn write_template_if_missing(filename: &str, contents: &str) -> Result<bool> {
-    let path = path(filename)?;
-    if path.exists() {
-        return Ok(false);
-    }
-    atomic_write_locked(&path, contents.as_bytes())?;
-    Ok(true)
-}
-
 /// Atomic write with `chmod 0600` (Unix). The temp file is created
 /// alongside the destination so the rename is on the same
 /// filesystem; perms are tightened on the tmp before rename so the
@@ -220,19 +206,6 @@ mod tests {
             // the file-type, which differs between platforms.
             assert_eq!(mode & 0o777, 0o600, "{:o}", mode);
         }
-        std::fs::remove_dir_all(&tmp).ok();
-    }
-
-    #[test]
-    #[ignore = "mutates the process-wide XDG_CONFIG_HOME — opt in with --ignored"]
-    fn write_template_if_missing_is_idempotent() {
-        let tmp = isolated_dir();
-        let wrote_first = write_template_if_missing("tmpl.toml", "key = \"x\"").unwrap();
-        assert!(wrote_first);
-        let wrote_second = write_template_if_missing("tmpl.toml", "key = \"y\"").unwrap();
-        assert!(!wrote_second, "second call must not overwrite");
-        let body = std::fs::read_to_string(path("tmpl.toml").unwrap()).unwrap();
-        assert_eq!(body, "key = \"x\"");
         std::fs::remove_dir_all(&tmp).ok();
     }
 

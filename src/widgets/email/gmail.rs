@@ -123,12 +123,13 @@ impl GmailProvider {
         }
     }
 
-    /// Public folder-listing entry point used by the wizard to populate
-    /// its checkbox picker. Returns `(value, label)` pairs where `value`
-    /// is what gets written to email.toml's `folders` array (a Gmail
-    /// label name like `INBOX` or `Bills/Utilities`) and `label` is the
-    /// display string. System labels come first (in stable order),
-    /// then user labels sorted by name.
+    /// Folder-listing entry point reserved for a future folder picker.
+    /// Returns `(value, label)` pairs where `value` is what gets written
+    /// to email.toml's `folders` array (a Gmail label name like `INBOX`
+    /// or `Bills/Utilities`) and `label` is the display string. System
+    /// labels come first (in stable order), then user labels sorted by
+    /// name.
+    #[allow(dead_code)] // surfaced by a future folder picker.
     pub async fn list_folders_for_picker(&self) -> Result<Vec<(String, String)>> {
         let token = self.access_token().await?;
         let url = format!("{GMAIL_BASE}/users/me/labels");

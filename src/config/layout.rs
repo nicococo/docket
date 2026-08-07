@@ -24,7 +24,7 @@ pub struct GridCell {
     /// path checks `is_stack()` to decide which one to read.
     #[serde(default)]
     pub widget: Option<String>,
-    /// Stack cell: `widgets = ["clock", "weather", "stocks"]`. Up to 3
+    /// Stack cell: `widgets = ["calendar", "news", "email"]`. Up to 3
     /// widgets share one cell; only one is visible at a time. Empty
     /// strings are dropped at parse time so the stack is always N
     /// contiguous widgets. After dropping empties, a stack of size 1
@@ -117,36 +117,20 @@ fn default_span() -> usize {
 }
 
 fn default_columns() -> Vec<u16> {
-    vec![40, 60]
+    vec![50, 50]
 }
 
 fn default_rows() -> Vec<u16> {
-    vec![35, 35, 30]
+    vec![100]
 }
 
 fn default_cells() -> Vec<GridCell> {
     vec![
         GridCell {
-            widget: Some("clock".into()),
-            widgets: None,
-            col: 0,
-            row: 0,
-            col_span: 1,
-            row_span: 1,
-        },
-        GridCell {
             widget: Some("calendar".into()),
             widgets: None,
-            col: 1,
-            row: 0,
-            col_span: 1,
-            row_span: 1,
-        },
-        GridCell {
-            widget: Some("weather".into()),
-            widgets: None,
             col: 0,
-            row: 1,
+            row: 0,
             col_span: 1,
             row_span: 1,
         },
@@ -154,16 +138,8 @@ fn default_cells() -> Vec<GridCell> {
             widget: Some("news".into()),
             widgets: None,
             col: 1,
-            row: 1,
+            row: 0,
             col_span: 1,
-            row_span: 1,
-        },
-        GridCell {
-            widget: Some("stocks".into()),
-            widgets: None,
-            col: 0,
-            row: 2,
-            col_span: 2,
             row_span: 1,
         },
     ]
@@ -252,18 +228,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn default_layout_has_five_cells() {
+    fn default_layout_has_two_cells() {
         let layout = LayoutConfig::default();
-        assert_eq!(layout.cells.len(), 5);
+        assert_eq!(layout.cells.len(), 2);
         let widgets: Vec<String> = layout
             .cells
             .iter()
             .map(|c| c.primary_widget().unwrap_or_default())
             .collect();
-        assert_eq!(
-            widgets,
-            vec!["clock", "calendar", "weather", "news", "stocks"]
-        );
+        assert_eq!(widgets, vec!["calendar", "news"]);
     }
 
     #[test]
@@ -271,33 +244,18 @@ mod tests {
         let layout = LayoutConfig::default();
         let area = Rect::new(0, 0, 100, 40);
         let resolved = layout.resolve(area);
-        assert_eq!(resolved.len(), 5);
+        assert_eq!(resolved.len(), 2);
 
-        // Top row: clock left, calendar right.
-        assert_eq!(resolved[0].cell.primary_widget().as_deref(), Some("clock"));
-        assert_eq!(resolved[0].area.x, 0);
-        assert_eq!(resolved[0].area.y, 0);
+        // Calendar left, news right.
         assert_eq!(
-            resolved[1].cell.primary_widget().as_deref(),
+            resolved[0].cell.primary_widget().as_deref(),
             Some("calendar")
         );
+        assert_eq!(resolved[0].area.x, 0);
+        assert_eq!(resolved[0].area.y, 0);
+        assert_eq!(resolved[1].cell.primary_widget().as_deref(), Some("news"));
         assert_eq!(resolved[1].area.y, 0);
         assert!(resolved[1].area.x > 0);
-
-        // Middle row: weather left, news right.
-        assert_eq!(
-            resolved[2].cell.primary_widget().as_deref(),
-            Some("weather")
-        );
-        assert_eq!(resolved[3].cell.primary_widget().as_deref(), Some("news"));
-        assert_eq!(resolved[2].area.y, resolved[3].area.y);
-        assert!(resolved[2].area.y > resolved[0].area.y);
-
-        // Bottom row: stocks spans both columns.
-        assert_eq!(resolved[4].cell.primary_widget().as_deref(), Some("stocks"));
-        assert_eq!(resolved[4].area.x, 0);
-        assert_eq!(resolved[4].area.width, 100);
-        assert!(resolved[4].area.y > resolved[2].area.y);
     }
 
     #[test]

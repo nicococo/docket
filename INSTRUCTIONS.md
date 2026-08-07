@@ -1,6 +1,11 @@
 # Docket setup instructions
 
-This file is the long-form companion to docket's interactive `--setup` wizard. The wizard collects the basics inline; the steps below cover the one-time provider setup (Google Cloud, Microsoft Azure, CalDAV) and the moving parts the TUI can't walk you through itself (browser tabs, third-party portals).
+Docket has no interactive setup wizard — `docket --init` seeds default
+config files directly to disk, and you configure everything by hand-editing
+TOML plus running `docket --auth <provider>` for OAuth. This file walks
+through the one-time provider setup (Google Cloud, Microsoft Azure, CalDAV)
+and the moving parts a config file alone can't walk you through (browser
+tabs, third-party portals).
 
 If you're stuck, see [Troubleshooting](#troubleshooting) at the bottom or open an issue at https://github.com/nicococo/docket/issues.
 
@@ -28,7 +33,7 @@ If you'd rather skip OAuth entirely, docket also supports:
 
 ## Google: Calendar + Gmail
 
-You'll create a Google Cloud project, enable the two APIs docket uses, configure an OAuth consent screen, and create a Desktop OAuth client. The credentials get pasted into the wizard's "Authorize Google" page.
+You'll create a Google Cloud project, enable the two APIs docket uses, configure an OAuth consent screen, and create a Desktop OAuth client. The credentials get pasted into `~/.config/docket/credentials/google_oauth_client.toml`.
 
 ### One-time setup
 
@@ -49,18 +54,19 @@ You'll create a Google Cloud project, enable the two APIs docket uses, configure
    - Application type: **Desktop app**.
    - Name: `docket`.
    - Click *Create*.
-6. **Copy the credentials.** Google shows you a dialog with the **Client ID** (looks like `1234567-abcdef.apps.googleusercontent.com`) and **Client Secret** (a short random string). Keep this dialog open — you'll paste both into docket's wizard in a moment.
+6. **Copy the credentials.** Google shows you a dialog with the **Client ID** (looks like `1234567-abcdef.apps.googleusercontent.com`) and **Client Secret** (a short random string). Keep this dialog open — you'll paste both into a file in a moment.
 
-### In the wizard
+### Authorize
 
-1. Go to *Configure email* (or *Configure calendar*) → press **Space** on **Authorize Google**.
-2. Paste your Client ID and Client Secret into the inline form. Press Tab to move between fields.
-3. Press Enter on **[ Save & Authorize ]**. The wizard:
-   - Writes `~/.config/docket/credentials/google_oauth_client.toml` with `0600` perms.
-   - Opens your browser to Google's consent screen.
-   - Listens on a temporary localhost port for the redirect.
-4. In the browser, sign in with the same Google account you added as a Test user. You'll see a warning that "Google hasn't verified this app" — that's expected for personal-use clients. Click *Continue* → *Continue* → tick the permissions docket asks for → *Continue*.
-5. The browser shows a success page; docket's wizard resumes automatically, the title row shows your email address, and the folder picker loads your Gmail labels.
+1. `docket --init` (if you haven't already) seeds a placeholder at `~/.config/docket/credentials/google_oauth_client.toml`. Open it and fill in:
+
+   ```toml
+   client_id = "1234567-abcdef.apps.googleusercontent.com"
+   client_secret = "your-client-secret"
+   ```
+2. Run `docket --auth google`. Docket opens your browser to Google's consent screen and listens on a temporary localhost port for the redirect.
+3. In the browser, sign in with the same Google account you added as a Test user. You'll see a warning that "Google hasn't verified this app" — that's expected for personal-use clients. Click *Continue* → *Continue* → tick the permissions docket asks for → *Continue*.
+4. The browser shows a success page; the terminal prints "Google authorization complete." Launch docket and the title row shows your email address.
 
 ### What's stored where
 
@@ -71,7 +77,7 @@ You'll create a Google Cloud project, enable the two APIs docket uses, configure
 
 ## Microsoft: Outlook calendar + mail
 
-You'll register an Azure app, configure it to accept loopback redirects (so the browser can hand the token back to docket), add the Graph API permissions docket uses, and copy the Application (client) ID into the wizard.
+You'll register an Azure app, configure it to accept loopback redirects (so the browser can hand the token back to docket), add the Graph API permissions docket uses, and copy the Application (client) ID into a credentials file.
 
 Note: Microsoft uses **PKCE**, so there's no Client Secret to handle — just the Client ID.
 
@@ -84,7 +90,7 @@ Note: Microsoft uses **PKCE**, so there's no Client Secret to handle — just th
    - Supported account types: **Accounts in any organizational directory and personal Microsoft accounts**.
    - Redirect URI: leave blank for now.
    - Click *Register*.
-4. **Copy the Application (client) ID** from the new app's overview page. You'll paste it into docket's wizard.
+4. **Copy the Application (client) ID** from the new app's overview page. You'll paste it into a credentials file.
 5. **Authentication settings.** Left sidebar → *Authentication* → *Add a platform* → **Mobile and desktop applications**.
    - Tick **http://localhost** under the Custom redirect URIs list (the loopback option).
    - Click *Configure*.
@@ -94,11 +100,15 @@ Note: Microsoft uses **PKCE**, so there's no Client Secret to handle — just th
    - `User.Read` — read your account profile (**required** for the email widget to show your address; without it the title row stays "(loading…)" forever).
    - Click *Add permissions*.
 
-### In the wizard
+### Authorize
 
-1. Press **Space** on **Authorize Microsoft (Outlook calendar)** or **Authorize Microsoft (for Outlook)**.
-2. Paste the Application (client) ID into the inline form. Tab → Enter on [ Save & Authorize ].
-3. Browser opens to login.microsoftonline.com. Sign in, approve the permissions docket asked for. The browser shows a success page; docket resumes.
+1. `docket --init` (if you haven't already) seeds a placeholder at `~/.config/docket/credentials/microsoft_oauth_client.toml`. Open it and fill in:
+
+   ```toml
+   client_id = "your-application-client-id"
+   tenant = "common"
+   ```
+2. Run `docket --auth microsoft`. Your browser opens to login.microsoftonline.com. Sign in, approve the permissions docket asked for. The browser shows a success page; the terminal prints "Microsoft authorization complete."
 
 ### What's stored where
 
@@ -111,7 +121,7 @@ Note: Microsoft uses **PKCE**, so there's no Client Secret to handle — just th
 
 The Calendar widget can show **two or more accounts of the same provider** at once — e.g. a work Outlook *and* a personal Outlook, or two Google accounts. (Different providers — Google + Outlook + CalDAV — have always merged; this adds *same-provider* accounts.)
 
-The setup wizard manages one **default** account per provider — the account you authorize on its *Authorize* page. Extra accounts are added by hand, in two steps.
+`docket --auth <provider>` authorizes one **default** account per provider. Extra accounts are added by hand, in two steps.
 
 ### 1. Authorize each extra account
 
@@ -122,7 +132,7 @@ docket --auth microsoft:work       # an extra Outlook account labelled "work"
 docket --auth google:personal      # an extra Google account labelled "personal"
 ```
 
-The provider name is `microsoft` or `google` (the same names the wizard uses — note `microsoft`, not `outlook`); the part after the `:` is your label. A bare `docket --auth microsoft` with no label authorizes the **default** account, exactly as the wizard does.
+The provider name is `microsoft` or `google` (note `microsoft`, not `outlook`); the part after the `:` is your label. A bare `docket --auth microsoft` with no label authorizes the **default** account.
 
 The browser opens as usual. If you're already signed into another account, choose **"Use another account"** (or use a private window) so you land on the right one. The token is written to `~/.config/docket/credentials/microsoft_oauth_token.<label>.toml` — one file per account. The shared `microsoft_oauth_client.toml` (your app registration) serves all of them, so you don't repeat the Azure / Google Cloud setup.
 
@@ -130,10 +140,10 @@ Keep labels simple — letters, digits, hyphens (e.g. `work`, `team-eu`). Avoid 
 
 ### 2. Add a provider block per account
 
-Edit `~/.config/docket/calendar.toml` and add one `[[providers]]` block per account, each with an `account = "<label>"` field. Omit `account` (or set it to `"default"`) for the wizard-managed default account:
+Edit `~/.config/docket/calendar.toml` and add one `[[providers]]` block per account, each with an `account = "<label>"` field. Omit `account` (or set it to `"default"`) for the default account:
 
 ```toml
-# Default Outlook account (managed by the wizard; account omitted)
+# Default Outlook account (account omitted)
 [[providers]]
 kind = "outlook"
 calendar_ids = ["primary"]
@@ -145,7 +155,7 @@ account = "work"
 calendar_ids = ["primary"]
 ```
 
-No restart needed — live config reload picks it up. And the wizard won't clobber these hand-added blocks if you run it again: it preserves every `[[providers]]` block whose source stays ticked.
+No restart needed — live config reload picks it up.
 
 ### Colors per account
 
@@ -177,7 +187,7 @@ CalDAV is the open standard for calendar sync; it bypasses OAuth in favour of an
    username = "your.apple.id@icloud.com"
    app_password = "abcd-efgh-ijkl-mnop"
    ```
-5. In the wizard's Calendar page, tick **CalDAV** under *Calendar sources*.
+5. Add a `[[providers]]` block with `kind = "caldav"` to `~/.config/docket/calendar.toml` (see [Multiple calendar accounts](#multiple-calendar-accounts-same-provider) for the block shape).
 
 ### Fastmail
 
@@ -207,15 +217,7 @@ IMAP skips OAuth entirely — you provide host, port, username, and an app-speci
 
 (Gmail requires 2-Step Verification to be enabled before you can generate app passwords. iCloud and Fastmail also force app passwords for third-party clients — your account password won't work.)
 
-### In the wizard
-
-1. *Configure email* → Provider → tick **IMAP**.
-2. Press **Space** on **Set up IMAP credentials**.
-3. Fill in the form: host, port (993 unless you know you need otherwise), username (usually your full email), app password. Press Enter on **[ Save & Authorize ]**.
-4. The wizard writes `~/.config/docket/credentials/imap.toml` with 0600 perms, then loads your mailbox folders so the folder picker populates.
-5. If the password is wrong, the folder picker stays on its "showing defaults" hint and `~/.config/docket/docket.log` has a `wizard: failed to fetch IMAP folders for picker` warning with the underlying error.
-
-### Manual setup (skipping the wizard)
+### Setup
 
 Drop a file at `~/.config/docket/credentials/imap.toml`:
 
@@ -248,10 +250,7 @@ widgets call whichever is active in `llm.toml`.
 ### Anthropic (Claude)
 
 1. https://console.anthropic.com/ → *Get API Keys* → create a key.
-2. Either pick **Anthropic (Claude)** on the wizard's
-   *Global → LLM provider* field and paste the key into the
-   *Anthropic API key* field below it, or edit
-   `~/.config/docket/credentials/anthropic_key.toml`:
+2. Edit `~/.config/docket/credentials/anthropic_key.toml`:
 
    ```toml
    api_key = "sk-ant-..."
@@ -260,9 +259,7 @@ widgets call whichever is active in `llm.toml`.
 ### OpenAI (GPT)
 
 1. https://platform.openai.com/api-keys → *Create new secret key*.
-2. Either pick **OpenAI (GPT)** on the wizard's *Global → LLM
-   provider* field and paste the key into the *OpenAI API key* field
-   below it, or edit `~/.config/docket/credentials/openai_key.toml`:
+2. Edit `~/.config/docket/credentials/openai_key.toml`:
 
    ```toml
    api_key = "sk-..."
@@ -277,8 +274,7 @@ widgets call whichever is active in `llm.toml`.
 After the key is on disk:
 
 - `llm.toml` carries `[provider] name = "anthropic"` or `"openai"` —
-  the wizard sets this when you pick a provider; you can flip it by
-  hand any time.
+  set this by hand to pick which provider is active.
 - `summarize_with_llm = true` in `news.toml` / `email.toml` opts each
   widget into summaries. Both default to `true` once a key is configured.
 
@@ -296,24 +292,18 @@ Expected for personal-use clients. You're seeing the unverified-app warning. Cli
 
 ### Microsoft: email widget shows "(loading…)" forever
 
-Your token is missing the `User.Read` Graph permission. Re-authorize:
+Your token is missing the `User.Read` Graph permission. Re-authorize with
+`docket --auth microsoft`. When the browser asks for permissions, make
+sure "View your basic profile" is part of the consent.
 
-- **In the wizard:** open *Configure email* → Space on *Authorize Microsoft*.
-- **Outside the wizard:** `docket --auth microsoft`.
+### "Wrote a template at … fill it in then retry" but I edited the file and it still complains
 
-When the browser asks for permissions, make sure "View your basic profile" is part of the consent.
-
-### "The wizard says 'Wrote a template at … press Space again' but I edited the file and pressing Space still complains"
-
-The wizard re-reads the file on each attempt. Double-check:
+The credentials-template check re-reads the file on each `--auth` attempt.
+Double-check:
 
 - File path is `~/.config/docket/credentials/<provider>_oauth_client.toml`.
 - Values are quoted: `client_id = "1234-abcdef.apps.googleusercontent.com"`.
 - Neither value still starts with `REPLACE_WITH_…`.
-
-### "Folder picker shows '(showing defaults — list refreshes after you authorize)' but never updates"
-
-The post-OAuth fetch is non-blocking and runs synchronously on auth completion. If it didn't populate, check `~/.config/docket/docket.log` for a `wizard: failed to fetch …` warning. The most common cause is a token without the right scope; re-authorize to refresh.
 
 ### Calendar / email shows "Last fetch failed: …"
 
@@ -325,16 +315,16 @@ Read the message — it carries the provider's error verbatim. Common causes:
 
 ### I deleted my token file, now what?
 
-Re-run the wizard's Authorize step or `docket --auth <provider>`. Docket will open a fresh browser flow and write a new token.
+Run `docket --auth <provider>`. Docket will open a fresh browser flow and write a new token.
 
 ### I want to start completely fresh
 
 ```bash
 rm -rf ~/.config/docket
-docket --setup
+docket --init
 ```
 
-This wipes everything — config, tokens, cache. The wizard seeds fresh defaults from docket's built-in templates.
+This wipes everything — config, tokens, cache. `docket --init` seeds fresh defaults from docket's built-in templates.
 
 ---
 
@@ -351,24 +341,19 @@ Everything a profile owns — layout, widget configs, the selected theme, accoun
 
 ### Managing profiles
 
-Run `docket --setup` and you land on the **Profile Manager** — it lists your profiles and lets you pick one to configure, or **create, clone, rename, and delete** them right there. Cloning copies a profile's configuration (not its credentials — you authorize the clone's accounts afterward). To jump straight into configuring one profile, use `docket --profile <name> --setup`.
+Profile management is entirely CLI-driven — **create, clone, rename, and delete** via flags (see below). `docket --new-profile <name>` creates a profile and seeds its defaults; `docket --profile <name>` launches into it.
 
 ### Upgrading from a pre-profiles install
 
-Your existing flat `~/.config/docket/` **keeps working as-is** — the default profile reads it in place, so nothing moves or is deleted until you choose. The first time you run `docket --setup`, docket notices the flat layout and offers to migrate:
-
-- **Migrate** (recommended) — moves your config into `profiles/default/`, tidies away the old flat duplicates, and unlocks creating and switching between multiple profiles.
-- **Keep flat** — stays single-profile for now; you can migrate any time (the prompt reappears on the next `--setup`).
+Your existing flat `~/.config/docket/` **keeps working as-is** — the default profile reads it in place, so nothing moves or is deleted until you choose. Run `docket --migrate-profiles` when you're ready to move it into `profiles/default/` and unlock creating/switching between multiple profiles; the flat originals are left in place afterward (an older flat binary keeps working) until you explicitly remove them with `docket --cleanup-flat-config`.
 
 Migration is non-destructive: your config is copied into `profiles/default/` *before* anything is removed, and the shared colorscheme library + OAuth client registrations always stay at the root.
 
-### Command-line management (advanced)
-
-Everything the Profile Manager does is also scriptable — handy for automation or headless setups:
+### Command-line management
 
 ```sh
 docket --list-profiles                     # list profiles (marks default + active)
-docket --new-profile work                  # create (then `docket --profile work --setup`)
+docket --new-profile work                  # create a profile and seed its defaults
 docket --new-profile staging --from work   # clone work's config (re-authorize accounts)
 docket --rename-profile old:new
 docket --delete-profile name               # not "default" or the active profile
@@ -389,8 +374,8 @@ docket --cleanup-flat-config               # remove leftover flat duplicates aft
 └── profiles/
     ├── default/                      # PER-PROFILE layer (the default profile)
     │   ├── config.toml               # [global] + [layout] + [[layout.cells]]
-    │   ├── clock.toml  calendar.toml  news.toml  stocks.toml  forex.toml
-    │   ├── weather.toml  gallery.toml  resources.toml  email.toml
+    │   ├── calendar.toml  news.toml  feeds@<instance>.toml
+    │   ├── resources.toml  email.toml
     │   ├── notes.toml  llm.toml
     │   ├── colorschemes.toml          # OPTIONAL per-profile scheme overrides
     │   ├── credentials/               # per-profile account secrets (0700)
@@ -399,11 +384,11 @@ docket --cleanup-flat-config               # remove leftover flat duplicates aft
     │   │   ├── caldav.toml  imap.toml
     │   │   ├── anthropic_key.toml  openai_key.toml
     │   ├── notes/<instance>/<id>.md   # each note as a plain markdown file
-    │   └── .runtime_state.toml  .wizard_state.toml  docket.log
+    │   └── .runtime_state.toml  docket.log
     └── work/  travel/  …             # other profiles, same shape
 ```
 
-Every `.toml` is plain text — edit in your favourite editor and either restart docket or hit `:reload` from the runtime command bar. The wizard preserves keys it doesn't manage (custom feeds, topic keywords, per-widget color overrides, etc.) across `--setup` re-runs, and preserves other profiles' `[[providers]]` blocks it doesn't own.
+Every `.toml` is plain text — edit in your favourite editor and either restart docket or hit `:reload` from the runtime command bar.
 
 ---
 

@@ -8,9 +8,9 @@ are all welcome.
 ```sh
 git clone <your-fork-url> docket
 cd docket
-make test          # full suite, ~460 tests
+make test          # full suite, ~540 tests
 make build         # debug binary
-cargo run -- --setup   # interactive wizard, useful for end-to-end testing
+cargo run -- --init    # seed default config files, useful for end-to-end testing
 ```
 
 Before you open a PR:
@@ -23,8 +23,7 @@ Before you open a PR:
 For non-trivial changes (new widget, new auth provider, anything that
 changes a public TOML field), please open an issue first so we can
 agree on shape before you spend time on code. `AGENTS.md` carries the
-architecture overview — read it before working on the wizard or the
-widget registry.
+architecture overview — read it before working on the widget registry.
 
 ## Licensing of your contributions
 
@@ -87,14 +86,14 @@ disagreement at merge time.
 
 ## How features get scoped
 
-docket is pre-launch v0.2 and shipping with deliberate restraint:
+docket is a young fork and shipping with deliberate restraint:
 
 - **Widgets are independently optional.** Each widget compiles in
   only when its Cargo feature is enabled. New widgets are purely
   additive — declare a `widget-<name>` feature, implement the
   `Widget` trait under `src/widgets/<name>/`, and append a
   `WidgetDescriptor` to `src/widgets/registry.rs`. No edits to
-  `app.rs`, `main.rs`, or the wizard are needed. See
+  `app.rs` or `main.rs` are needed. See
   [`docs/widget-sdk.md`](docs/widget-sdk.md) for the quickstart,
   available platform capabilities (polling, theming, caching),
   and reference patterns extracted from the shipped widgets.

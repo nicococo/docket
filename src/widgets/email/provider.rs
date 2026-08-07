@@ -67,9 +67,9 @@ pub struct EmailFolder {
 /// Read-only email source. v1 has two implementations: Gmail and Outlook.
 #[async_trait]
 pub trait EmailProvider: Send + Sync {
-    /// List the folders/labels available on the account. Used by `--setup`
-    /// and future UI to help the user pick which folders to follow.
-    #[allow(dead_code)] // surfaced by the wizard / folder picker later.
+    /// List the folders/labels available on the account. Reserved for a
+    /// future folder picker.
+    #[allow(dead_code)] // surfaced by a future folder picker.
     async fn list_folders(&self) -> Result<Vec<EmailFolder>>;
 
     /// Fetch recent messages from a single folder. `since` is a hard

@@ -125,7 +125,7 @@ impl ImapProvider {
         }
     }
 
-    /// Public folder-listing entry point for the wizard's picker.
+    /// Public folder-listing entry point (backs [`EmailProvider::list_folders`]).
     /// Issues `LIST "" "*"` against the server. Sub-folders are joined
     /// by the server's hierarchy delimiter (usually `.` or `/`) — we
     /// preserve the raw name so the user can paste it into email.toml

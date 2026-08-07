@@ -51,7 +51,7 @@ install: release
 	@echo "If $(BINDIR) isn't on your \$$PATH yet, add it:"
 	@echo "  echo 'export PATH=\"$(BINDIR):\$$PATH\"' >> ~/.zshrc   # or ~/.bashrc"
 	@echo
-	@echo "Then run \`docket\` to launch. First run drops you into the setup wizard."
+	@echo "Then run \`docket\` to launch. First run seeds default config files at ~/.config/docket/."
 
 .PHONY: uninstall
 uninstall:

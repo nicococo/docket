@@ -3,40 +3,11 @@
 // Copyright (C) 2026 nicococo
 
 //! Chart-axis primitives shared by widgets that render a braille
-//! time-series. Today: y-axis tick row indices, the right-anchored
-//! x-axis label layout, and the horizontal reference-line overlay.
-//! All routines are presentation-only — they don't know what units
-//! the series carries.
+//! time-series. Today: the right-anchored x-axis label layout and the
+//! horizontal reference-line overlay. All routines are
+//! presentation-only — they don't know what units the series carries.
 
-use ratatui::{layout::Rect, style::Style, Frame};
-
-/// Row indices (0 = top, `plot_h - 1` = bottom) where a widget should
-/// draw y-axis labels. Always includes the top + bottom; adds the
-/// midpoint when there's room, and quarter points when `plot_h` is
-/// large. The widget supplies the actual label text — this just picks
-/// which rows to put it on.
-pub fn label_rows(plot_h: u16) -> Vec<u16> {
-    if plot_h == 0 {
-        return Vec::new();
-    }
-    if plot_h == 1 {
-        return vec![0];
-    }
-    let fracs: &[f64] = match plot_h {
-        2..=3 => &[0.0, 1.0],
-        4..=6 => &[0.0, 0.5, 1.0],
-        _ => &[0.0, 0.25, 0.5, 0.75, 1.0],
-    };
-    let mut rows: Vec<u16> = Vec::with_capacity(fracs.len());
-    for f in fracs {
-        let row = (f * (plot_h as f64 - 1.0)).round() as u16;
-        let row = row.min(plot_h - 1);
-        if !rows.contains(&row) {
-            rows.push(row);
-        }
-    }
-    rows
-}
+use ratatui::{style::Style, Frame};
 
 /// Place `labels` evenly across a line of `width` cells, right-anchored:
 /// the last label's right edge sits at exactly column `width`, the first
@@ -122,106 +93,9 @@ pub fn draw_reference_line(
     }
 }
 
-/// Place `(col, label)` pairs into a `width`-cell line so each label
-/// is centered on its requested column. Labels rendered in input
-/// order; an earlier label wins any overlap with a later one.
-/// Trailing labels that would extend past `width` are clamped so the
-/// rightmost label's right edge sits at exactly `width - 1`.
-pub fn lay_out_x_axis_labels_at_cols(items: &[(usize, &str)], width: usize) -> String {
-    if width == 0 {
-        return String::new();
-    }
-    let mut buf: Vec<char> = vec![' '; width];
-    for (col, label) in items {
-        let start = (*col).min(width.saturating_sub(1));
-        let chars: Vec<char> = label.chars().collect();
-        // Center the label on `col` so it visually anchors on the guide.
-        // Right edge would overflow off the chart for the rightmost label —
-        // clamp so the last label's right edge sits at width-1.
-        let half = chars.len() / 2;
-        let mut left = start.saturating_sub(half);
-        if left + chars.len() > width {
-            left = width.saturating_sub(chars.len());
-        }
-        // Skip if the slot is already painted (earlier label wins).
-        if buf[left..(left + chars.len()).min(width)]
-            .iter()
-            .any(|c| *c != ' ')
-        {
-            continue;
-        }
-        for (i, ch) in chars.iter().enumerate() {
-            if left + i >= width {
-                break;
-            }
-            buf[left + i] = *ch;
-        }
-    }
-    buf.iter().collect()
-}
-
-/// Draw a faint vertical `│` guide at column `trace_col` within the
-/// plot. Skips rows where the trace already painted a glyph at that
-/// column so the guide reads as "behind" the trace where they
-/// overlap. Used to mark calendar / time boundaries on intraday and
-/// long-window charts.
-#[allow(clippy::too_many_arguments)]
-pub fn draw_vertical_guide(
-    frame: &mut Frame,
-    x: u16,
-    plot_top: u16,
-    plot_h: u16,
-    trace_rows: &[String],
-    trace_col: u16,
-    style: Style,
-) {
-    if plot_h == 0 {
-        return;
-    }
-    let buf = frame.buffer_mut();
-    for row in 0..plot_h as usize {
-        let trace_owns_cell = trace_rows
-            .get(row)
-            .and_then(|s| s.chars().nth(trace_col as usize))
-            .map(|c| c != ' ')
-            .unwrap_or(false);
-        if trace_owns_cell {
-            continue;
-        }
-        let y = plot_top + row as u16;
-        if let Some(cell) = buf.cell_mut((x, y)) {
-            cell.set_char('│');
-            cell.set_style(style);
-        }
-    }
-}
-
-/// Suppress unused-import warnings when only some of this module's
-/// functions are referenced. The `Rect` re-export keeps signatures
-/// self-contained for future helpers that need the chart's rect
-/// dimensions.
-#[allow(dead_code)]
-fn _unused_rect_marker(_: Rect) {}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn label_rows_handles_degenerate_heights() {
-        assert_eq!(label_rows(0), Vec::<u16>::new());
-        assert_eq!(label_rows(1), vec![0]);
-        assert_eq!(label_rows(2), vec![0, 1]);
-    }
-
-    #[test]
-    fn label_rows_picks_three_for_small_heights_and_five_for_large() {
-        assert_eq!(label_rows(5), vec![0, 2, 4]);
-        let big = label_rows(20);
-        assert_eq!(big.first(), Some(&0));
-        assert_eq!(big.last(), Some(&19));
-        assert_eq!(big.len(), 5);
-    }
 
     #[test]
     fn lay_out_x_axis_labels_right_anchors_last_label() {

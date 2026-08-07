@@ -14,7 +14,7 @@ log_level = "info"
 # Vertical mouse-wheel direction.
 #   "natural"  — wheel-up scrolls a list selection / pane content up (default).
 #   "inverted" — wheel-up scrolls down. Pick this if your trackpad / mouse
-#                feels backwards in news, email, stocks, and other scrollable
+#                feels backwards in news, email, and other scrollable
 #                widgets. Applied once at the platform boundary so every
 #                widget honors the choice without per-widget config.
 mouse_scroll = "natural"
@@ -32,31 +32,15 @@ show_status_bar = true
 zoom_margin = 5
 
 [layout]
-columns = [40, 60]
-rows = [35, 35, 30]
-
-[[layout.cells]]
-widget = "clock"
-col = 0
-row = 0
+columns = [50, 50]
+rows = [100]
 
 [[layout.cells]]
 widget = "calendar"
-col = 1
-row = 0
-
-[[layout.cells]]
-widget = "weather"
 col = 0
-row = 1
+row = 0
 
 [[layout.cells]]
 widget = "news"
 col = 1
-row = 1
-
-[[layout.cells]]
-widget = "stocks"
-col = 0
-row = 2
-col_span = 2
+row = 0

@@ -4,13 +4,10 @@
 
 pub mod big_digits;
 pub mod chart;
-pub mod grid;
 pub mod help;
 pub mod modal;
 pub mod status;
 pub mod status_bar;
-
-pub use grid::CardGrid;
 
 use std::{cell::Cell, collections::HashMap, collections::HashSet, sync::Arc};
 
@@ -90,14 +87,14 @@ pub struct RenderState<'a> {
 const TITLE_METADATA_MIN_GAP: usize = 3;
 
 /// Visual weight of the right-aligned title metadata. Widgets that want
-/// to draw the eye to a transient/overridden state (e.g. the weather
-/// widget showing a `:weather <city>` lookup instead of the configured
-/// home city) pass [`Emphasized`]; the framework lays italic on top of
-/// the base `theme.metadata_style(focused)` so the differentiation is
-/// preserved even when the metadata gets truncated and no textual
-/// marker survives. Other widgets pass [`Default`] and inherit the
-/// existing rendering. Adding a new emphasis variant is one match arm
-/// in [`metadata_style_for_emphasis`] plus a fallback to make sense to
+/// to draw the eye to a transient/overridden state (e.g. a lookup query
+/// standing in for the configured default) pass [`Emphasized`]; the
+/// framework lays italic on top of the base
+/// `theme.metadata_style(focused)` so the differentiation is preserved
+/// even when the metadata gets truncated and no textual marker
+/// survives. Other widgets pass [`Default`] and inherit the existing
+/// rendering. Adding a new emphasis variant is one match arm in
+/// [`metadata_style_for_emphasis`] plus a fallback to make sense to
 /// older callers — by convention the framework defines what each
 /// variant looks like, not the widget.
 ///
@@ -110,9 +107,9 @@ pub enum MetadataEmphasis {
     Default,
     /// Layer italic on top of the standard style. Reserved for metadata
     /// that signals "this isn't the configured default" — transient
-    /// overrides, lookup queries, ephemeral filters. Surviving narrow
-    /// widths is the point: even when the city name is tail-truncated
-    /// to `Toky…`, italics still telegraph "this isn't your home."
+    /// overrides, lookup queries, ephemeral filters. No current widget
+    /// constructs this yet.
+    #[allow(dead_code)]
     Emphasized,
 }
 

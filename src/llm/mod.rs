@@ -28,13 +28,16 @@ pub type LlmBuilder = fn(&ProviderConfig, LimitsConfig) -> Result<Option<Arc<dyn
 pub struct LlmProviderDef {
     /// Identifier matched against `[provider.name]` in `llm.toml`.
     pub name: &'static str,
-    /// Human-readable label used by the wizard's provider picker.
+    /// Human-readable label.
+    #[allow(dead_code)] // reserved for a future provider-status listing.
     pub display_name: &'static str,
     /// Credentials filename under `~/.config/docket/credentials/` that
     /// stores this provider's API key.
+    #[allow(dead_code)] // reserved for a future provider-status listing.
     pub credentials_filename: &'static str,
-    /// URL where the user obtains an API key (shown in the wizard hint
-    /// and the seeded credentials-template file header).
+    /// URL where the user obtains an API key (shown in the seeded
+    /// credentials-template file header).
+    #[allow(dead_code)] // reserved for a future provider-status listing.
     pub key_portal_url: &'static str,
     /// Used when the user's `llm.toml` doesn't override these.
     pub default_model: &'static str,

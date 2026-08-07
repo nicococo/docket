@@ -27,9 +27,9 @@ Like glint, docket is licensed GPL-3.0-or-later — see [`LICENSE`](LICENSE).
 
 ---
 
-A fast, keyboard-driven terminal dashboard. Stocks, forex + crypto,
-calendar, weather, news, email, notes, system resources, image gallery —
-all in one grid you compose yourself. Written in Rust with
+A fast, keyboard-driven terminal dashboard for getting things done.
+Calendar, news, email, notes, system resources, and single-source RSS
+feeds — all in one grid you compose yourself. Written in Rust with
 [ratatui](https://ratatui.rs).
 
 https://github.com/user-attachments/assets/31f79aef-412c-44fb-bd72-c684e6aa9185
@@ -37,41 +37,40 @@ https://github.com/user-attachments/assets/31f79aef-412c-44fb-bd72-c684e6aa9185
 *A live capture — keyboard shortcuts driving focus, view changes, and
 widget interaction across the dashboard.*
 
-![Composed docket dashboard with clock, weather, calendar, news, stocks, resources, and gallery widgets in the tokyonight scheme](docs/screenshots/docket-demo1.png)
+![Composed docket dashboard with calendar, news, email, notes, resources, and feeds widgets in the tokyonight scheme](docs/screenshots/docket-demo1.png)
 
-*A composed dashboard — clock + weather on the left, a calendar / email
-/ notes stack and a stocks / forex / WSJ stack on the right, system
-resources and a rotating gallery filling the rest. `tokyonight` scheme.*
+*A composed dashboard — calendar and email on one side, news and a
+resources / feeds stack on the other. `tokyonight` scheme.*
 
-![The same layout with the calendar rotated to week view, weather expanded to a 3-day forecast, and the WSJ news widget scrolling the latest articles](docs/screenshots/docket-demo2.png)
+![The same layout with the calendar rotated to week view and the news widget scrolling the latest articles](docs/screenshots/docket-demo2.png)
 
-*Same layout, different views — calendar in week mode, weather showing
-the 3-day forecast, the gallery rotating its next image, and the WSJ
-feed scrolling the latest articles in the middle stack.*
+*Same layout, different views — calendar in week mode, the feeds
+widget scrolling the latest articles in the middle stack.*
 
-![A different 5-pane layout in the chalktone scheme, focused on the WSJ widget with an NVDA stock chart open](docs/screenshots/docket-demo3.png)
+![A different layout in the chalktone scheme, focused on a single-source RSS feed](docs/screenshots/docket-demo3.png)
 
-*A different 5-pane layout in the `chalktone` scheme, focused on the
-WSJ stack with an NVDA chart open in stocks on the right.*
+*A different layout in the `chalktone` scheme, focused on a
+single-source RSS feed.*
 
 Everything is opt-in, locally configured, and persists in plain TOML
 under `~/.config/docket/` — no accounts, no telemetry, no cloud
-component docket controls. The setup wizard generates a working
-dashboard on first launch.
+component docket controls. First launch seeds a working default
+dashboard directly from TOML — no interactive setup flow to walk
+through.
 
 ---
 
 ## Highlights
 
-- **Ten widget kinds**, each independently configurable, with sensible
+- **Six widget kinds**, each independently configurable, with sensible
   built-in defaults — see the [widget catalogue](#widget-catalogue) below.
 - **Composable layout**: a grid of cells; any cell can be a single
   widget or a **stack** of widgets you cycle between with `.` / `,`.
 - **Multi-instance** — run the same widget kind in several panes
-  (`stocks@watchlist1` + `stocks@watchlist2`, `clock@home` + `clock@office`).
+  (`calendar@work` + `calendar@personal`, `feeds@wsj` + `feeds@ai`).
 - **Profiles** — `docket --profile work` (or `-p work`) runs an isolated
-  config tree: its own layout, widgets, theme, and accounts. Create,
-  switch, and manage them from the setup wizard (`docket --setup`). The
+  config tree: its own layout, widgets, theme, and accounts. Create one
+  with `docket --new-profile work`, switch with `--profile work`. The
   colorscheme library and OAuth app registrations are shared; everything
   else is per-profile. See [INSTRUCTIONS.md → Profiles](INSTRUCTIONS.md#profiles).
 - **Live config reload** — edit any widget's TOML and the dashboard
@@ -79,9 +78,9 @@ dashboard on first launch.
 - **Theming** — nine bundled colour schemes; per-widget colour overrides;
   add your own schemes by editing one TOML file. `:scheme nord` switches
   live.
-- **Setup wizard** — `docket --setup` (or first launch with no config)
-  walks you through layout, widget assignment, and credentials with
-  copy-pasteable instructions for each external service.
+- **No setup wizard** — `docket --init` (or first launch with no config)
+  seeds default TOML files directly; hand-edit them to customize. No
+  interactive flow to walk through.
 - **Keyboard-first, mouse-friendly** — `Tab` cycles widgets,
   `Shift+<letter>` jumps to a widget by its shortcut letter, `:` opens
   a command bar, click anywhere to focus.
@@ -147,12 +146,11 @@ Every widget compiles in only when its feature is enabled. The default
 
 ```sh
 cargo install --path . --no-default-features \
-  --features widget-clock,widget-weather,widget-stocks
+  --features widget-calendar,widget-news
 ```
 
-Available features: `widget-clock`, `widget-weather`, `widget-calendar`,
-`widget-news`, `widget-stocks`, `widget-forex`, `widget-email`,
-`widget-resources`, `widget-gallery`, `widget-notes`.
+Available features: `widget-calendar`, `widget-news`, `widget-email`,
+`widget-resources`, `widget-notes`, `widget-feeds`.
 
 ### Updating
 
@@ -197,36 +195,35 @@ terminal isn't listed.
 
 ## Quickstart
 
-Launch with no existing config and you land in the setup wizard:
+Launch with no existing config and docket seeds sensible defaults
+straight to disk, then launches:
 
 ```sh
 docket
-# → "No config detected … launching the setup wizard."
+# → "No config detected … writing defaults."
+# → "Edit that file (or the per-widget TOMLs alongside it) to customize your dashboard."
 ```
 
-The wizard walks you through:
+That writes `~/.config/docket/config.toml` (a two-pane calendar + news
+layout) plus a default TOML for every widget kind. From there:
 
-1. **Global settings** — colour scheme, mouse-scroll direction, optional
-   LLM provider and API key.
-2. **Layout** — pick 1 to 8 panes and a layout preset.
-3. **Widget assignment** — pick the widget kind that fills each pane,
-   including the option to stack multiple widgets in a single cell.
-4. **Per-widget setup** — timezone, location, RSS feeds, watchlist
-   tickers, calendar providers, mailbox folders, gallery image paths.
-5. **OAuth flows** (where needed) — Gmail, Outlook, Google Calendar all
-   captured inline through the wizard with copy-paste instructions.
+1. Hand-edit `config.toml`'s `[layout]` section to add, remove, or
+   rearrange panes — see [Configuration](#configuration) below for the
+   full schema and a worked example.
+2. Edit the per-widget TOML (`calendar.toml`, `news.toml`, …) for
+   things like RSS feeds, calendar providers, or mailbox folders.
+3. Run an OAuth flow where a widget needs one:
+   `docket --auth google` / `docket --auth microsoft`. Credentials
+   templates are seeded under `~/.config/docket/credentials/` — fill
+   in the client ID/secret first (see
+   [External dependencies](#external-dependencies) for the walkthrough
+   per provider).
 
-![Setup wizard layout step — picking a 5-pane preset such as "Sidebar + 2x2"](docs/screenshots/docket-setup.png)
+`docket --init` re-runs the seeding step at any time — it's idempotent,
+so it only writes files that are still missing; existing files and
+hand-edits are left untouched.
 
-*The wizard's layout step — pick a pane count, then a preset; widget
-assignment follows on the next page.*
-
-Re-run any time with `docket --setup`. Every section has an
-**Edit / Skip** gate; skipping leaves that TOML untouched, so hand-edits
-and comments survive.
-
-After the wizard, the dashboard launches with your layout. Press `?` for
-the live keybinding overlay.
+Press `?` while running for the live keybinding overlay.
 
 ---
 
@@ -234,20 +231,16 @@ the live keybinding overlay.
 
 | widget | what it does | external services |
 |---|---|---|
-| **Clock** | big block-digit local time, optional secondary world clocks, configurable gradient | none |
-| **Weather** | current conditions + N-day forecast, IP geolocation fallback | [Open-Meteo](https://open-meteo.com) (free, key-less) |
 | **Calendar** | day / week / month views with event agenda | Google Calendar (OAuth), Microsoft Outlook (OAuth), CalDAV (iCloud / Fastmail / Nextcloud), local TOML events |
 | **News** | RSS / Atom aggregator with topic filters, keyword search (`:news <terms>`), optional per-article LLM summaries | any RSS/Atom feed; LLM provider for summaries |
-| **Stocks** | watchlist with price + change %, intraday + multi-year graphs, period toggle | [Yahoo Finance](https://finance.yahoo.com) (free, key-less) |
-| **Forex** | fiat + crypto pairs with auto-grouped Currencies / Crypto sections, primary-swap with `s`, USD-pivot triangulation | Yahoo Finance |
+| **Feeds** | tabbed single-source RSS reader (WSJ, MarketWatch, or any feed you point it at), one tab per source | any RSS/Atom feed; LLM provider for summaries |
 | **Email** | unified inbox preview with optional per-message LLM summaries | Gmail (OAuth), Outlook (OAuth), any IMAP server (app password) |
 | **Resources** | htop-style CPU / memory / top-process view | local `sysinfo` (no FFI) |
-| **Gallery** | rotating inline image slideshow (any image glob you point it at) | none — uses iTerm2 / Kitty / Sixel inline image protocol, falls back to unicode half-blocks |
 | **Notes** | vim-flavoured multi-note pad with undo/redo, mouse cursor positioning, per-note files | none — plain `.md` files under `~/.config/docket/notes/` |
 
-Every widget is independently optional. The wizard surfaces only what
-you turn on; missing credentials route gracefully into the inline
-capture flow.
+Every widget is independently optional — turn a kind off entirely with
+`--no-default-features` (see [Slim builds](#slim-builds)), or just
+leave it out of `[layout]`.
 
 ---
 
@@ -259,22 +252,19 @@ All files live under `~/.config/docket/`:
 |---|---|
 | `config.toml` | active colour scheme, mouse-scroll direction, status bar, grid layout, widget cell placements |
 | `colorschemes.toml` | named theme palettes (`default`, `chalktone`, `gruvbox`, `tokyonight`, `rosepine`, `nord`, `bluloco`, `onedark`, `miasma`) |
-| `clock.toml` | primary timezone, world clocks, big-digit gradient |
-| `weather.toml` | location, units (metric/imperial), forecast days, IP geolocation fallback |
 | `news.toml` | RSS / Atom feeds, topic filters, LLM summary toggle, fetch-body strategy |
-| `stocks.toml` | watchlist, indices, default period, jump URL template |
-| `forex.toml` | primary currency, fiat watchlist, **separate crypto watchlist**, default period |
+| `feeds.toml` (or `feeds@<instance>.toml`) | `[[feeds]]` blocks for one tabbed single-source reader instance |
 | `calendar.toml` | Google / Outlook / CalDAV / Local providers + per-provider calendar IDs |
 | `email.toml` | folders / labels to follow, polling cadence, LLM-summary opt-in |
 | `resources.toml` | refresh interval, top-N processes, sort key (CPU vs memory) |
-| `gallery.toml` | image paths or globs, rotation cadence, rescan interval |
 | `notes.toml` | per-widget shortcut + colour overrides (notes themselves live under `notes/`) |
 | `llm.toml` | active LLM provider (`anthropic` or `openai`), model, rate limit, cache size |
 | `credentials/` | OAuth tokens + API keys (`*_oauth_client.toml`, `*_oauth_token.<account>.toml`, `anthropic_key.toml`, `openai_key.toml`, `caldav.toml`, `imap.toml`) — 0600 perms |
 | `notes/<instance>/` | one `.md` file per note, `mtime` sorts the list |
 
 Most fields have sensible defaults; you only have to set what you care
-about. Re-run the wizard any time, or hand-edit and `:reload`.
+about. Hand-edit any file and `:reload` (or just save — the config
+watcher picks it up automatically).
 
 ### Layout example
 
@@ -292,25 +282,25 @@ columns = [28, 36, 36]    # three columns at 28% / 36% / 36% of width
 rows = [30, 35, 35]       # three rows at 30% / 35% / 35% of height
 
 [[layout.cells]]
-widget = "clock"
+widget = "calendar"
 col = 0
 row = 0
 
 [[layout.cells]]
-widget = "calendar"
+widget = "email"
 col = 1
 row = 0
 col_span = 2              # span two columns
 
 # Stack pane: three widgets share row 1, cols 1–2; rotate with . / ,
 [[layout.cells]]
-widgets = ["news", "email", "notes"]
+widgets = ["news", "feeds", "notes"]
 col = 1
 row = 1
 col_span = 2
 
 [[layout.cells]]
-widgets = ["stocks", "forex"]
+widget = "resources"
 col = 0
 row = 2
 col_span = 2
@@ -322,20 +312,20 @@ Cells can reference a widget as `kind@instance`:
 
 ```toml
 [[layout.cells]]
-widget = "stocks@watchlist1"
+widget = "feeds@wsj"
 col = 0
 row = 2
 
 [[layout.cells]]
-widget = "stocks@watchlist2"
+widget = "feeds@marketwatch"
 col = 1
 row = 2
 ```
 
-The first uses `stocks.toml` (the implicit `main` instance), the others
-read `stocks@watchlist1.toml` and `stocks@watchlist2.toml`. Same trick
-works for clocks (home + office), calendars (work + personal), email
-(two accounts), etc.
+The first reads `feeds@wsj.toml`, the second `feeds@marketwatch.toml` —
+each instance is fully independent. Same trick works for calendars
+(work + personal), email (two accounts), etc. A bare `widget = "feeds"`
+(no `@instance`) reads the implicit `main` instance's `feeds.toml`.
 
 ### Per-widget colour overrides
 
@@ -343,8 +333,8 @@ Any widget's TOML can carry a `[colors]` block that overrides the
 active theme just for that widget:
 
 ```toml
-# weather.toml
-location = "Vancouver, BC"
+# calendar.toml
+poll_interval_secs = 60
 
 [colors]
 border.focused = { fg = "#e07b00", modifiers = ["bold"] }
@@ -408,24 +398,17 @@ State (selection, scroll, active tab, warm data) is preserved entering
 | `:scheme <name>` | switch colour scheme (persists to `config.toml`) |
 | `:reload` | re-read every widget's TOML without restarting |
 | `:news <terms>` | filter News by keyword |
-| `:weather <city>` | retarget Weather to a one-off city |
-| `:time <city>` | retarget Clock |
-| `:stock <symbol>` | jump-lookup a ticker in Stocks |
-| `:fx <code>` | swap primary currency in Forex |
+| `:feeds <terms>` | filter the active Feeds instance by keyword |
 
 ### Common per-widget keys
 
 | widget | keys |
 |---|---|
-| **Stocks** | `↑/↓` select ticker · `←/→` cycle graph period · `c` % ↔ $ · `Enter` open in browser · `1–9` jump period · `y` yank value |
-| **Forex** | `↑/↓` select pair · `←/→` cycle period · `s` / `Enter` make selected primary (crypto seeds amount=1) · `c` edit amount · `y` yank |
 | **Calendar** | `d` / `w` / `m` day/week/month · `h` / `l` prev/next period · `←↑↓→` move the selected day (month view) · `j` / `k` scroll the day agenda · `t` today · click a day to select it · `o` open in browser |
-| **Weather** | `:weather <city>` retarget · `x` revert to default |
-| **Clock** | `:time <city>` retarget · `x` revert to local |
 | **News** | `↑/↓` select · `←/→` filter tabs · `e` expand · `s` LLM summary · `Enter` open · `x` clear search |
+| **Feeds** | `↑/↓` select article · `←/→` switch topic tab · `e`/`Enter` expand · `o` open in browser · `s` LLM summary · `Ctrl+S` cycle summary length · `r` force refresh · `x` clear search |
 | **Email** | `↑/↓` select · `←/→` folder · `e`/`Enter` expand · `o` open in mail client · `s` LLM summary · `u` mark read/unread · `r` refresh |
 | **Resources** | `m` toggle sort (CPU ↔ memory) · `r` force refresh |
-| **Gallery** | `p` pause/resume · `n` / `N` step · `↑/↓` rotation interval ±1s |
 | **Notes** | `+` new · `-` delete (confirm) · `i` insert · `ESC` normal · `h`/`l` focus list / content · `j`/`k` scroll · `gg`/`G` top/bottom · `y` yank note · `Ctrl-A`/`Ctrl-E` line start/end · `Ctrl-U` delete line · `Ctrl-Z` / `Ctrl-Shift-Z` undo / redo |
 
 Hit `?` while running for the full overlay with the current shortcut
@@ -436,10 +419,15 @@ assignments and active scheme.
 ## CLI reference
 
 ```sh
-docket                    # launch the dashboard (or wizard on first run)
-docket --setup            # launch the wizard
-docket --init             # create ~/.config/docket/ with default seed files
+docket                    # launch the dashboard (seeds defaults first, on first run)
+docket --init             # create/refresh ~/.config/docket/ with default seed files
 docket --auth <provider>  # run an auth flow (google, microsoft, imap, anthropic, openai)
+docket --new-profile <name> [--from <src>]
+                         # create a profile, optionally cloning another's config
+docket --profile <name>   # (or -p) run under an isolated profile
+docket --list-profiles
+docket --rename-profile OLD:NEW
+docket --delete-profile <name>
 docket --clear-cache [TARGET]
                          # wipe ~/.cache/docket/ entirely, or scope to
                          # a widget kind (news) or instance (news@home)
@@ -456,19 +444,17 @@ service; nothing routes through a docket-owned backend.
 
 | service | used by | auth |
 |---|---|---|
-| [Open-Meteo](https://open-meteo.com) | Weather (forecast), Weather (geocoding fallback via `ipapi.co`) | none |
-| [Yahoo Finance](https://finance.yahoo.com) | Stocks, Forex (fiat + crypto) | none |
 | [Google Calendar API](https://developers.google.com/calendar) | Calendar (Google provider) | OAuth, you create the OAuth app |
 | [Gmail API](https://developers.google.com/gmail) | Email (Gmail provider) | OAuth, same app as Calendar |
 | [Microsoft Graph](https://learn.microsoft.com/en-us/graph/) | Calendar (Outlook), Email (Outlook) | OAuth, you register an Azure app |
 | any CalDAV server | Calendar (iCloud, Fastmail, Nextcloud, …) | app password |
 | any IMAP server | Email (IMAP provider) | app password |
-| [Anthropic](https://www.anthropic.com/) / [OpenAI](https://openai.com/) | News + Email LLM summaries | API key, optional |
-| any RSS / Atom feed | News | none |
+| [Anthropic](https://www.anthropic.com/) / [OpenAI](https://openai.com/) | News + Feeds + Email LLM summaries | API key, optional |
+| any RSS / Atom feed | News, Feeds | none |
 
-The setup wizard walks you through the OAuth flows for Google, Outlook,
-and the LLM providers. For CalDAV and IMAP the wizard captures host +
-username + app-password inline. `INSTRUCTIONS.md` in the repo has the
+`docket --auth <provider>` runs the OAuth flow for Google, Outlook, or
+IMAP once you've filled in the seeded credentials template under
+`~/.config/docket/credentials/`. `INSTRUCTIONS.md` in the repo has the
 full step-by-step for each provider, including screenshots of the
 Google Cloud / Azure portals.
 
@@ -477,9 +463,9 @@ Google Cloud / Azure portals.
 Notable runtime crates: `ratatui` (TUI), `crossterm` (terminal I/O),
 `tokio` (async runtime), `reqwest` (HTTP), `serde` + `toml` (config),
 `chrono` + `chrono-tz` (time / timezones), `feed-rs` (RSS / Atom),
-`image` + `ratatui-image` (Gallery), `imap` + `mail-parser` (Email),
-`sysinfo` (Resources), `readability` (article extraction for LLM
-summaries). Full list in `Cargo.toml`.
+`image` + `ratatui-image` (Feeds article images), `imap` +
+`mail-parser` (Email), `sysinfo` (Resources), `readability` (article
+extraction for LLM summaries). Full list in `Cargo.toml`.
 
 ---
 
@@ -547,32 +533,32 @@ Deferred for the scope.
 - **`docket` not found after install** — make sure `$(PREFIX)/bin` is on
   your `$PATH`. The Makefile prints the right export line at the end of
   `make install`.
-- **Gallery shows chunky pixelated images** — your terminal doesn't
-  speak iTerm2 / Kitty / Sixel inline protocols, so docket fell back to
-  unicode half-blocks. Switch to iTerm2 (macOS), WezTerm, Kitty, or
-  enable sixel mode in your terminal.
+- **Feeds article images look chunky / pixelated** — your terminal
+  doesn't speak iTerm2 / Kitty / Sixel inline protocols, so docket fell
+  back to unicode half-blocks. Switch to iTerm2 (macOS), WezTerm,
+  Kitty, or enable sixel mode in your terminal.
 - **OAuth flow won't open a browser** — the auth flow prints the URL
   too; copy-paste it into any browser, complete the consent, and the
   flow's localhost listener picks up the redirect.
-- **Forex shows blank rates after closing on a non-USD primary** —
-  fixed; the disk cache now only persists when the live primary
-  matches the configured one. Earlier versions could seed the next
-  launch with the wrong symbol set.
+- **A layout cell shows nothing / logs "unknown widget kind in layout,
+  skipping"** — the `[[layout.cells]]` entry references a widget kind
+  that isn't compiled in (e.g. a slim build) or no longer exists. Fix
+  the `widget = "..."` value in `config.toml`.
 - **Logs**: runtime alt-screen mode means stderr/stdout would corrupt
   the display, so warnings/errors land in
   `~/.config/docket/docket.log`. `tail -f ~/.config/docket/docket.log`
   while debugging.
 - **Reset to defaults**: move aside `~/.config/docket/` and re-run
-  `docket --setup`.
+  `docket --init`.
 
 ---
 
 ## Contributing
 
-docket is pre-launch v0.2; the architecture is settling but the surface
+docket is a young fork; the architecture is settling but the surface
 is largely stable. If you want to dig in:
 
-1. `make test` — runs the full suite (~460 tests). Should pass clean
+1. `make test` — runs the full suite (~540 tests). Should pass clean
    on `main` at all times.
 2. `make build` for a debug binary, `make` for release.
 3. `cargo clippy --features widgets-all` for lints; CI gates on this.
@@ -580,7 +566,7 @@ is largely stable. If you want to dig in:
    trait under `src/widgets/<name>/`, declare a `widget-<name>` Cargo
    feature, and append a `WidgetDescriptor` to
    `src/widgets/registry.rs`. The registry is the single registration
-   point — no edits to `app.rs`, `main.rs`, or the wizard are needed.
+   point — no edits to `app.rs` or `main.rs` are needed.
 5. `AGENTS.md` carries the architecture overview (read it before
    non-trivial PRs). `docs/widget-sdk.md` is the widget author's
    guide — platform capabilities, conventions, and reference
