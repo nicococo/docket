@@ -4,19 +4,16 @@
 //
 // Shared confirm-modal primitive for widgets.
 
-//! Centred y/N confirmation modal — the rendering and key dispatch
-//! that `notes::confirm_delete`, `stocks::confirm_remove`, and
-//! `forex::confirm_remove` were each reimplementing.
+//! Centred y/N confirmation modal — shared rendering and key dispatch
+//! for widgets that need a "delete this?" style confirmation.
 //!
 //! Each widget keeps its own `Option<T>` state slot (T is typically
-//! a `String` identifier — a note name, a ticker symbol, a currency
-//! code) so the widget retains control over what "confirmation
-//! target" actually means and how to act on it. This module only
-//! owns the *presentation* (rounded border, theme-aware title bar,
-//! centred target-name body, "[y] confirm" hint) and the *key
-//! dispatch* (y/Y commits, any other key cancels).
-//!
-//! See `docs/widget-sdk.md` § Confirm modal.
+//! a `String` identifier — a note name, an email id) so the widget
+//! retains control over what "confirmation target" actually means
+//! and how to act on it. This module only owns the *presentation*
+//! (rounded border, theme-aware title bar, centred target-name body,
+//! "[y] confirm" hint) and the *key dispatch* (y/Y commits, any
+//! other key cancels).
 
 #![allow(dead_code)] // some accessors are SDK surface for future widgets.
 

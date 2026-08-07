@@ -8,6 +8,20 @@ the `Cargo.toml` `version` field.
 
 ### Removed
 
+- **Multi-profile support**, entirely: `src/config/profiles.rs`,
+  `src/config/migrate.rs` (the old flat-config → profiles migration
+  tooling), the `--profile`/`-p`/`--new-profile`/`--list-profiles`/
+  `--rename-profile`/`--delete-profile`/`--migrate-profiles`/
+  `--cleanup-flat-config` CLI flags, and `cache::remove_profile_cache`.
+  Config now lives flat at `~/.config/docket/` (no `profiles/<name>/`
+  nesting) and cache flat at `~/.cache/docket/`; only one dashboard
+  identity was ever in use, so the isolation this bought wasn't
+  worth the surface area.
+- The bundled screenshots and demo-video link in the README (they
+  depicted widgets removed in an earlier pass) and three docs written
+  for a multi-widget-author / multi-profile story that no longer
+  applies: `docs/widget-sdk.md`, `docs/multi-account-spec.md`,
+  `docs/profiles-spec.md`.
 - **Google and Microsoft OAuth support**, entirely: `src/auth/`
   (`google/`, `microsoft/`, `loopback.rs`, `registry.rs`), the
   OAuth-backed Calendar providers (`calendar/google.rs`,
@@ -24,9 +38,8 @@ the `Cargo.toml` `version` field.
   Local calendars have no canonical web URL to deep-link to).
 - `credentials::save`/the credentials-dir global/per-profile tiering —
   both existed solely to support OAuth token writes and client
-  registrations; every remaining credential file is user-written and
-  per-profile, so `credentials::load` is now the module's only entry
-  point.
+  registrations; every remaining credential file is user-written, so
+  `credentials::load` is now the module's only entry point.
 
 ### Changed
 
@@ -79,8 +92,7 @@ as before.
   (CSS-style, with fallback); live-reload safe.
 - **`ViewTier` framework** (`Compact`/`Standard`/`Expanded`/`Full`) plus shared
   UI helpers (`row_split`, `CardGrid`, `range_bar`) so widgets can adapt to the
-  space they are given. Documented for widget authors in
-  [`docs/widget-sdk.md`](docs/widget-sdk.md) → *Responsive views & Focus Zoom*.
+  space they are given.
 - **Zoomed (Full-tier) views** — all Full-tier only, unzoomed rendering
   unchanged:
   - **Stocks** — fundamentals panel.
@@ -183,7 +195,7 @@ on memory, HTTP, and rendering.
   so per-calendar colors don't collide — even across providers. The
   setup wizard stays single-account per provider (the default account);
   extra accounts are hand-added to `calendar.toml` and survive wizard
-  re-runs untouched. See `docs/multi-account-spec.md`.
+  re-runs untouched.
 - **Forex widget** (`widget-forex`). Watchlist of fiat pairs against
   a configurable primary, intraday + multi-year graphs, period toggle
   shared with Stocks, swap-primary with `s` or Enter (`:fx <code>`

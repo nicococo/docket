@@ -93,10 +93,7 @@ docket is a young fork and shipping with deliberate restraint:
   additive — declare a `widget-<name>` feature, implement the
   `Widget` trait under `src/widgets/<name>/`, and append a
   `WidgetDescriptor` to `src/widgets/registry.rs`. No edits to
-  `app.rs` or `main.rs` are needed. See
-  [`docs/widget-sdk.md`](docs/widget-sdk.md) for the quickstart,
-  available platform capabilities (polling, theming, caching),
-  and reference patterns extracted from the shipped widgets.
+  `app.rs` or `main.rs` are needed.
 - **No design for hypothetical future requirements.** A bug fix
   doesn't need surrounding cleanup; a one-shot operation doesn't
   need a helper. Three similar lines is better than a premature

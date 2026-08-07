@@ -23,9 +23,6 @@
 //! connections, manual triggers) simply don't construct a
 //! `PollTracker` and don't implement the trait hook. The platform
 //! treats them as "not polling" and stays out of their way.
-//!
-//! ## See also
-//! `docs/widget-sdk.md` — the developer-facing capability writeup.
 
 #![allow(dead_code)] // PollSnapshot + next_due_at are forward-looking platform surface
 

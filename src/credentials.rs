@@ -13,8 +13,6 @@
 //! Callers identify files by basename (`"imap.toml"`) rather than full path
 //! so the credentials-dir convention is enforced — you can't accidentally
 //! read a secret from `~/Desktop/`.
-//!
-//! See `docs/widget-sdk.md` § Credentials storage.
 
 use std::path::PathBuf;
 
@@ -23,7 +21,7 @@ use serde::de::DeserializeOwned;
 
 /// The credentials dir — `<config_dir>/credentials/`, created mode `0700`
 /// on first use. Holds account-level secrets (CalDAV, IMAP, LLM keys).
-/// Per-profile: each profile has its own. Idempotent.
+/// Idempotent.
 pub fn dir() -> Result<PathBuf> {
     ensure_0700(crate::config::config_dir()?.join("credentials"))
 }

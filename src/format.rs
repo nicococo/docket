@@ -21,8 +21,6 @@
 //! Tests below cover the bucket boundaries each variant cares
 //! about; widgets can adopt the one that matches their column
 //! budget without reimplementing the math.
-//!
-//! See `docs/widget-sdk.md` § Formatting.
 
 #![allow(dead_code)] // some exports are SDK surface for future widgets.
 

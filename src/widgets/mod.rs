@@ -194,9 +194,6 @@ pub trait Widget: Send + Sync {
     /// from their own [`update`](Self::update) implementation. The
     /// platform just peeks at "are you currently polling, and on
     /// what cadence?"
-    ///
-    /// See `docs/widget-sdk.md` § Polling for the recommended usage
-    /// pattern.
     #[allow(dead_code)] // forward-looking platform surface
     fn poll_snapshot(&self) -> Option<crate::polling::PollSnapshot> {
         None

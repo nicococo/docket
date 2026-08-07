@@ -15,8 +15,6 @@
 //! how to ellipsise an overflowed final line). Consolidating fixes
 //! the latent correctness bugs and gives every future widget one
 //! canonical implementation to reach for.
-//!
-//! See `docs/widget-sdk.md` § Text utilities.
 
 #![allow(dead_code)] // some exports are SDK surface for future widgets.
 

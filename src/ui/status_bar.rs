@@ -14,10 +14,7 @@ use ratatui::{
 use crate::theme::Theme;
 
 /// Bottom-of-screen status bar:
-/// `docket vX.Y.Z │ [Profile: <name> │] HH:MM:SS │ Focus: <id> │ Scheme: <name> │ Tab: switch · ? help · q quit`
-///
-/// The `Profile:` segment appears only for a non-default profile, so the
-/// default dashboard is visually unchanged.
+/// `docket vX.Y.Z │ HH:MM:SS │ Focus: <id> │ Scheme: <name> │ Tab: switch · ? help · q quit`
 pub fn render(
     frame: &mut Frame,
     area: Rect,
@@ -34,19 +31,6 @@ pub fn render(
     let sep = Span::styled("│", dim);
 
     let mut spans: Vec<Span> = vec![Span::styled(format!(" docket v{version} "), dim)];
-
-    // Active-profile indicator — surfaced right after the version so the
-    // context is the first thing read. Hidden for the default profile.
-    let profile = crate::config::active_profile();
-    if profile != crate::config::DEFAULT_PROFILE {
-        spans.push(sep.clone());
-        spans.push(Span::styled(" Profile: ", dim));
-        spans.push(Span::styled(
-            profile.to_string(),
-            theme.text_selected.add_modifier(Modifier::BOLD),
-        ));
-        spans.push(Span::styled(" ", dim));
-    }
 
     spans.extend([
         sep.clone(),

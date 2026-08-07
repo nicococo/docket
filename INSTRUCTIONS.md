@@ -222,59 +222,20 @@ This wipes everything — config, tokens, cache. `docket --init` seeds fresh def
 
 ---
 
-## Profiles
-
-Run docket in several isolated contexts — a focused **work** dashboard, a stripped-down **travel** view — each with its own layout, widgets, theme, and accounts:
-
-```sh
-docket --profile work        # or: docket -p work
-docket                       # the "default" profile
-```
-
-Everything a profile owns — layout, widget configs, the selected theme, account credentials, notes, cache — is isolated under `~/.config/docket/profiles/<name>/`. One thing is **shared** across all profiles, so you define it once: the colorscheme **library** (`colorschemes.toml`). You can also select a profile with `DOCKET_PROFILE=work` instead of the flag.
-
-### Managing profiles
-
-Profile management is entirely CLI-driven — **create, clone, rename, and delete** via flags (see below). `docket --new-profile <name>` creates a profile and seeds its defaults; `docket --profile <name>` launches into it.
-
-### Upgrading from a pre-profiles install
-
-Your existing flat `~/.config/docket/` **keeps working as-is** — the default profile reads it in place, so nothing moves or is deleted until you choose. Run `docket --migrate-profiles` when you're ready to move it into `profiles/default/` and unlock creating/switching between multiple profiles; the flat originals are left in place afterward (an older flat binary keeps working) until you explicitly remove them with `docket --cleanup-flat-config`.
-
-Migration is non-destructive: your config is copied into `profiles/default/` *before* anything is removed, and the shared colorscheme library always stays at the root.
-
-### Command-line management
-
-```sh
-docket --list-profiles                     # list profiles (marks default + active)
-docket --new-profile work                  # create a profile and seed its defaults
-docket --new-profile staging --from work   # clone work's config (re-fill credentials)
-docket --rename-profile old:new
-docket --delete-profile name               # not "default" or the active profile
-docket --migrate-profiles                  # copy a flat config into profiles/default/ (copy-only)
-docket --cleanup-flat-config               # remove leftover flat duplicates after migrating
-```
-
----
-
 ## What lives where on disk
 
 ```
-~/.config/docket/                      # GLOBAL layer — shared across profiles
-├── colorschemes.toml                 # named [schemes.*] palettes (the library)
-└── profiles/
-    ├── default/                      # PER-PROFILE layer (the default profile)
-    │   ├── config.toml               # [global] + [layout] + [[layout.cells]]
-    │   ├── calendar.toml  news.toml  feeds@<instance>.toml
-    │   ├── resources.toml  email.toml
-    │   ├── notes.toml  llm.toml
-    │   ├── colorschemes.toml          # OPTIONAL per-profile scheme overrides
-    │   ├── credentials/               # per-profile account secrets (0700)
-    │   │   ├── caldav.toml  ics.toml  imap.toml
-    │   │   ├── anthropic_key.toml  openai_key.toml
-    │   ├── notes/<instance>/<id>.md   # each note as a plain markdown file
-    │   └── .runtime_state.toml  docket.log
-    └── work/  travel/  …             # other profiles, same shape
+~/.config/docket/
+├── config.toml               # [global] + [layout] + [[layout.cells]]
+├── colorschemes.toml         # named [schemes.*] palettes
+├── calendar.toml  news.toml  feeds@<instance>.toml
+├── resources.toml  email.toml
+├── notes.toml  llm.toml
+├── credentials/               # account secrets (0700)
+│   ├── caldav.toml  ics.toml  imap.toml
+│   ├── anthropic_key.toml  openai_key.toml
+├── notes/<instance>/<id>.md   # each note as a plain markdown file
+└── .runtime_state.toml  docket.log
 ```
 
 Every `.toml` is plain text — edit in your favourite editor and either restart docket or hit `:reload` from the runtime command bar.

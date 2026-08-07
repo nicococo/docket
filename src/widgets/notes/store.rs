@@ -223,15 +223,10 @@ pub fn resolve_root(configured: Option<&str>) -> Result<(PathBuf, Resolution)> {
     )
 }
 
-/// One-time adoption of a pre-profiles `~/.docket/notes` into the default
-/// profile's per-profile notes dir. Only the default profile inherits it
-/// (the single pre-profiles install *was* "default"); other profiles start
-/// empty. Best-effort — a failed move just leaves the legacy dir in place
+/// One-time adoption of a legacy `~/.docket/notes` into the current notes
+/// dir. Best-effort — a failed move just leaves the legacy dir in place
 /// (where Tier 3 can still find it).
 fn adopt_legacy_notes(per_profile: &Path) {
-    if crate::config::active_profile() != crate::config::DEFAULT_PROFILE {
-        return;
-    }
     if per_profile.exists() {
         return;
     }

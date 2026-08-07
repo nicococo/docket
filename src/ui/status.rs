@@ -17,8 +17,6 @@
 //! shape is `Option<TimedFeedback<String>>` for a status message,
 //! but `Option<TimedFeedback<usize>>` works equally well for things
 //! like a "row index that was copied to clipboard" pulse marker.
-//!
-//! See `docs/widget-sdk.md` § Transient status (TimedFeedback).
 
 #![allow(dead_code)] // some accessors are SDK surface for future widgets.
 
