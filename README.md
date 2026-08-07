@@ -1,5 +1,32 @@
 # docket
 
+## Origins
+
+docket is a hard fork of [**glint**](https://github.com/ntrospect0/glint),
+a fast, keyboard-driven terminal dashboard written by
+[**ntrospect0**](https://github.com/ntrospect0). Every widget engine,
+the wizard, the rendering pipeline, the config/cache architecture —
+the whole foundation this project stands on — is ntrospect0's design
+and work. glint's own goal is to be a general-purpose, highly
+adaptable dashboard: whatever mix of stocks, weather, calendar, news,
+and more you want, composed your way. That idea, and the care put
+into making it genuinely pleasant to use in a terminal, is what made
+this fork worth doing in the first place — thank you, ntrospect0.
+
+docket exists because I wanted something narrower and more opinionated:
+a dashboard purpose-built around *my* work and project management, not
+a general-purpose canvas. That's a different design goal than glint's,
+not a better one, so rather than pile my opinions onto glint as
+options and flags, I forked it and started shaping it toward that one
+purpose. This is a standalone project going forward — it doesn't track
+glint's upstream changes, and its own direction will diverge over
+time. If you want the general-purpose dashboard, go use glint; it's
+great, and this project wouldn't exist without it.
+
+Like glint, docket is licensed GPL-3.0-or-later — see [`LICENSE`](LICENSE).
+
+---
+
 A fast, keyboard-driven terminal dashboard. Stocks, forex + crypto,
 calendar, weather, news, email, notes, system resources, image gallery —
 all in one grid you compose yourself. Written in Rust with
@@ -31,33 +58,6 @@ Everything is opt-in, locally configured, and persists in plain TOML
 under `~/.config/docket/` — no accounts, no telemetry, no cloud
 component docket controls. The setup wizard generates a working
 dashboard on first launch.
-
----
-
-## Origins
-
-docket is a hard fork of [**glint**](https://github.com/ntrospect0/glint),
-a fast, keyboard-driven terminal dashboard written by
-[**ntrospect0**](https://github.com/ntrospect0). Every widget engine,
-the wizard, the rendering pipeline, the config/cache architecture —
-the whole foundation this project stands on — is ntrospect0's design
-and work. glint's own goal is to be a general-purpose, highly
-adaptable dashboard: whatever mix of stocks, weather, calendar, news,
-and more you want, composed your way. That idea, and the care put
-into making it genuinely pleasant to use in a terminal, is what made
-this fork worth doing in the first place — thank you, ntrospect0.
-
-docket exists because I wanted something narrower and more opinionated:
-a dashboard purpose-built around *my* work and project management, not
-a general-purpose canvas. That's a different design goal than glint's,
-not a better one, so rather than pile my opinions onto glint as
-options and flags, I forked it and started shaping it toward that one
-purpose. This is a standalone project going forward — it doesn't track
-glint's upstream changes, and its own direction will diverge over
-time. If you want the general-purpose dashboard, go use glint; it's
-great, and this project wouldn't exist without it.
-
-Like glint, docket is licensed GPL-3.0-or-later — see [`LICENSE`](LICENSE).
 
 ---
 
