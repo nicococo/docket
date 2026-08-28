@@ -212,6 +212,10 @@ fn connect_concrete(creds: &ImapCredentials) -> Result<ConcreteSession> {
 /// index — Google resolves an email address there to the matching
 /// logged-in session regardless of browser tab order, which a hardcoded
 /// `/u/0/` can't do once more than one Google account is signed in.
+/// The address goes in **unencoded** (same as `docs.google.com/document
+/// /u/user@gmail.com/d/...`-style URLs) — percent-encoding the `@` to
+/// `%40` breaks Google's account-slot matching and surfaces as a
+/// generic "Temporary Error (404)" page instead of the message.
 fn gmail_web_url(host: &str, username: &str, message_id: Option<&str>) -> Option<String> {
     if !host.eq_ignore_ascii_case("imap.gmail.com") {
         return None;
@@ -220,11 +224,8 @@ fn gmail_web_url(host: &str, username: &str, message_id: Option<&str>) -> Option
     if id.is_empty() {
         return None;
     }
-    let user_slot = if username.trim().is_empty() {
-        "0".to_string()
-    } else {
-        urlencoding::encode(username.trim()).into_owned()
-    };
+    let username = username.trim();
+    let user_slot = if username.is_empty() { "0" } else { username };
     Some(format!(
         "https://mail.google.com/mail/u/{user_slot}/#search/rfc822msgid:{}",
         urlencoding::encode(id)
@@ -501,7 +502,7 @@ mod tests {
         assert_eq!(
             url,
             Some(
-                "https://mail.google.com/mail/u/work%40gmail.com/#search/rfc822msgid:abc123%40mail.gmail.com"
+                "https://mail.google.com/mail/u/work@gmail.com/#search/rfc822msgid:abc123%40mail.gmail.com"
                     .to_string()
             )
         );
@@ -517,7 +518,7 @@ mod tests {
         assert_eq!(
             url,
             Some(
-                "https://mail.google.com/mail/u/personal%40gmail.com/#search/rfc822msgid:abc123%40mail.gmail.com"
+                "https://mail.google.com/mail/u/personal@gmail.com/#search/rfc822msgid:abc123%40mail.gmail.com"
                     .to_string()
             )
         );
