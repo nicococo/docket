@@ -11,6 +11,7 @@
 //!     so docket never has to write to the server.
 //!   - Bodies come from the provider's body endpoint, with HTML→text fallback.
 
+pub mod eml;
 pub mod html_strip;
 pub mod imap;
 pub mod provider;
@@ -889,16 +890,46 @@ impl EmailWidget {
         st.expanded = false;
     }
 
+    /// `o`: open the selected message. Providers with a real web link
+    /// (none currently — IMAP is the only provider and never sets
+    /// `web_url`, see the doc comment on that field) get a browser
+    /// tab; everything else falls back to writing a standalone `.eml`
+    /// to the temp dir and handing it to the OS's default handler,
+    /// which is normally whatever desktop client is registered for
+    /// that file type (see `eml.rs`).
     fn open_selected(&self) {
         let filtered = self.filtered_messages();
-        let url = {
+        let msg = {
             let st = self.state.lock().expect("email state poisoned");
-            filtered.get(st.selected).and_then(|m| m.web_url.clone())
+            filtered.get(st.selected).cloned()
         };
-        if let Some(url) = url {
-            if let Err(err) = open::that(&url) {
+        let Some(msg) = msg else { return };
+
+        if let Some(url) = &msg.web_url {
+            if let Err(err) = open::that(url) {
                 tracing::warn!(error = %err, url = %url, "failed to open email URL");
             }
+            return;
+        }
+
+        let file_name = format!(
+            "docket-email-{}-{}.eml",
+            eml::sanitize_id(&msg.account),
+            eml::sanitize_id(&msg.id)
+        );
+        let path = std::env::temp_dir().join(file_name);
+        if let Err(err) = std::fs::write(&path, eml::build(&msg)) {
+            tracing::warn!(error = %err, path = %path.display(), "failed to write temp .eml");
+            let mut st = self.state.lock().expect("email state poisoned");
+            st.last_error = Some(format!("Open failed: {err}"));
+            st.dirty = true;
+            return;
+        }
+        if let Err(err) = open::that(&path) {
+            tracing::warn!(error = %err, path = %path.display(), "failed to open .eml with default handler");
+            let mut st = self.state.lock().expect("email state poisoned");
+            st.last_error = Some(format!("Open failed: {err}"));
+            st.dirty = true;
         }
     }
 
