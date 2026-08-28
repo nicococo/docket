@@ -890,13 +890,13 @@ impl EmailWidget {
         st.expanded = false;
     }
 
-    /// `o`: open the selected message. Providers with a real web link
-    /// (none currently — IMAP is the only provider and never sets
-    /// `web_url`, see the doc comment on that field) get a browser
-    /// tab; everything else falls back to writing a standalone `.eml`
-    /// to the temp dir and handing it to the OS's default handler,
-    /// which is normally whatever desktop client is registered for
-    /// that file type (see `eml.rs`).
+    /// `o`: open the selected message. A message with a `web_url`
+    /// (Gmail IMAP accounts get a `rfc822msgid:` search deep link —
+    /// see `imap::gmail_web_url`) opens in the browser; everything
+    /// else falls back to writing a standalone `.eml` to the temp dir
+    /// and handing it to the OS's default handler, normally whatever
+    /// desktop client is registered for that file type (see
+    /// `eml.rs`).
     fn open_selected(&self) {
         let filtered = self.filtered_messages();
         let msg = {

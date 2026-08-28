@@ -36,8 +36,12 @@ pub struct EmailMessage {
     /// `html_strip::html_to_text`.
     pub plain_body: String,
     /// Direct URL into the provider's web UI for this message, if
-    /// available. Always `None` for IMAP — there's no canonical web URL
-    /// for a raw IMAP message.
+    /// available. IMAP has no canonical web URL for a raw message in
+    /// general, but the `imap` provider special-cases Gmail hosts and
+    /// fills this in with a `rfc822msgid:` search deep link (see
+    /// `imap::gmail_web_url`) — every other IMAP host leaves it
+    /// `None`, and `o` in the widget falls back to opening a temp
+    /// `.eml` with the OS's default handler.
     pub web_url: Option<String>,
     /// Which configured account this came from — only meaningful in
     /// multi-account IMAP mode (`[[accounts]]` in email.toml), where it

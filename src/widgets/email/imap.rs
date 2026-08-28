@@ -197,6 +197,29 @@ fn connect_concrete(creds: &ImapCredentials) -> Result<ConcreteSession> {
         .map_err(|(err, _client)| anyhow!("imap: login failed for {}: {err}", creds.username))
 }
 
+/// A Gmail web-search deep link for `message_id`, when `host` is a
+/// Gmail IMAP host and a `Message-ID` header was present on the
+/// message. Gmail's web search supports `rfc822msgid:<id>` regardless
+/// of how the message was fetched, so this gives IMAP-fetched Gmail
+/// mail the same "open in the actual mailbox" experience the removed
+/// Gmail OAuth provider's own web links used to — `o` in the widget
+/// opens this in a browser instead of falling back to a temp `.eml`.
+/// `None` for every other IMAP host, where there's no equivalent web
+/// UI to link into.
+fn gmail_web_url(host: &str, message_id: Option<&str>) -> Option<String> {
+    if !host.eq_ignore_ascii_case("imap.gmail.com") {
+        return None;
+    }
+    let id = message_id?.trim().trim_start_matches('<').trim_end_matches('>');
+    if id.is_empty() {
+        return None;
+    }
+    Some(format!(
+        "https://mail.google.com/mail/u/0/#search/rfc822msgid:{}",
+        urlencoding::encode(id)
+    ))
+}
+
 fn fetch_recent_sync(
     creds: &ImapCredentials,
     folder: &str,
@@ -286,6 +309,7 @@ fn fetch_recent_sync(
             .flags()
             .iter()
             .any(|f| matches!(f, imap::types::Flag::Seen));
+        let web_url = gmail_web_url(&creds.host, msg.message_id());
         out.push(EmailMessage {
             id: format!("imap-{}-{}", folder, fetched.uid.unwrap_or(0)),
             folder: folder.to_string(),
@@ -295,7 +319,7 @@ fn fetch_recent_sync(
             received,
             server_unread,
             plain_body,
-            web_url: None,
+            web_url,
             account: String::new(),
             imap_uid: fetched.uid,
         });
@@ -455,6 +479,38 @@ impl EmailProvider for ImapProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn gmail_web_url_builds_search_link_for_gmail_host() {
+        let url = gmail_web_url("imap.gmail.com", Some("abc123@mail.gmail.com"));
+        assert_eq!(
+            url,
+            Some("https://mail.google.com/mail/u/0/#search/rfc822msgid:abc123%40mail.gmail.com".to_string())
+        );
+    }
+
+    #[test]
+    fn gmail_web_url_strips_angle_brackets_and_is_case_insensitive_on_host() {
+        let url = gmail_web_url("IMAP.GMAIL.COM", Some("<abc123@mail.gmail.com>"));
+        assert_eq!(
+            url,
+            Some("https://mail.google.com/mail/u/0/#search/rfc822msgid:abc123%40mail.gmail.com".to_string())
+        );
+    }
+
+    #[test]
+    fn gmail_web_url_is_none_for_non_gmail_host() {
+        assert_eq!(
+            gmail_web_url("imap.fastmail.com", Some("abc123@example.com")),
+            None
+        );
+    }
+
+    #[test]
+    fn gmail_web_url_is_none_without_a_message_id() {
+        assert_eq!(gmail_web_url("imap.gmail.com", None), None);
+        assert_eq!(gmail_web_url("imap.gmail.com", Some("   ")), None);
+    }
 
     #[test]
     fn template_for_known_provider_seeds_host_port() {
