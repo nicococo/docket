@@ -164,7 +164,7 @@ the live keybinding overlay.
 | **Calendar** | day / week / month views with event agenda | CalDAV (iCloud / Fastmail / Nextcloud), ICS/webcal feed (incl. Google Calendar's "secret address"), local TOML events |
 | **News** | RSS / Atom aggregator with topic filters, keyword search (`:news <terms>`), optional per-article LLM summaries | any RSS/Atom feed; LLM provider for summaries |
 | **Feeds** | tabbed single-source RSS reader (WSJ, MarketWatch, AI News, or any feed you point it at), one tab per source | any RSS/Atom feed; LLM provider for summaries |
-| **Email** | unified inbox preview with optional per-message LLM summaries | any IMAP server (app password) |
+| **Email** | unified inbox preview; `Enter` opens the full message in a popup with AI actions — summarize, explain, extract todos/dates as a selectable list you can add straight to Notes/Calendar | any IMAP server (app password); LLM provider for the AI actions |
 | **Resources** | htop-style CPU / memory / top-process view | local `sysinfo` (no FFI) |
 | **Notes** | vim-flavoured multi-note pad with undo/redo, per-note files; any note can be toggled (`t`) into a colorful kanban-style board, columns from `## Heading` lines, cards from `- [ ]`/`- [x]` items; cards can reference other notes with `[[Note Name]]`, previewed in place with `e`/`Enter` | none — plain `.md` files under `~/.config/docket/notes/` |
 
@@ -242,7 +242,7 @@ border.focused = { fg = "#e07b00", modifiers = ["bold"] }
 | **Calendar** | `d` / `w` / `m` day/week/month · `h` / `l` prev/next period · `←↑↓→` move selected day (month view) · `j` / `k` scroll agenda · `t` today · click a day to select it |
 | **News** | `↑/↓` select · `←/→` filter tabs · `e` expand · `s` LLM summary · `Enter` open · `x` clear search |
 | **Feeds** | `↑/↓` select · `←/→` topic tab · `e`/`Enter` expand · `o` open in browser · `s` LLM summary · `r` refresh · `x` clear search |
-| **Email** | `↑/↓` select · `←/→` folder · `e`/`Enter` expand · `o` open in mail client · `s` LLM summary · `u` mark read/unread · `r` refresh |
+| **Email** | `↑/↓` select · `←/→` folder · `e` expand inline · `Enter` open popup (full body) · `s`/`x`/`t` in popup: summarize/explain/extract todos·dates · in extract list: `j`/`k` select, `space` add/remove (todo→Notes, date→Calendar) · `u` mark read/unread · `r` refresh |
 | **Resources** | `m` toggle sort (CPU ↔ memory) · `r` force refresh |
 | **Notes** | `+` new · `-` delete · `i` insert · `Esc` normal · `h`/`l` list / content · `j`/`k` scroll · `y` yank note · `Ctrl-Z`/`Ctrl-Shift-Z` undo/redo · `t` toggle board · (board) `h/j/k/l` select · `space`/`x` toggle checkbox · `H`/`L` move card column · `o` new card · `e`/`Enter` preview `[[linked]]` notes |
 

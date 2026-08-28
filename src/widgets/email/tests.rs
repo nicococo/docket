@@ -204,7 +204,6 @@ fn make_message(line_count: usize) -> provider::EmailMessage {
         received: Local::now(),
         server_unread: false,
         plain_body: body,
-        web_url: None,
         account: String::new(),
         imap_uid: None,
     }
@@ -333,8 +332,10 @@ fn expanded_body_lines_honors_summary_toggle_and_body_cap() {
     // must surface the cached summary instead of the raw body, with no LLM.
     {
         let mut st = widget.state.lock().unwrap();
-        st.summaries
-            .insert(msg.id.clone(), SummaryState::Ready("A crisp summary.".into()));
+        st.ai_results.insert(
+            (msg.id.clone(), AiAction::Summarize),
+            SummaryState::Ready("A crisp summary.".into()),
+        );
         st.summary_view.insert(msg.id.clone(), true);
     }
     let summarized = expanded_body_lines(&msg, &widget.state, 80, true, usize::MAX);
@@ -607,4 +608,278 @@ fn message_matches_tab_multi_account_filters_by_account_or_all() {
     assert!(!widget.message_matches_tab(&work_msg, "personal"));
     assert!(widget.message_matches_tab(&personal_msg, "All"));
     assert!(widget.message_matches_tab(&work_msg, "All"));
+}
+
+// ── AI popup (Enter) ──────────────────────────────────────────────────────
+
+#[test]
+fn ai_action_key_and_cache_prefix_are_distinct_per_action() {
+    use std::collections::HashSet;
+    let keys: HashSet<char> = AiAction::ALL.iter().map(|a| a.key()).collect();
+    assert_eq!(keys.len(), AiAction::ALL.len(), "every action needs a unique key");
+    let prefixes: HashSet<&str> = AiAction::ALL.iter().map(|a| a.cache_prefix()).collect();
+    assert_eq!(
+        prefixes.len(),
+        AiAction::ALL.len(),
+        "every action needs its own cache namespace so switching actions never reads a stale result"
+    );
+}
+
+#[test]
+fn enter_opens_popup_for_the_selected_message() {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    let mut widget = make_widget_with_messages(vec![make_message(3)]);
+    assert!(widget.state.lock().unwrap().popup.is_none());
+
+    widget.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+    let st = widget.state.lock().unwrap();
+    let popup = st.popup.as_ref().expect("Enter must open the popup");
+    assert_eq!(popup.message_id, "test-msg-1");
+    assert_eq!(popup.active_action, None);
+}
+
+#[test]
+fn any_other_key_closes_the_popup() {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    let mut widget = make_widget_with_messages(vec![make_message(3)]);
+    widget.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    assert!(widget.state.lock().unwrap().popup.is_some());
+
+    widget.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+    assert!(
+        widget.state.lock().unwrap().popup.is_none(),
+        "Esc (or any non-scroll, non-action key) must close the popup"
+    );
+}
+
+#[test]
+fn popup_j_k_scroll_without_a_configured_llm_is_a_noop_past_zero() {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    let mut widget = make_widget_with_messages(vec![make_message(3)]);
+    widget.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+    // No render has happened yet, so last_popup_max_scroll is still 0 —
+    // j must clamp to 0 rather than let scroll run away.
+    widget.handle_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE));
+    assert_eq!(widget.state.lock().unwrap().popup.as_ref().unwrap().scroll, 0);
+
+    // k on an already-zero scroll must saturate, not underflow/panic.
+    widget.handle_key(KeyEvent::new(KeyCode::Char('k'), KeyModifiers::NONE));
+    assert_eq!(widget.state.lock().unwrap().popup.as_ref().unwrap().scroll, 0);
+}
+
+#[test]
+fn popup_action_key_is_a_noop_when_ai_is_not_configured() {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    // Default `make_widget_with_messages` widget has no LLM and
+    // summarize_with_llm defaults false — pressing an action key must
+    // leave the popup on the raw-body view rather than silently
+    // "activating" an action nothing can ever fulfill.
+    let mut widget = make_widget_with_messages(vec![make_message(3)]);
+    widget.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+    widget.handle_key(KeyEvent::new(
+        KeyCode::Char(AiAction::Summarize.key()),
+        KeyModifiers::NONE,
+    ));
+
+    assert_eq!(
+        widget.state.lock().unwrap().popup.as_ref().unwrap().active_action,
+        None
+    );
+}
+
+#[tokio::test]
+async fn popup_action_key_toggles_active_action_on_and_back_off() {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+    struct UnusedLlm;
+    #[async_trait]
+    impl LlmProvider for UnusedLlm {
+        async fn complete(&self, _request: LlmRequest) -> Result<crate::llm::LlmResponse> {
+            // Never actually awaited by this test — it only checks the
+            // synchronous state mutation `trigger_popup_action` makes
+            // before spawning the LLM call.
+            Err(anyhow::anyhow!("not called in this test"))
+        }
+    }
+
+    let cfg = EmailConfig {
+        provider: "unknown".into(),
+        summarize_with_llm: true,
+        ..EmailConfig::default()
+    };
+    let mut widget = EmailWidget::with_config_and_llm(
+        "main".into(),
+        cfg,
+        Some(Arc::new(UnusedLlm) as Arc<dyn LlmProvider>),
+        Arc::new(Theme::builtin_defaults()),
+        ScopedCache::ephemeral(),
+    );
+    widget.provider_ready = true;
+    {
+        let mut st = widget.state.lock().unwrap();
+        st.messages = vec![Arc::new(make_message(3))];
+    }
+
+    widget.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    widget.handle_key(KeyEvent::new(
+        KeyCode::Char(AiAction::Explain.key()),
+        KeyModifiers::NONE,
+    ));
+    assert_eq!(
+        widget.state.lock().unwrap().popup.as_ref().unwrap().active_action,
+        Some(AiAction::Explain)
+    );
+
+    // Pressing the same action key again reverts to the raw body view.
+    widget.handle_key(KeyEvent::new(
+        KeyCode::Char(AiAction::Explain.key()),
+        KeyModifiers::NONE,
+    ));
+    assert_eq!(
+        widget.state.lock().unwrap().popup.as_ref().unwrap().active_action,
+        None
+    );
+}
+
+// ── Extract JSON parsing ──────────────────────────────────────────
+
+#[test]
+fn parse_extracted_items_reads_plain_json() {
+    let items = parse_extracted_items(
+        r#"{"todos": ["Reply with numbers"], "dates": [{"title": "Budget review", "date": "2026-09-03"}]}"#,
+    )
+    .expect("valid JSON must parse");
+    assert_eq!(items.todos, vec!["Reply with numbers".to_string()]);
+    assert_eq!(items.dates.len(), 1);
+    assert_eq!(items.dates[0].title, "Budget review");
+    assert_eq!(items.dates[0].date, "2026-09-03");
+}
+
+#[test]
+fn parse_extracted_items_strips_a_json_code_fence() {
+    let items = parse_extracted_items("```json\n{\"todos\": [\"a\"], \"dates\": []}\n```")
+        .expect("fenced JSON must still parse");
+    assert_eq!(items.todos, vec!["a".to_string()]);
+    assert!(items.dates.is_empty());
+}
+
+#[test]
+fn parse_extracted_items_strips_a_bare_code_fence() {
+    let items = parse_extracted_items("```\n{\"todos\": [], \"dates\": []}\n```")
+        .expect("bare-fenced JSON must still parse");
+    assert!(items.todos.is_empty());
+    assert!(items.dates.is_empty());
+}
+
+#[test]
+fn parse_extracted_items_defaults_missing_fields_to_empty() {
+    let items = parse_extracted_items("{}").expect("empty object must parse via #[serde(default)]");
+    assert!(items.todos.is_empty());
+    assert!(items.dates.is_empty());
+}
+
+#[test]
+fn parse_extracted_items_returns_none_for_plain_text() {
+    assert!(parse_extracted_items("- follow up with Alice\n- meeting Tuesday").is_none());
+}
+
+#[test]
+fn parse_extracted_items_returns_none_for_malformed_json() {
+    assert!(parse_extracted_items(r#"{"todos": ["unterminated]}"#).is_none());
+}
+
+// ── Extract list: selection + space toggles add/remove on disk ──────
+
+// Shared isolation helper — see its doc comment in
+// `widgets::test_support` for why this needs to be one process-wide
+// lock rather than a per-module one (this exact race bit these tests
+// before it got centralized there).
+use crate::widgets::test_support::IsolatedConfigHome;
+
+#[test]
+fn extract_list_j_navigates_and_space_toggles_todo_add_remove() {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+    let _cfg = IsolatedConfigHome::new();
+    let mut widget = make_widget_with_messages(vec![make_message(3)]);
+    let msg_id = "test-msg-1".to_string();
+    {
+        let mut st = widget.state.lock().unwrap();
+        st.ai_results.insert(
+            (msg_id.clone(), AiAction::ExtractTodo),
+            SummaryState::Ready(
+                r#"{"todos": ["First todo", "Second todo"], "dates": []}"#.to_string(),
+            ),
+        );
+    }
+
+    widget.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    widget.handle_key(KeyEvent::new(
+        KeyCode::Char(AiAction::ExtractTodo.key()),
+        KeyModifiers::NONE,
+    ));
+    assert_eq!(
+        widget.state.lock().unwrap().popup.as_ref().unwrap().extract_selected,
+        0
+    );
+
+    // j moves selection to the second todo, not scroll.
+    widget.handle_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE));
+    assert_eq!(
+        widget.state.lock().unwrap().popup.as_ref().unwrap().extract_selected,
+        1
+    );
+
+    let id = extract_actions::todo_item_id(&msg_id, "Second todo");
+    assert!(!extract_actions::todo_marker_present(&id));
+
+    widget.handle_key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE));
+    assert!(
+        extract_actions::todo_marker_present(&id),
+        "space must add the selected todo"
+    );
+
+    widget.handle_key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE));
+    assert!(
+        !extract_actions::todo_marker_present(&id),
+        "space again must remove it"
+    );
+
+    // The popup is still open and still on the extract list — space
+    // toggling never closes it, unlike the generic "any other key".
+    assert!(widget.state.lock().unwrap().popup.is_some());
+}
+
+#[test]
+fn extract_list_space_toggles_date_add_remove_as_a_calendar_event() {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+    let _cfg = IsolatedConfigHome::new();
+    let mut widget = make_widget_with_messages(vec![make_message(3)]);
+    let msg_id = "test-msg-1".to_string();
+    {
+        let mut st = widget.state.lock().unwrap();
+        st.ai_results.insert(
+            (msg_id.clone(), AiAction::ExtractTodo),
+            SummaryState::Ready(
+                r#"{"todos": [], "dates": [{"title": "Budget review", "date": "2026-09-03"}]}"#
+                    .to_string(),
+            ),
+        );
+    }
+
+    widget.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    widget.handle_key(KeyEvent::new(
+        KeyCode::Char(AiAction::ExtractTodo.key()),
+        KeyModifiers::NONE,
+    ));
+
+    let id = extract_actions::date_item_id(&msg_id, "Budget review", "2026-09-03");
+    assert!(!extract_actions::event_marker_present(&id));
+
+    widget.handle_key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE));
+    assert!(extract_actions::event_marker_present(&id));
 }

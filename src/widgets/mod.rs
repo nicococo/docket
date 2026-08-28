@@ -372,6 +372,59 @@ pub(crate) mod test_support {
         }
         out
     }
+
+    /// Isolates `$XDG_CONFIG_HOME` for the duration of the guard, so
+    /// code going through `config::config_dir()` (`notes::store`,
+    /// `calendar::local`'s email-extract helpers, etc.) reads/writes a
+    /// throwaway temp dir instead of the real `~/.config/docket/`.
+    ///
+    /// `XDG_CONFIG_HOME` is process-global and `cargo test` runs tests
+    /// in parallel by default, so every test that needs this isolation
+    /// — across every widget module — must share *one* lock. A
+    /// per-module static mutex looks like it serializes correctly but
+    /// doesn't: two tests in different modules, each holding their own
+    /// module-local lock, can still mutate the env var concurrently
+    /// and step on each other (this bit the email-extract tests before
+    /// this got centralized here). Do not reintroduce a local copy of
+    /// this pattern — use this one.
+    static CONFIG_HOME_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    static CONFIG_HOME_COUNTER: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+    pub(crate) struct IsolatedConfigHome {
+        original: Option<String>,
+        dir: std::path::PathBuf,
+        _lock: std::sync::MutexGuard<'static, ()>,
+    }
+
+    impl IsolatedConfigHome {
+        pub(crate) fn new() -> Self {
+            let lock = CONFIG_HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+            let n = CONFIG_HOME_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let dir = std::env::temp_dir().join(format!(
+                "docket-isolated-config-home-{}-{n}",
+                std::process::id()
+            ));
+            let _ = std::fs::remove_dir_all(&dir);
+            std::fs::create_dir_all(&dir).expect("create isolated config home temp dir");
+            let original = std::env::var("XDG_CONFIG_HOME").ok();
+            std::env::set_var("XDG_CONFIG_HOME", dir.join(".config"));
+            Self {
+                original,
+                dir,
+                _lock: lock,
+            }
+        }
+    }
+
+    impl Drop for IsolatedConfigHome {
+        fn drop(&mut self) {
+            match &self.original {
+                Some(v) => std::env::set_var("XDG_CONFIG_HOME", v),
+                None => std::env::remove_var("XDG_CONFIG_HOME"),
+            }
+            let _ = std::fs::remove_dir_all(&self.dir);
+        }
+    }
 }
 
 #[cfg(test)]

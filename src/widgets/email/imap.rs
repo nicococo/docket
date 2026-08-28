@@ -295,15 +295,6 @@ fn fetch_recent_sync(
             received,
             server_unread,
             plain_body,
-            // No canonical web URL for a raw IMAP message — tried a
-            // Gmail-specific web-search deep link here, but neither
-            // the `/u/<email>/` path substitution nor `?authuser=`
-            // nor the AccountChooser redirect reliably jump straight
-            // to the right signed-in account without extra manual
-            // steps, so `o` in the widget always falls back to
-            // opening a temp `.eml` with the OS's default handler
-            // instead (see `eml.rs`).
-            web_url: None,
             account: String::new(),
             imap_uid: fetched.uid,
         });

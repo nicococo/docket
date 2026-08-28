@@ -35,13 +35,6 @@ pub struct EmailMessage {
     /// Plain-text body. When the source was HTML-only, this is the output of
     /// `html_strip::html_to_text`.
     pub plain_body: String,
-    /// Direct URL into the provider's web UI for this message, if
-    /// available. Always `None` for IMAP — there's no canonical web
-    /// URL for a raw IMAP message that reliably lands on the right
-    /// signed-in account when the user has more than one; `o` in the
-    /// widget instead opens a temp `.eml` with the OS's default
-    /// handler.
-    pub web_url: Option<String>,
     /// Which configured account this came from — only meaningful in
     /// multi-account IMAP mode (`[[accounts]]` in email.toml), where it
     /// becomes the tab-filter key alongside `folder`. Providers themselves
