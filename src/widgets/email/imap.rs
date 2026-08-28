@@ -206,7 +206,13 @@ fn connect_concrete(creds: &ImapCredentials) -> Result<ConcreteSession> {
 /// opens this in a browser instead of falling back to a temp `.eml`.
 /// `None` for every other IMAP host, where there's no equivalent web
 /// UI to link into.
-fn gmail_web_url(host: &str, message_id: Option<&str>) -> Option<String> {
+///
+/// `username` (the IMAP login, which for Gmail is always the account's
+/// own address) goes in the `/u/<email>/` slot instead of a numeric
+/// index — Google resolves an email address there to the matching
+/// logged-in session regardless of browser tab order, which a hardcoded
+/// `/u/0/` can't do once more than one Google account is signed in.
+fn gmail_web_url(host: &str, username: &str, message_id: Option<&str>) -> Option<String> {
     if !host.eq_ignore_ascii_case("imap.gmail.com") {
         return None;
     }
@@ -214,8 +220,13 @@ fn gmail_web_url(host: &str, message_id: Option<&str>) -> Option<String> {
     if id.is_empty() {
         return None;
     }
+    let user_slot = if username.trim().is_empty() {
+        "0".to_string()
+    } else {
+        urlencoding::encode(username.trim()).into_owned()
+    };
     Some(format!(
-        "https://mail.google.com/mail/u/0/#search/rfc822msgid:{}",
+        "https://mail.google.com/mail/u/{user_slot}/#search/rfc822msgid:{}",
         urlencoding::encode(id)
     ))
 }
@@ -309,7 +320,7 @@ fn fetch_recent_sync(
             .flags()
             .iter()
             .any(|f| matches!(f, imap::types::Flag::Seen));
-        let web_url = gmail_web_url(&creds.host, msg.message_id());
+        let web_url = gmail_web_url(&creds.host, &creds.username, msg.message_id());
         out.push(EmailMessage {
             id: format!("imap-{}-{}", folder, fetched.uid.unwrap_or(0)),
             folder: folder.to_string(),
@@ -481,17 +492,40 @@ mod tests {
     use super::*;
 
     #[test]
-    fn gmail_web_url_builds_search_link_for_gmail_host() {
-        let url = gmail_web_url("imap.gmail.com", Some("abc123@mail.gmail.com"));
+    fn gmail_web_url_builds_search_link_with_account_in_the_u_slot() {
+        let url = gmail_web_url(
+            "imap.gmail.com",
+            "work@gmail.com",
+            Some("abc123@mail.gmail.com"),
+        );
         assert_eq!(
             url,
-            Some("https://mail.google.com/mail/u/0/#search/rfc822msgid:abc123%40mail.gmail.com".to_string())
+            Some(
+                "https://mail.google.com/mail/u/work%40gmail.com/#search/rfc822msgid:abc123%40mail.gmail.com"
+                    .to_string()
+            )
         );
     }
 
     #[test]
     fn gmail_web_url_strips_angle_brackets_and_is_case_insensitive_on_host() {
-        let url = gmail_web_url("IMAP.GMAIL.COM", Some("<abc123@mail.gmail.com>"));
+        let url = gmail_web_url(
+            "IMAP.GMAIL.COM",
+            "personal@gmail.com",
+            Some("<abc123@mail.gmail.com>"),
+        );
+        assert_eq!(
+            url,
+            Some(
+                "https://mail.google.com/mail/u/personal%40gmail.com/#search/rfc822msgid:abc123%40mail.gmail.com"
+                    .to_string()
+            )
+        );
+    }
+
+    #[test]
+    fn gmail_web_url_falls_back_to_slot_zero_for_a_blank_username() {
+        let url = gmail_web_url("imap.gmail.com", "", Some("abc123@mail.gmail.com"));
         assert_eq!(
             url,
             Some("https://mail.google.com/mail/u/0/#search/rfc822msgid:abc123%40mail.gmail.com".to_string())
@@ -501,15 +535,18 @@ mod tests {
     #[test]
     fn gmail_web_url_is_none_for_non_gmail_host() {
         assert_eq!(
-            gmail_web_url("imap.fastmail.com", Some("abc123@example.com")),
+            gmail_web_url("imap.fastmail.com", "user@fastmail.com", Some("abc123@example.com")),
             None
         );
     }
 
     #[test]
     fn gmail_web_url_is_none_without_a_message_id() {
-        assert_eq!(gmail_web_url("imap.gmail.com", None), None);
-        assert_eq!(gmail_web_url("imap.gmail.com", Some("   ")), None);
+        assert_eq!(gmail_web_url("imap.gmail.com", "user@gmail.com", None), None);
+        assert_eq!(
+            gmail_web_url("imap.gmail.com", "user@gmail.com", Some("   ")),
+            None
+        );
     }
 
     #[test]
