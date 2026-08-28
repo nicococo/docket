@@ -33,7 +33,39 @@
 //! Saves are debounced via "save on every change" plus an explicit
 //! save when leaving insert mode. The atomic-write helper in `store`
 //! keeps partial writes from corrupting a note.
+//!
+//! ## Board mode
+//!
+//! Any note can be rendered as a kanban-style board instead of flat
+//! text — `t` toggles it. The note stays a plain `.md` file; board is
+//! purely a way of viewing and navigating the same body (see
+//! `board.rs`):
+//!
+//! - A `<!-- board -->` marker right after the title (line 1) flags
+//!   the note as a board.
+//! - Every `## Heading` line becomes a column, in the order it
+//!   appears.
+//! - `- [ ] ...` / `- [x] ...` lines under a heading become that
+//!   column's cards.
+//!
+//! In Normal mode, `h`/`j`/`k`/`l` select a card/column, `space`/`x`
+//! toggles a card's checkbox, `H`/`L` move the selected card to the
+//! adjacent column, and `o` appends a new card and drops into Insert
+//! mode. Insert mode always uses the flat editor — adding headings or
+//! editing card text still happens as plain text editing, the same as
+//! any other note.
+//!
+//! A card's text can reference another note with an Obsidian-style
+//! `[[Note Name]]` wikilink — `e`/`Enter` opens a scrollable overlay
+//! showing every linked note's full body (resolved by exact title
+//! match against loaded notes; unresolved links show "not found").
+//! Any key other than `j`/`k` closes it.
+//!
+//! Columns are rendered as bordered, colour-coded boxes (cycling a
+//! fixed accent palette) with a blank gap between them so adjacent
+//! columns read as distinct cards rather than a fused block.
 
+pub mod board;
 pub mod store;
 
 use std::collections::HashMap;
@@ -47,7 +79,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, BorderType, Borders, Paragraph, Wrap},
+    widgets::{Block, BorderType, Borders, Clear, Paragraph, Wrap},
     Frame,
 };
 use serde::Deserialize;
@@ -110,6 +142,20 @@ const LIST_PLAIN_PREFIX: &str = "  ";
 const LIST_CONT_INDENT: &str = "   ";
 const LIST_PREFIX_W: usize = 2;
 const LIST_CONT_W: usize = 3;
+
+/// Cycled per-column accent color in board rendering — same "light,
+/// distinct hues" formula as the calendar widget's per-calendar
+/// palette (`widgets::calendar::colors::DEFAULT_PALETTE`), reused
+/// here for visual consistency across the app rather than inventing
+/// a second color scheme.
+const BOARD_COLUMN_PALETTE: [Color; 6] = [
+    Color::LightCyan,
+    Color::LightGreen,
+    Color::LightYellow,
+    Color::LightMagenta,
+    Color::LightBlue,
+    Color::LightRed,
+];
 
 /// Hanging-indent width used when the content pane auto-wraps a long
 /// source line onto multiple visual rows. Continuation rows get this
@@ -223,11 +269,23 @@ struct NotesState {
     content_scroll: u16,
     /// Scroll offset of the list viewport, in rows.
     list_scroll: u16,
+    /// Selected column/card when the active note is a board (see
+    /// `board.rs`). Only meaningful in `Mode::Normal` with
+    /// `SubFocus::Content`; clamped against the freshly-parsed
+    /// `BoardModel` on every use rather than kept valid proactively,
+    /// since editing the note (adding/removing cards) can shrink
+    /// either dimension out from under a stale selection.
+    board_col: usize,
+    board_row: usize,
     mode: Mode,
     focus: SubFocus,
     pending: PendingChord,
     /// `Some` when a delete is awaiting y/N confirmation.
     confirm_delete: Option<String>,
+    /// `Some` while the `[[wikilink]]` preview modal for the selected
+    /// board card is open (see `open_board_link_preview`). Gates key
+    /// dispatch the same way `confirm_delete` does.
+    board_link_preview: Option<LinkPreview>,
     /// Transient status line in the title bar — used for feedback like
     /// "Copied to clipboard" or "Save failed: …". Carries its own
     /// timestamp so the render path can expire it after `STATUS_TTL`
@@ -257,6 +315,15 @@ impl TransientStatus {
     }
 }
 
+/// Resolved `[[wikilink]]` targets for the board card the preview
+/// modal was opened on. `None` bodies are links that don't match any
+/// existing note's title — rendered as "not found" rather than
+/// silently dropped.
+struct LinkPreview {
+    entries: Vec<(String, Option<String>)>,
+    scroll: u16,
+}
+
 impl NotesState {
     /// Set a transient status line. Stamped with `Instant::now()` so
     /// render can expire it after [`STATUS_TTL`]. Always prefer this
@@ -279,10 +346,13 @@ impl Default for NotesState {
             cursor_col: 0,
             content_scroll: 0,
             list_scroll: 0,
+            board_col: 0,
+            board_row: 0,
             mode: Mode::Normal,
             focus: SubFocus::Content,
             pending: PendingChord::None,
             confirm_delete: None,
+            board_link_preview: None,
             status: None,
             history: HashMap::new(),
             dirty: true,
@@ -348,6 +418,9 @@ pub struct NotesWidget {
     /// The key handler reads this when bumping j/k so we never scroll
     /// past the last visual row.
     last_max_content_scroll: Arc<Mutex<u16>>,
+    /// Highest valid scroll offset for the open link-preview modal
+    /// (see `LinkPreview`), updated by `render_link_preview_modal`.
+    last_link_preview_max_scroll: Arc<Mutex<u16>>,
     /// Highest valid `list_scroll` (in entry-index units) given the
     /// currently visible entry count. Updated by `render_list`; read
     /// by the list scrollbar's click handler so clicking the bar
@@ -418,6 +491,7 @@ impl NotesWidget {
             last_list_rect: Arc::new(Mutex::new(Rect::default())),
             last_list_entry_rows: Arc::new(Mutex::new(Vec::new())),
             last_max_content_scroll: Arc::new(Mutex::new(0)),
+            last_link_preview_max_scroll: Arc::new(Mutex::new(0)),
             last_max_list_scroll: Arc::new(Mutex::new(0)),
             last_outer_area: Arc::new(Mutex::new(Rect::default())),
         }
@@ -442,6 +516,8 @@ impl NotesWidget {
             st.cursor_row = 0;
             st.cursor_col = 0;
             st.content_scroll = 0;
+            st.board_col = 0;
+            st.board_row = 0;
             st.mode = Mode::Insert;
             st.focus = SubFocus::Content;
             st.status = None;
@@ -472,6 +548,8 @@ impl NotesWidget {
             st.cursor_row = 0;
             st.cursor_col = 0;
             st.content_scroll = 0;
+            st.board_col = 0;
+            st.board_row = 0;
             st.pending = PendingChord::None;
             st.confirm_delete = None;
             st.status = None;
@@ -676,6 +754,188 @@ impl NotesWidget {
         self.save_active();
     }
 
+    /// Toggle the active note's board marker on/off (see `board.rs`).
+    /// Resets the board selection since the note's column layout may
+    /// have just appeared or disappeared entirely.
+    fn toggle_board_marker(&self) {
+        let mut st = self.state.lock().expect("notes state poisoned");
+        let Some(active) = st.active else { return };
+        if st.notes.get(active).is_none() {
+            return;
+        }
+        st.push_undo_snapshot();
+        {
+            let Some(note) = st.notes.get_mut(active) else {
+                return;
+            };
+            board::toggle_marker(&mut note.body);
+        }
+        st.board_col = 0;
+        st.board_row = 0;
+        drop(st);
+        self.save_active();
+    }
+
+    /// Toggle the checkbox of the currently-selected board card.
+    /// No-op if the active note isn't a board or the selection points
+    /// at nothing (e.g. an empty column).
+    fn toggle_board_checkbox(&self) {
+        let mut st = self.state.lock().expect("notes state poisoned");
+        let Some(active) = st.active else { return };
+        let Some(note) = st.notes.get(active) else {
+            return;
+        };
+        let model = board::parse(&note.body);
+        let Some(line) = model
+            .columns
+            .get(st.board_col)
+            .and_then(|c| c.cards.get(st.board_row))
+            .map(|c| c.line)
+        else {
+            return;
+        };
+        st.push_undo_snapshot();
+        let Some(note) = st.notes.get_mut(active) else {
+            return;
+        };
+        board::toggle_checkbox(&mut note.body, line);
+        drop(st);
+        self.save_active();
+    }
+
+    /// Move the board selection to the next card within the current
+    /// column, if there is one. Content-focused board `j`/`Down`.
+    fn move_board_selection_down(&self) {
+        let mut st = self.state.lock().expect("notes state poisoned");
+        let Some(active) = st.active else { return };
+        let Some(note) = st.notes.get(active) else {
+            return;
+        };
+        let model = board::parse(&note.body);
+        let Some(col) = model.columns.get(st.board_col) else {
+            return;
+        };
+        if col.cards.is_empty() {
+            return;
+        }
+        st.board_row = (st.board_row + 1).min(col.cards.len() - 1);
+    }
+
+    /// Move the board selection to the adjacent column (`dir` is `1`
+    /// or `-1`), clamping the row to that column's card count. No-op
+    /// at the first/last column — callers handle the left-boundary
+    /// "switch to list focus" behavior separately.
+    fn move_board_column(&self, dir: i32) {
+        let mut st = self.state.lock().expect("notes state poisoned");
+        let Some(active) = st.active else { return };
+        let Some(note) = st.notes.get(active) else {
+            return;
+        };
+        let model = board::parse(&note.body);
+        if model.columns.is_empty() {
+            return;
+        }
+        let target = st.board_col as i32 + dir;
+        if target < 0 || target as usize >= model.columns.len() {
+            return;
+        }
+        let target = target as usize;
+        st.board_col = target;
+        st.board_row = model.columns[target]
+            .cards
+            .len()
+            .saturating_sub(1)
+            .min(st.board_row);
+    }
+
+    /// Move the selected card into the adjacent column (`dir` is `1`
+    /// or `-1`), selecting it in its new column. No-op (undo history
+    /// untouched) if there's no card selected or no column in that
+    /// direction.
+    fn move_board_card(&self, dir: i32) {
+        let mut st = self.state.lock().expect("notes state poisoned");
+        let Some(active) = st.active else { return };
+        let Some(note) = st.notes.get(active) else {
+            return;
+        };
+        let model = board::parse(&note.body);
+        let col = st.board_col;
+        let row = st.board_row;
+        if model
+            .columns
+            .get(col)
+            .and_then(|c| c.cards.get(row))
+            .is_none()
+        {
+            return;
+        }
+        let target = col as i32 + dir;
+        if target < 0 || target as usize >= model.columns.len() {
+            return;
+        }
+
+        st.push_undo_snapshot();
+        let new_col = {
+            let Some(note) = st.notes.get_mut(active) else {
+                return;
+            };
+            board::move_card(&mut note.body, &model, col, row, dir)
+        };
+        if let Some(new_col) = new_col {
+            let new_model = board::parse(&st.notes[active].body);
+            st.board_col = new_col;
+            st.board_row = new_model.columns[new_col].cards.len().saturating_sub(1);
+        }
+        drop(st);
+        self.save_active();
+    }
+
+    /// Append a new empty card (`- [ ] `) to the selected column and
+    /// drop into EDIT mode with the cursor at its end. No-op if the
+    /// active note isn't a board or has no columns yet (add a `##
+    /// Heading` first via EDIT mode).
+    fn append_board_card(&self) {
+        let mut st = self.state.lock().expect("notes state poisoned");
+        let Some(active) = st.active else { return };
+        let Some(note) = st.notes.get(active) else {
+            return;
+        };
+        let model = board::parse(&note.body);
+        if model.columns.is_empty() {
+            return;
+        }
+        let col = st.board_col.min(model.columns.len() - 1);
+        let total_lines = active_line_count_for(&note.body);
+        let Some(insert_at) = board::column_insert_line(&model, col, total_lines) else {
+            return;
+        };
+
+        st.push_undo_snapshot();
+        const NEW_CARD: &str = "- [ ] ";
+        {
+            let Some(note) = st.notes.get_mut(active) else {
+                return;
+            };
+            let mut lines: Vec<String> = if note.body.is_empty() {
+                vec![String::new()]
+            } else {
+                note.body.split('\n').map(|s| s.to_string()).collect()
+            };
+            let insert_at = insert_at.min(lines.len());
+            lines.insert(insert_at, NEW_CARD.to_string());
+            note.body = lines.join("\n");
+        }
+        st.cursor_row = insert_at;
+        st.cursor_col = NEW_CARD.chars().count();
+        st.board_col = col;
+        let new_model = board::parse(&st.notes[active].body);
+        st.board_row = new_model.columns[col].cards.len().saturating_sub(1);
+        st.mode = Mode::Insert;
+        st.focus = SubFocus::Content;
+        drop(st);
+        self.save_active();
+    }
+
     /// Delete the line the cursor is on (Ctrl-U in insert mode).
     /// Captures an undo snapshot before mutating.
     fn delete_current_line(&self) {
@@ -790,6 +1050,8 @@ impl NotesWidget {
             st.cursor_row = 0;
             st.cursor_col = 0;
             st.content_scroll = 0;
+            st.board_col = 0;
+            st.board_row = 0;
             st.pending = PendingChord::None;
             prev != Some(idx)
         };
@@ -812,6 +1074,8 @@ impl NotesWidget {
             st.cursor_row = 0;
             st.cursor_col = 0;
             st.content_scroll = 0;
+            st.board_col = 0;
+            st.board_row = 0;
             st.pending = PendingChord::None;
             prev != Some(next)
         };
@@ -1013,11 +1277,18 @@ impl Widget for NotesWidget {
         }
         self.render_content(frame, content_rect_padded, focused);
 
-        // Modal delete confirm last so it sits above both panes.
+        // Modals last so they sit above both panes. At most one is
+        // ever open at a time (both gate key dispatch exclusively in
+        // `handle_key`), but check both defensively rather than
+        // assuming that invariant holds.
         let st = self.state.lock().expect("notes state poisoned");
-        if let Some(name) = st.confirm_delete.clone() {
-            drop(st);
+        let confirm_name = st.confirm_delete.clone();
+        let link_preview_open = st.board_link_preview.is_some();
+        drop(st);
+        if let Some(name) = confirm_name {
             self.render_confirm_modal(frame, inner, &name);
+        } else if link_preview_open {
+            self.render_link_preview_modal(frame, inner);
         }
     }
 
@@ -1031,6 +1302,10 @@ impl Widget for NotesWidget {
             if st.confirm_delete.is_some() {
                 drop(st);
                 return self.handle_confirm_key(key);
+            }
+            if st.board_link_preview.is_some() {
+                drop(st);
+                return self.handle_link_preview_key(key);
             }
         }
         let mode = self.state.lock().expect("notes state poisoned").mode;
@@ -1256,6 +1531,12 @@ impl Widget for NotesWidget {
             ("mouse click", "position cursor (EDIT mode)"),
             ("mouse wheel", "scroll list or content (VIEW mode)"),
             ("scrollbar click", "jump scroll position"),
+            ("t", "toggle board rendering for the active note"),
+            ("h / j / k / l (board)", "select card / column (VIEW mode)"),
+            ("space / x (board)", "toggle card checkbox"),
+            ("H / L (board)", "move card to prev / next column"),
+            ("o (board)", "add a new card, switch to EDIT mode"),
+            ("e / Enter (board)", "preview card's [[linked]] notes"),
         ]
     }
 
@@ -1567,6 +1848,147 @@ impl NotesWidget {
         }
     }
 
+    /// Board rendering: columns laid out side by side, one per `##
+    /// Heading`, cards as checkbox lines. Only called from
+    /// `render_content` in Normal mode for a board note — Insert mode
+    /// always uses the flat editor below so editing a board note's
+    /// raw text (adding headings, typing card text) works exactly
+    /// like any other note.
+    fn render_board(
+        &self,
+        frame: &mut Frame,
+        area: Rect,
+        model: &board::BoardModel,
+        board_col: usize,
+        board_row: usize,
+        content_focused: bool,
+    ) {
+        if model.columns.is_empty() {
+            let dim = self.theme.text_dim;
+            let hint = vec![
+                Line::from(""),
+                Line::from(Span::styled(
+                    "  Board note, no columns yet.",
+                    dim,
+                )),
+                Line::from(Span::styled(
+                    "  Press i and add \"## Column Name\" headings to get started.",
+                    dim,
+                )),
+            ];
+            frame.render_widget(Paragraph::new(hint).wrap(Wrap { trim: false }), area);
+            return;
+        }
+
+        let footer_rows = CONTENT_FOOTER_ROWS.min(area.height);
+        let body_height = area.height.saturating_sub(footer_rows);
+        let cols_area = Rect {
+            height: body_height,
+            ..area
+        };
+
+        // One Fill(1) slot per column, with a 1-cell blank gap between
+        // adjacent columns (not after the last) so each column's own
+        // border reads as a distinct card rather than fusing into one
+        // solid block — the "vertical divider" is the gap plus the
+        // two colored borders either side of it.
+        let mut constraints: Vec<Constraint> = Vec::with_capacity(model.columns.len() * 2 - 1);
+        for i in 0..model.columns.len() {
+            if i > 0 {
+                constraints.push(Constraint::Length(1));
+            }
+            constraints.push(Constraint::Fill(1));
+        }
+        let split = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints(constraints)
+            .split(cols_area);
+        let col_rects: Vec<Rect> = split.iter().step_by(2).copied().collect();
+
+        for (ci, col) in model.columns.iter().enumerate() {
+            let rect = col_rects[ci];
+            if rect.width == 0 || rect.height == 0 {
+                continue;
+            }
+            let is_selected_col = content_focused && ci == board_col;
+            let accent = BOARD_COLUMN_PALETTE[ci % BOARD_COLUMN_PALETTE.len()];
+            let (border_style, header_style) = if content_focused {
+                let mut border = Style::default().fg(accent);
+                if is_selected_col {
+                    border = border.add_modifier(Modifier::BOLD);
+                }
+                (border, Style::default().fg(accent).add_modifier(Modifier::BOLD))
+            } else {
+                (self.theme.text_dim, self.theme.text_dim)
+            };
+            let block = Block::default()
+                .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .border_style(border_style)
+                .title(Span::styled(
+                    format!(" {} ({}) ", col.title, col.cards.len()),
+                    header_style,
+                ));
+            let inner = block.inner(rect);
+            frame.render_widget(block, rect);
+            if inner.width == 0 || inner.height == 0 {
+                continue;
+            }
+
+            let mut lines: Vec<Line<'static>> = Vec::with_capacity(inner.height as usize + 1);
+            if col.cards.is_empty() {
+                lines.push(Line::from(Span::styled("  (empty)", self.theme.text_dim)));
+            }
+
+            let inner_w = inner.width as usize;
+            let text_w = inner_w.saturating_sub(LIST_PREFIX_W).max(1);
+            let cont_w = inner_w.saturating_sub(LIST_CONT_W).max(1);
+            for (ri, card) in col.cards.iter().enumerate() {
+                let selected = is_selected_col && ri == board_row;
+                let (prefix, mut style) = if selected {
+                    (LIST_CARET, self.theme.text_focused)
+                } else if card.checked {
+                    (LIST_PLAIN_PREFIX, self.theme.text_dim)
+                } else {
+                    (LIST_PLAIN_PREFIX, self.theme.text_plain)
+                };
+                if !content_focused {
+                    style = self.theme.text_dim;
+                }
+                if card.checked {
+                    style = style.add_modifier(Modifier::CROSSED_OUT);
+                }
+                let mark = if card.checked { "\u{2713} " } else { "\u{2610} " };
+                let full_text = format!("{mark}{}", card.text);
+                let wrapped = word_wrap(&full_text, text_w, cont_w);
+                for (wi, w) in wrapped.into_iter().enumerate() {
+                    let row_prefix: &str = if wi == 0 { prefix } else { LIST_CONT_INDENT };
+                    lines.push(Line::from(vec![
+                        Span::styled(row_prefix.to_string(), style),
+                        Span::styled(w.text, style),
+                    ]));
+                }
+            }
+            frame.render_widget(Paragraph::new(lines), inner);
+        }
+
+        if footer_rows > 0 {
+            let hint = "  h/j/k/l select \u{b7} space/x toggle \u{b7} H/L move column \u{b7} o new card \u{b7} t toggle board";
+            let footer_rect = Rect {
+                x: area.x,
+                y: area.y + body_height,
+                width: area.width,
+                height: footer_rows,
+            };
+            let mut flines: Vec<Line<'static>> = Vec::with_capacity(footer_rows as usize);
+            for _ in 0..footer_rows.saturating_sub(1) {
+                flines.push(Line::from(""));
+            }
+            flines.push(Line::from(Span::styled(hint.to_string(), self.theme.text_dim)));
+            frame.render_widget(Paragraph::new(flines), footer_rect);
+        }
+    }
+
     fn render_content(&self, frame: &mut Frame, area: Rect, widget_focused: bool) {
         // `mut` so we can auto-scroll the viewport when the cursor
         // moves outside it (typing past the visible bottom in insert
@@ -1577,6 +1999,20 @@ impl NotesWidget {
             Some(n) => n.body.clone(),
             None => String::new(),
         };
+
+        // Board notes get their own layout entirely — columns laid
+        // out side by side rather than the flat word-wrapped buffer
+        // below. Only in Normal mode: Insert mode always drops back
+        // to the flat editor so typing/adding headings works exactly
+        // like any other note (see `board.rs`'s module doc).
+        if st.active.is_some() && st.mode == Mode::Normal && board::is_board(&body) {
+            let model = board::parse(&body);
+            let board_col = st.board_col;
+            let board_row = st.board_row;
+            drop(st);
+            self.render_board(frame, area, &model, board_col, board_row, content_focused);
+            return;
+        }
 
         if st.active.is_none() {
             let dim = self.theme.text_dim;
@@ -1851,6 +2287,117 @@ impl NotesWidget {
         );
     }
 
+    /// Centred, scrollable overlay showing the resolved bodies of
+    /// every `[[wikilink]]` on the board card the preview was opened
+    /// from (see `open_board_link_preview`). Bespoke rather than the
+    /// shared `crate::ui::modal` primitive — that one is a fixed-size
+    /// y/N confirm shape, this needs to fit and scroll arbitrary note
+    /// bodies.
+    fn render_link_preview_modal(&self, frame: &mut Frame, parent: Rect) {
+        let (entries, scroll) = {
+            let st = self.state.lock().expect("notes state poisoned");
+            let Some(preview) = st.board_link_preview.as_ref() else {
+                return;
+            };
+            (preview.entries.clone(), preview.scroll)
+        };
+
+        const MIN_W: u16 = 30;
+        const MIN_H: u16 = 8;
+        if parent.width < MIN_W + 2 || parent.height < MIN_H + 2 {
+            return;
+        }
+        let w = (parent.width * 4 / 5)
+            .max(MIN_W)
+            .min(parent.width.saturating_sub(2));
+        let h = (parent.height * 4 / 5)
+            .max(MIN_H)
+            .min(parent.height.saturating_sub(2));
+        let rect = Rect {
+            x: parent.x + (parent.width - w) / 2,
+            y: parent.y + (parent.height - h) / 2,
+            width: w,
+            height: h,
+        };
+        frame.render_widget(Clear, rect);
+
+        let title_bg = self.theme.text_selected.fg.unwrap_or(Color::Yellow);
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(self.theme.border_focused)
+            .title(Span::styled(
+                " Linked notes ",
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(title_bg)
+                    .add_modifier(Modifier::BOLD),
+            ));
+        let inner = block.inner(rect);
+        frame.render_widget(block, rect);
+
+        let footer_rows: u16 = 1;
+        let body_height = inner.height.saturating_sub(footer_rows);
+        let text_w = inner.width as usize;
+
+        let mut lines: Vec<Line<'static>> = Vec::new();
+        for (i, (name, body)) in entries.iter().enumerate() {
+            if i > 0 {
+                lines.push(Line::from(""));
+            }
+            lines.push(Line::from(Span::styled(
+                format!("[[{name}]]"),
+                self.theme.text_focused,
+            )));
+            match body {
+                Some(text) => {
+                    for raw_line in text.lines() {
+                        for wrap in word_wrap(raw_line, text_w, text_w) {
+                            lines.push(Line::from(Span::styled(wrap.text, self.theme.text_plain)));
+                        }
+                    }
+                }
+                None => {
+                    lines.push(Line::from(Span::styled(
+                        "  (note not found)",
+                        self.theme.text_dim,
+                    )));
+                }
+            }
+        }
+
+        let max_scroll = (lines.len() as u16).saturating_sub(body_height);
+        *self.last_link_preview_max_scroll.lock().unwrap() = max_scroll;
+        let scroll = scroll.min(max_scroll);
+
+        let visible: Vec<Line<'static>> = lines
+            .into_iter()
+            .skip(scroll as usize)
+            .take(body_height as usize)
+            .collect();
+        let body_rect = Rect {
+            x: inner.x,
+            y: inner.y,
+            width: inner.width,
+            height: body_height,
+        };
+        frame.render_widget(Paragraph::new(visible), body_rect);
+
+        let footer_rect = Rect {
+            x: inner.x,
+            y: inner.y + body_height,
+            width: inner.width,
+            height: footer_rows,
+        };
+        frame.render_widget(
+            Paragraph::new(Line::from(Span::styled(
+                "  j/k scroll  ·  any other key closes",
+                self.theme.text_dim,
+            ))),
+            footer_rect,
+        );
+    }
+
     fn handle_confirm_key(&self, key: KeyEvent) -> EventResult {
         match crate::ui::modal::dispatch_key(key) {
             crate::ui::modal::ConfirmChoice::Confirm => self.delete_active(),
@@ -1864,9 +2411,80 @@ impl NotesWidget {
         EventResult::Handled
     }
 
+    /// Open the `[[wikilink]]` preview modal for the selected board
+    /// card. No-op (with a status hint) if the card has no links.
+    /// Links are resolved against every loaded note's title — a
+    /// match is exact (trimmed), same as Obsidian's default behavior.
+    fn open_board_link_preview(&self) {
+        let mut st = self.state.lock().expect("notes state poisoned");
+        let Some(active) = st.active else { return };
+        let Some(note) = st.notes.get(active) else {
+            return;
+        };
+        let model = board::parse(&note.body);
+        let Some(card) = model
+            .columns
+            .get(st.board_col)
+            .and_then(|c| c.cards.get(st.board_row))
+        else {
+            return;
+        };
+        let links = board::extract_links(&card.text);
+        if links.is_empty() {
+            st.set_status("No [[links]] in this card");
+            return;
+        }
+        let entries = links
+            .into_iter()
+            .map(|name| {
+                let body = st
+                    .notes
+                    .iter()
+                    .find(|n| n.display_name() == name)
+                    .map(|n| n.body.clone());
+                (name, body)
+            })
+            .collect();
+        st.board_link_preview = Some(LinkPreview { entries, scroll: 0 });
+    }
+
+    /// Key dispatch while the link-preview modal is open: `j`/`k`
+    /// (and arrows) scroll, anything else closes it — same "any other
+    /// key cancels" convention as the delete-confirm modal.
+    fn handle_link_preview_key(&self, key: KeyEvent) -> EventResult {
+        let mut st = self.state.lock().expect("notes state poisoned");
+        match key.code {
+            KeyCode::Char('j') | KeyCode::Down => {
+                let max = *self.last_link_preview_max_scroll.lock().unwrap();
+                if let Some(p) = st.board_link_preview.as_mut() {
+                    p.scroll = p.scroll.saturating_add(1).min(max);
+                }
+            }
+            KeyCode::Char('k') | KeyCode::Up => {
+                if let Some(p) = st.board_link_preview.as_mut() {
+                    p.scroll = p.scroll.saturating_sub(1);
+                }
+            }
+            _ => st.board_link_preview = None,
+        }
+        EventResult::Handled
+    }
+
     fn handle_normal_key(&self, key: KeyEvent) -> EventResult {
         let mut st = self.state.lock().expect("notes state poisoned");
         st.status = None;
+
+        // Whether board-specific navigation/mutation keys apply: only
+        // when the content pane has focus and the active note carries
+        // the board marker (see `board.rs`). Gates every board-only
+        // arm below so a plain note's normal-mode behavior is
+        // unchanged.
+        let board_ctx = st.focus == SubFocus::Content
+            && st
+                .active
+                .and_then(|i| st.notes.get(i))
+                .map(|n| board::is_board(&n.body))
+                .unwrap_or(false);
 
         // Two-key chord handling. `gg` jumps to top in this view-only
         // mode; `dd` was removed because there's no cursor to anchor
@@ -1931,6 +2549,79 @@ impl NotesWidget {
             KeyCode::Char('y') => {
                 drop(st);
                 self.yank_active();
+                EventResult::Handled
+            }
+            // Toggle the active note between plain and board rendering
+            // (see `board.rs`). Works either direction; only needs
+            // content focus and an active note. Lowercase, so it
+            // doesn't collide with the app-wide Shift+<letter> widget-
+            // shortcut dispatcher.
+            KeyCode::Char('t') if st.focus == SubFocus::Content && st.active.is_some() => {
+                drop(st);
+                self.toggle_board_marker();
+                EventResult::Handled
+            }
+            // Board-only: append a new card to the selected column and
+            // drop into EDIT mode with the cursor at its end — the
+            // "add a card" affordance, mirroring vim's `o`.
+            KeyCode::Char('o') if board_ctx => {
+                drop(st);
+                self.append_board_card();
+                EventResult::Handled
+            }
+            // Board-only: toggle the selected card's checkbox.
+            KeyCode::Char(' ') | KeyCode::Char('x') if board_ctx => {
+                drop(st);
+                self.toggle_board_checkbox();
+                EventResult::Handled
+            }
+            // Board-only: open the selected card's [[wikilink]]
+            // preview — same `e`/`Enter` expand convention News,
+            // Feeds, and Email already use.
+            KeyCode::Char('e') | KeyCode::Enter if board_ctx => {
+                drop(st);
+                self.open_board_link_preview();
+                EventResult::Handled
+            }
+            // Board-only: move the selected card into the adjacent
+            // column. Shift+letter, so it's scoped to board_ctx the
+            // same way `G` reserves fallthrough to the app's global
+            // widget-shortcut dispatcher when it doesn't apply.
+            KeyCode::Char('H') if board_ctx => {
+                drop(st);
+                self.move_board_card(-1);
+                EventResult::Handled
+            }
+            KeyCode::Char('L') if board_ctx => {
+                drop(st);
+                self.move_board_card(1);
+                EventResult::Handled
+            }
+            // Board-only: k/j move the selection within the current
+            // column; l/h move it across columns, falling through to
+            // the plain h/l sub-pane-focus toggle at the left boundary
+            // (same boundary convention as the flat editor).
+            KeyCode::Char('k') | KeyCode::Up if board_ctx => {
+                st.board_row = st.board_row.saturating_sub(1);
+                EventResult::Handled
+            }
+            KeyCode::Char('j') | KeyCode::Down if board_ctx => {
+                drop(st);
+                self.move_board_selection_down();
+                EventResult::Handled
+            }
+            KeyCode::Char('l') | KeyCode::Right if board_ctx => {
+                drop(st);
+                self.move_board_column(1);
+                EventResult::Handled
+            }
+            KeyCode::Char('h') | KeyCode::Left if board_ctx => {
+                if st.board_col == 0 {
+                    st.focus = SubFocus::List;
+                } else {
+                    drop(st);
+                    self.move_board_column(-1);
+                }
                 EventResult::Handled
             }
             // `gg` / `G` are content-scroll gestures, so they only

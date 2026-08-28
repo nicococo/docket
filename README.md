@@ -166,7 +166,7 @@ the live keybinding overlay.
 | **Feeds** | tabbed single-source RSS reader (WSJ, MarketWatch, AI News, or any feed you point it at), one tab per source | any RSS/Atom feed; LLM provider for summaries |
 | **Email** | unified inbox preview with optional per-message LLM summaries | any IMAP server (app password) |
 | **Resources** | htop-style CPU / memory / top-process view | local `sysinfo` (no FFI) |
-| **Notes** | vim-flavoured multi-note pad with undo/redo, per-note files | none — plain `.md` files under `~/.config/docket/notes/` |
+| **Notes** | vim-flavoured multi-note pad with undo/redo, per-note files; any note can be toggled (`t`) into a colorful kanban-style board, columns from `## Heading` lines, cards from `- [ ]`/`- [x]` items; cards can reference other notes with `[[Note Name]]`, previewed in place with `e`/`Enter` | none — plain `.md` files under `~/.config/docket/notes/` |
 
 Turn a kind off entirely with `--no-default-features` (see
 [Slim builds](#slim-builds)), or just leave it out of `[layout]`.
@@ -244,7 +244,7 @@ border.focused = { fg = "#e07b00", modifiers = ["bold"] }
 | **Feeds** | `↑/↓` select · `←/→` topic tab · `e`/`Enter` expand · `o` open in browser · `s` LLM summary · `r` refresh · `x` clear search |
 | **Email** | `↑/↓` select · `←/→` folder · `e`/`Enter` expand · `o` open in mail client · `s` LLM summary · `u` mark read/unread · `r` refresh |
 | **Resources** | `m` toggle sort (CPU ↔ memory) · `r` force refresh |
-| **Notes** | `+` new · `-` delete · `i` insert · `Esc` normal · `h`/`l` list / content · `j`/`k` scroll · `y` yank note · `Ctrl-Z`/`Ctrl-Shift-Z` undo/redo |
+| **Notes** | `+` new · `-` delete · `i` insert · `Esc` normal · `h`/`l` list / content · `j`/`k` scroll · `y` yank note · `Ctrl-Z`/`Ctrl-Shift-Z` undo/redo · `t` toggle board · (board) `h/j/k/l` select · `space`/`x` toggle checkbox · `H`/`L` move card column · `o` new card · `e`/`Enter` preview `[[linked]]` notes |
 
 Hit `?` while running for the full overlay.
 
