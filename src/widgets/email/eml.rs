@@ -4,13 +4,16 @@
 //! Build a minimal RFC 5322 `.eml` file from an [`EmailMessage`] so
 //! `o` (open) has something to hand the OS's default handler for.
 //!
-//! Gmail IMAP accounts get a `rfc822msgid:` web search deep link
-//! instead (see `imap::gmail_web_url`) — this fallback only fires for
-//! every other IMAP host, which has no equivalent web UI to link
-//! into. Writing the message out as a standalone `.eml` and opening
-//! *that* file lets the OS's file-type association do the rest —
-//! Thunderbird, Apple Mail, Outlook desktop, and most other clients
-//! register themselves as the `.eml` handler.
+//! IMAP messages never carry a `web_url` (no provider gives a canonical
+//! web link for a raw IMAP message — see the doc comment on that
+//! field; a Gmail-specific web-search deep link was tried and reverted,
+//! since none of the account-selection tricks reliably land on the
+//! right signed-in account without an extra manual step), so "open in
+//! mail client" can't just launch a browser URL. Writing the message
+//! out as a standalone `.eml` and opening *that* file lets the OS's
+//! file-type association do the rest — Thunderbird, Apple Mail,
+//! Outlook desktop, and most other clients register themselves as the
+//! `.eml` handler.
 //!
 //! This is a read-only preview, not a faithful copy of the original
 //! wire message — headers this widget doesn't track (raw `Message-ID`,
