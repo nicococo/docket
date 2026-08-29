@@ -32,8 +32,8 @@ show_status_bar = true
 zoom_margin = 5
 
 [layout]
-columns = [50, 50]
-rows = [100]
+columns = [56, 44]
+rows = [34, 33, 33]
 
 [[layout.cells]]
 widget = "calendar"
@@ -41,6 +41,18 @@ col = 0
 row = 0
 
 [[layout.cells]]
-widget = "news"
+widget = "feeds@ai"
 col = 1
 row = 0
+row_span = 2
+
+[[layout.cells]]
+widget = "notes"
+col = 0
+row = 1
+
+[[layout.cells]]
+widget = "email"
+col = 0
+row = 2
+col_span = 2

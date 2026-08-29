@@ -1,11 +1,12 @@
 # docket
 
-A fast, keyboard-driven terminal dashboard for getting things done —
-calendar, email, notes (with a built-in kanban board), news, system
-resources, and single-source RSS feeds, all in one grid you compose
-yourself. Written in Rust with [ratatui](https://ratatui.rs).
+A fast, keyboard-driven terminal dashboard that pulls your calendar,
+email, and notes into one place, distills them with AI, and moves
+information between them — an email's action items become a Notes
+board card or a Calendar event with one keystroke, not a copy-paste
+detour. Written in Rust with [ratatui](https://ratatui.rs).
 
-![docket dashboard: calendar, a kanban notes board, and an email inbox](assets/screenshot.png)
+![docket dashboard: calendar, an AI news feed, a kanban notes board, and an email inbox](assets/screenshot.png)
 
 No accounts, no telemetry, no OAuth. Everything is plain TOML under
 `~/.config/docket/` — hand-edit it, back it up, sync it with dotfiles,
@@ -21,24 +22,24 @@ docket                          # first run seeds a working default layout
 
 ## Highlights
 
-- **Composable layout** — a grid of cells; any cell can hold a single
-  widget or a **stack** you cycle between with `.` / `,`. Run the same
-  widget kind multiple times (`calendar@work` + `calendar@personal`).
-- **Notes with a kanban board** — any note toggles (`t`) between plain
-  markdown and a colourful board view, columns from `## Heading`
-  lines, cards from `- [ ]` items — still just a `.md` file underneath.
-- **Email with AI actions** — `Enter` pops the full message with
-  one-key summarize / explain / extract. Extracted todos and dates
-  are selectable — add them straight to Notes or Calendar with `space`.
-- **Live config reload** — edit any widget's TOML, see it picked up
-  with no restart.
-- **Nine bundled colour schemes**, live-switchable (`:scheme nord`),
-  plus per-widget colour overrides.
-- **Focus Zoom** (`z`) — enlarge the focused widget over a dimmed
-  backdrop; every widget paints a richer view when it has the room.
+- **Distill, then move it where it's useful** — `Enter` on an email
+  pops the full message with one-key AI summarize / explain /
+  extract. Extracted todos and dates are selectable — `space` adds
+  them straight to Notes or Calendar. No copy-paste detour.
+- **Notes with a kanban board** — the natural landing spot for those
+  todos. Any note toggles (`t`) between plain markdown and a
+  colourful board view, columns from `## Heading` lines, cards from
+  `- [ ]` items — still just a `.md` file underneath.
+- **Calendar** — day/week/month agenda over CalDAV, ICS, or local
+  events, so the dates you pull out of an email land somewhere
+  you'll actually see them again.
 - **No wizard, no cloud** — `docket --init` seeds default TOML
   directly; hand-edit credentials under `credentials/` (0600 perms).
-  Nothing phones home that isn't in the [widget catalogue](#widget-catalogue) below.
+  No accounts, no telemetry, no OAuth, nothing phones home beyond the
+  provider you point a widget at yourself.
+- **Configurable, not the point** — live TOML reload, a composable
+  grid, nine colour schemes, Focus Zoom (`z`). All there when you want
+  to shape it, none of it what docket is actually for.
 
 ---
 
@@ -82,7 +83,8 @@ terminal; force one with `TERMINAL=alacritty …`).
 ## Quickstart
 
 First launch writes `~/.config/docket/config.toml` (a starter
-calendar + news layout) plus a default TOML per widget kind. From there:
+calendar + AI news + notes + email layout) plus a default TOML per
+widget kind. From there:
 
 1. Hand-edit `config.toml`'s `[layout]` to add/remove/rearrange panes.
 2. Edit each widget's own TOML (`calendar.toml`, `news.toml`, …) for
@@ -94,22 +96,6 @@ calendar + news layout) plus a default TOML per widget kind. From there:
 `docket --init` re-runs the seeding step any time (idempotent — only
 fills in what's missing). Press `?` while running for the full
 keybinding overlay.
-
----
-
-## Widget catalogue
-
-| widget | what it does | external services |
-|---|---|---|
-| **Calendar** | day / week / month views with event agenda | CalDAV (iCloud / Fastmail / Nextcloud), ICS/webcal feed, local TOML events |
-| **Notes** | vim-flavoured multi-note editor with undo/redo; toggle any note into a kanban board; `[[Note Name]]` links | none — plain `.md` files |
-| **Email** | unified inbox; `Enter` for a popup with AI summarize/explain/extract, extracted items addable to Notes/Calendar | any IMAP server (app password); LLM provider for AI actions |
-| **News** | RSS/Atom aggregator with topic filters, keyword search, optional LLM summaries | any RSS/Atom feed; LLM provider |
-| **Feeds** | tabbed single-source RSS reader, one tab per source | any RSS/Atom feed; LLM provider |
-| **Resources** | htop-style CPU / memory / top-process view | local only |
-
-Turn a kind off with `--no-default-features` (see [Slim
-builds](#install)), or just leave it out of `[layout]`.
 
 ---
 
@@ -179,9 +165,11 @@ docket --version
 | `~/.cache/docket/` | regenerable caches; swept after 30 days |
 | `~/.config/docket/docket.log` | runtime log |
 
-docket never sends data anywhere not named in the [widget
-catalogue](#widget-catalogue)'s external-services column — no
-telemetry, no OAuth, no docket-owned backend.
+docket never sends data anywhere except the provider you point a
+widget at yourself (a CalDAV server, an IMAP host, an LLM API) — no
+telemetry, no OAuth, no docket-owned backend. See
+[INSTRUCTIONS.md](INSTRUCTIONS.md) for exactly what each provider
+needs.
 
 Credentials are plain TOML, 0600, atomic writes — same convention as
 `aws`/`gcloud`/`gh`/`ssh`. That protects against other local users and
@@ -215,17 +203,29 @@ full picture. Issues and PRs welcome.
 
 ## Origins
 
-docket is a hard fork of [**glint**](https://github.com/ntrospect0/glint)
-by [**ntrospect0**](https://github.com/ntrospect0) — every widget
-engine, the rendering pipeline, the config/cache architecture, is
-ntrospect0's design. glint aims to be general-purpose: whatever mix of
-stocks, weather, calendar, and news you want, composed your way.
-docket exists because I wanted something narrower — opinionated around
-my own work and project management, not a general-purpose canvas. So
-rather than pile options onto glint, I forked it and pointed it one
-direction. This is a standalone project now; it doesn't track glint's
-upstream. If you want the general-purpose dashboard, go use glint —
-this project wouldn't exist without it.
+docket is a hard fork of [**glint**](https://github.com/ntrospect0/glint),
+a fast, keyboard-driven terminal dashboard written by
+[**ntrospect0**](https://github.com/ntrospect0). Every widget engine,
+the rendering pipeline, the config/cache architecture — the whole
+foundation this project stands on — is ntrospect0's design and work.
+glint's own goal is to be a general-purpose, highly adaptable
+dashboard: whatever mix of stocks, weather, calendar, news, and more
+you want, composed your way. That idea, and the care put into making
+it genuinely pleasant to use in a terminal, is what made this fork
+worth doing in the first place — thank you, ntrospect0.
+
+docket exists because I wanted something narrower and more
+opinionated: not a general-purpose canvas of widgets you configure,
+but a dashboard purpose-built around pulling my own information
+sources together, distilling them, and moving what matters between
+them with as little friction as possible. That's a different design
+goal than glint's, not a better one, so rather than pile my opinions
+onto glint as options and flags, I forked it and started shaping it
+toward that one purpose. This is a standalone project going forward —
+it doesn't track glint's upstream changes, and its own direction will
+keep diverging further this way over time. If you want the
+general-purpose dashboard, go use glint; it's great, and this project
+wouldn't exist without it.
 
 ## License
 

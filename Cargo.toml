@@ -2,7 +2,7 @@
 name = "docket-tui"
 version = "0.1.0"
 edition = "2021"
-description = "A fast, opinionated terminal dashboard for work and project management — forked from glint"
+description = "A fast terminal dashboard that pulls calendar, email, and notes together, distills them with AI, and moves information between them — forked from glint"
 license = "GPL-3.0-or-later"
 repository = "https://github.com/nicococo/docket"
 keywords = ["tui", "dashboard", "terminal", "productivity", "ratatui"]

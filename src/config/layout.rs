@@ -117,13 +117,18 @@ fn default_span() -> usize {
 }
 
 fn default_columns() -> Vec<u16> {
-    vec![50, 50]
+    vec![56, 44]
 }
 
 fn default_rows() -> Vec<u16> {
-    vec![100]
+    vec![34, 33, 33]
 }
 
+/// Mirrors `config/defaults/config.toml`'s `[layout]` — kept in sync
+/// by hand since one is TOML seeded to disk and the other is this
+/// Rust-level fallback for a hand-edited config.toml that omits
+/// `[layout]` entirely. A calendar/notes/AI-news/email grid, the same
+/// shape a docket dashboard actually gets used for day to day.
 fn default_cells() -> Vec<GridCell> {
     vec![
         GridCell {
@@ -135,11 +140,27 @@ fn default_cells() -> Vec<GridCell> {
             row_span: 1,
         },
         GridCell {
-            widget: Some("news".into()),
+            widget: Some("feeds@ai".into()),
             widgets: None,
             col: 1,
             row: 0,
             col_span: 1,
+            row_span: 2,
+        },
+        GridCell {
+            widget: Some("notes".into()),
+            widgets: None,
+            col: 0,
+            row: 1,
+            col_span: 1,
+            row_span: 1,
+        },
+        GridCell {
+            widget: Some("email".into()),
+            widgets: None,
+            col: 0,
+            row: 2,
+            col_span: 2,
             row_span: 1,
         },
     ]
@@ -228,15 +249,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn default_layout_has_two_cells() {
+    fn default_layout_has_four_cells() {
         let layout = LayoutConfig::default();
-        assert_eq!(layout.cells.len(), 2);
+        assert_eq!(layout.cells.len(), 4);
         let widgets: Vec<String> = layout
             .cells
             .iter()
             .map(|c| c.primary_widget().unwrap_or_default())
             .collect();
-        assert_eq!(widgets, vec!["calendar", "news"]);
+        assert_eq!(widgets, vec!["calendar", "feeds@ai", "notes", "email"]);
     }
 
     #[test]
@@ -244,18 +265,23 @@ mod tests {
         let layout = LayoutConfig::default();
         let area = Rect::new(0, 0, 100, 40);
         let resolved = layout.resolve(area);
-        assert_eq!(resolved.len(), 2);
+        assert_eq!(resolved.len(), 4);
 
-        // Calendar left, news right.
+        // Calendar top-left, AI feeds top-right (spanning both rows above email).
         assert_eq!(
             resolved[0].cell.primary_widget().as_deref(),
             Some("calendar")
         );
         assert_eq!(resolved[0].area.x, 0);
         assert_eq!(resolved[0].area.y, 0);
-        assert_eq!(resolved[1].cell.primary_widget().as_deref(), Some("news"));
+        assert_eq!(
+            resolved[1].cell.primary_widget().as_deref(),
+            Some("feeds@ai")
+        );
         assert_eq!(resolved[1].area.y, 0);
         assert!(resolved[1].area.x > 0);
+        assert_eq!(resolved[2].cell.primary_widget().as_deref(), Some("notes"));
+        assert_eq!(resolved[3].cell.primary_widget().as_deref(), Some("email"));
     }
 
     #[test]

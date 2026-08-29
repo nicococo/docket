@@ -1579,7 +1579,7 @@ mod tests {
         );
         assert_eq!(
             widget_at(&app, area, 80, 2).map(|(id, _)| id),
-            Some("news".to_string())
+            Some("feeds@ai".to_string())
         );
         // Status bar row — last row of the area — should be unfocusable.
         assert!(widget_at(&app, area, 50, 39).is_none());
@@ -1592,15 +1592,24 @@ mod tests {
         let mut app = App::new(config);
         assert_eq!(
             app.focus_order,
-            vec!["calendar".to_string(), "news".to_string()]
+            vec![
+                "calendar".to_string(),
+                "feeds@ai".to_string(),
+                "notes".to_string(),
+                "email".to_string(),
+            ]
         );
         assert_eq!(app.focused_widget(), Some("calendar"));
         app.cycle_focus(true);
-        assert_eq!(app.focused_widget(), Some("news"));
+        assert_eq!(app.focused_widget(), Some("feeds@ai"));
+        app.cycle_focus(true);
+        assert_eq!(app.focused_widget(), Some("notes"));
+        app.cycle_focus(true);
+        assert_eq!(app.focused_widget(), Some("email"));
         app.cycle_focus(true);
         assert_eq!(app.focused_widget(), Some("calendar"));
         app.cycle_focus(false);
-        assert_eq!(app.focused_widget(), Some("news"));
+        assert_eq!(app.focused_widget(), Some("email"));
     }
 
     #[cfg(feature = "widgets-all")]
@@ -1800,9 +1809,9 @@ mod tests {
     #[test]
     fn exit_zoom_clears_target_and_restores_focus() {
         let mut app = App::new(Config::default());
-        // Move focus to news (index 1), then zoom.
+        // Move focus to feeds@ai (index 1), then zoom.
         app.cycle_focus(true);
-        assert_eq!(app.focused_widget(), Some("news"));
+        assert_eq!(app.focused_widget(), Some("feeds@ai"));
         app.zoom_enter();
         assert!(app.zoom_target.is_some());
         // Advance focus without exiting zoom — simulates what a retarget call might do.
@@ -1810,7 +1819,7 @@ mod tests {
         app.exit_zoom();
         assert!(app.zoom_target.is_none());
         // exit_zoom restores focus_idx to the zoomed widget's position.
-        assert_eq!(app.focused_widget(), Some("news"));
+        assert_eq!(app.focused_widget(), Some("feeds@ai"));
     }
 
     /// Pressing `z` while already zoomed exits zoom (no nested zoom).

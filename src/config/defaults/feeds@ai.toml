@@ -1,0 +1,57 @@
+# AI / ML news — a tabbed single-source reader, one tab per feed
+# below. `docket --init` seeds this alongside a default layout cell
+# (`feeds@ai`) so there's real content on first launch.
+
+poll_interval_secs = 900
+default_summary_length = "medium"
+
+# Preferred Shift+<letter> shortcut keys. First-fit: the app claims
+# the first letter not already taken by another widget.
+shortcuts = ["A", "I"]
+
+# Per-instance command aliases — :ai <terms>, :ai-summary, :ai-refresh
+# on top of the always-available kind-level :feeds* commands.
+commands = ["ai"]
+
+# Active feeds — each becomes a tab (←/→ to switch). Comment one out
+# to disable it, or add your own.
+
+[[feeds]]
+topic = "Research"
+url = "https://www.marktechpost.com/feed"
+
+[[feeds]]
+topic = "HF"
+url = "https://huggingface.co/blog/feed.xml"
+
+[[feeds]]
+topic = "Venture"
+url = "https://venturebeat.com/category/ai/feed/"
+
+[[feeds]]
+topic = "News"
+url = "https://aiwire.net/feed/"
+
+[[feeds]]
+topic = "Weekly"
+url = "https://lastweekin.ai/feed/"
+
+[[feeds]]
+topic = "Papers"
+url = "https://www.thegradient.pub/rss/"
+
+[[feeds]]
+topic = "OpenAI"
+url = "https://openai.com/news/rss.xml"
+
+[[feeds]]
+topic = "r/LocalLLaMA"
+url = "https://www.reddit.com/r/LocalLLaMA/.rss"
+
+[[feeds]]
+topic = "r/MLNews"
+url = "https://www.reddit.com/r/machinelearningnews/.rss"
+
+[[feeds]]
+topic = "Data Science"
+url = "https://towardsdatascience.com/feed"

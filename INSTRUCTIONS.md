@@ -244,6 +244,6 @@ Every `.toml` is plain text — edit in your favourite editor and either restart
 
 ## Further reading
 
-- `README.md` — install, keybindings, color schemes, multi-instance widgets, widget catalogue, external dependencies.
+- `README.md` — install, keybindings, color schemes, configuration.
 - `AGENTS.md` — architecture overview for contributors and AI assistants.
 - https://github.com/nicococo/docket — source, issues, releases.

@@ -110,6 +110,8 @@ pub const DEFAULT_CONFIG_TOML: &str = include_str!("defaults/config.toml");
 
 pub const DEFAULT_NEWS_TOML: &str = include_str!("defaults/news.toml");
 
+pub const DEFAULT_FEEDS_AI_TOML: &str = include_str!("defaults/feeds@ai.toml");
+
 pub const DEFAULT_COLORSCHEMES_TOML: &str = include_str!("defaults/colorschemes.toml");
 
 pub const DEFAULT_LLM_TOML: &str = include_str!("defaults/llm.toml");
@@ -135,6 +137,7 @@ pub fn init_default_config() -> Result<PathBuf> {
     seed(&dir.join("config.toml"), DEFAULT_CONFIG_TOML)?;
     seed(&dir.join("calendar.toml"), DEFAULT_CALENDAR_TOML)?;
     seed(&dir.join("news.toml"), DEFAULT_NEWS_TOML)?;
+    seed(&dir.join("feeds@ai.toml"), DEFAULT_FEEDS_AI_TOML)?;
     seed(&dir.join("llm.toml"), DEFAULT_LLM_TOML)?;
 
     let creds = dir.join("credentials");
@@ -189,7 +192,7 @@ mod tests {
     fn default_config_parses() {
         let cfg: Config = toml::from_str(DEFAULT_CONFIG_TOML).expect("default config should parse");
         assert_eq!(cfg.version, 1);
-        assert_eq!(cfg.layout.cells.len(), 2);
+        assert_eq!(cfg.layout.cells.len(), 4);
         assert_eq!(cfg.global.command_key, ":");
     }
 
@@ -197,7 +200,7 @@ mod tests {
     fn minimal_config_uses_defaults() {
         let cfg: Config = toml::from_str("").expect("empty config should parse");
         assert_eq!(cfg.version, 1);
-        assert_eq!(cfg.layout.cells.len(), 2);
+        assert_eq!(cfg.layout.cells.len(), 4);
     }
 
     #[test]
@@ -293,6 +296,15 @@ mod tests {
             assert!(
                 !news.feeds.is_empty(),
                 "news seed should ship example feeds"
+            );
+        }
+        #[cfg(feature = "widget-feeds")]
+        {
+            let ai: crate::widgets::feeds::FeedsConfig =
+                toml::from_str(DEFAULT_FEEDS_AI_TOML).expect("feeds@ai seed should parse");
+            assert!(
+                !ai.feeds.is_empty(),
+                "feeds@ai seed should ship example feeds — it's in the default layout"
             );
         }
         let llm: crate::llm::LlmConfig =
