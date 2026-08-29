@@ -1,10 +1,12 @@
 # docket
 
-A fast, keyboard-driven terminal dashboard that pulls your calendar,
-email, and notes into one place, distills them with AI, and moves
-information between them — an email's action items become a Notes
+A fast, keyboard-driven terminal dashboard that pulls your
+information sources into one place, distills them with AI, and moves
+what matters between them — an email's action items become a Notes
 board card or a Calendar event with one keystroke, not a copy-paste
-detour. Written in Rust with [ratatui](https://ratatui.rs).
+detour. Calendar, email, and notes today; Slack, research/paper
+feeds, and deeper project-management integration are next. Written
+in Rust with [ratatui](https://ratatui.rs).
 
 ![docket dashboard: calendar, an AI news feed, a kanban notes board, and an email inbox](assets/screenshot.png)
 
