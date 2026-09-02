@@ -13,51 +13,41 @@
 //! 4. Append a `WidgetDescriptor` to [`WIDGETS`] below.
 //!
 //! No edits to `app.rs` or `main.rs` required.
-//! Registration and first-run defaults all walk `WIDGETS`.
 
 use super::{Widget, WidgetCtx, WidgetFactory};
 
 /// Static description of a widget kind.
 pub struct WidgetDescriptor {
-    /// Stable kind string used in `layout.toml` cells and `<kind>.toml`
-    /// config filenames. Must match the widget module's `KIND` constant.
+    /// Stable kind string used in the fixed pane layout and
+    /// `<kind>[@<instance>].toml` config filenames. Must match the
+    /// widget module's `KIND` constant.
     pub kind: &'static str,
 
     /// Factory that reads the widget's TOML and constructs an instance.
     pub factory: WidgetFactory,
-
-    /// Whether this widget appears in the empty-layout fallback grid. Set
-    /// to `false` for auxiliary widgets that the user should opt into by
-    /// editing `config.toml`.
-    pub default_in_first_run: bool,
 }
 
-/// The full set of widgets compiled into this build. Order is significant
-/// — it sets the empty-layout fallback registration order.
+/// The full set of widgets compiled into this build.
 pub const WIDGETS: &[WidgetDescriptor] = &[
     #[cfg(feature = "widget-calendar")]
     WidgetDescriptor {
         kind: super::calendar::KIND,
         factory: super::calendar::build,
-        default_in_first_run: true,
     },
     #[cfg(feature = "widget-email")]
     WidgetDescriptor {
         kind: super::email::KIND,
         factory: super::email::build,
-        default_in_first_run: false,
     },
     #[cfg(feature = "widget-notes")]
     WidgetDescriptor {
         kind: super::notes::KIND,
         factory: super::notes::build,
-        default_in_first_run: false,
     },
     #[cfg(feature = "widget-feeds")]
     WidgetDescriptor {
         kind: super::feeds::KIND,
         factory: super::feeds::build,
-        default_in_first_run: false,
     },
 ];
 
@@ -69,7 +59,7 @@ pub fn find(kind: &str) -> Option<&'static WidgetDescriptor> {
 
 /// Build a widget for `(kind, instance)` via the registry. `make_ctx`
 /// produces the [`WidgetCtx`] stamped with the supplied instance. Returns
-/// `None` for unknown kinds so callers can warn and skip on layout typos.
+/// `None` for unknown kinds so callers can warn and skip.
 pub fn build_for(
     kind: &str,
     instance: &str,
@@ -78,14 +68,6 @@ pub fn build_for(
     let desc = find(kind)?;
     let ctx = make_ctx(instance.to_string());
     Some((desc.factory)(&ctx))
-}
-
-/// Kinds that seed the empty-layout fallback grid.
-pub fn default_kinds() -> impl Iterator<Item = &'static str> {
-    WIDGETS
-        .iter()
-        .filter(|d| d.default_in_first_run)
-        .map(|d| d.kind)
 }
 
 #[cfg(test)]

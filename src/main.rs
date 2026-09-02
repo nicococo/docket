@@ -19,6 +19,7 @@ mod event;
 mod format;
 mod http;
 mod llm;
+mod pane_layout;
 mod polling;
 mod runtime_state;
 mod text;

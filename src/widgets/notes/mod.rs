@@ -1553,21 +1553,12 @@ impl Widget for NotesWidget {
         self.shortcut = shortcut;
     }
 
-    fn shortcut(&self) -> Option<char> {
-        self.shortcut
-    }
-
     fn is_capturing_text(&self) -> bool {
         self.state
             .lock()
             .expect("notes state poisoned")
             .mode
             == Mode::Insert
-    }
-
-    fn title_metadata(&self) -> Option<String> {
-        let st = self.state.lock().expect("notes state poisoned");
-        self.derive_title_metadata(&st)
     }
 }
 

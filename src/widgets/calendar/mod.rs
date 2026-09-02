@@ -2550,14 +2550,6 @@ impl Widget for CalendarWidget {
     fn set_shortcut(&mut self, shortcut: Option<char>) {
         self.shortcut = shortcut;
     }
-
-    fn shortcut(&self) -> Option<char> {
-        self.shortcut
-    }
-
-    fn title_metadata(&self) -> Option<String> {
-        Some(self.title_metadata_string())
-    }
 }
 
 impl CalendarWidget {

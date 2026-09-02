@@ -2013,20 +2013,6 @@ impl Widget for FeedsWidget {
     fn set_shortcut(&mut self, shortcut: Option<char>) {
         self.shortcut = shortcut;
     }
-
-    fn shortcut(&self) -> Option<char> {
-        self.shortcut
-    }
-
-    fn title_metadata(&self) -> Option<String> {
-        let count = self
-            .state
-            .lock()
-            .expect("feeds state poisoned")
-            .articles
-            .len();
-        Some(format!("{count} articles"))
-    }
 }
 
 pub fn build(ctx: &WidgetCtx) -> Box<dyn Widget> {

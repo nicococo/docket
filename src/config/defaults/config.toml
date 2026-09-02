@@ -30,29 +30,3 @@ show_status_bar = true
 # bottom]; 4 values set [top, right, bottom, left]. Each side must be 0–45
 # and top+bottom / left+right must each be ≤90. Invalid values fall back to 5.
 zoom_margin = 5
-
-[layout]
-columns = [56, 44]
-rows = [34, 33, 33]
-
-[[layout.cells]]
-widget = "calendar"
-col = 0
-row = 0
-
-[[layout.cells]]
-widget = "feeds@ai"
-col = 1
-row = 0
-row_span = 2
-
-[[layout.cells]]
-widget = "notes"
-col = 0
-row = 1
-
-[[layout.cells]]
-widget = "email"
-col = 0
-row = 2
-col_span = 2

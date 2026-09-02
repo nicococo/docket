@@ -12,7 +12,6 @@ pub mod email;
 #[cfg(feature = "widget-notes")]
 pub mod notes;
 pub mod registry;
-pub mod stack;
 #[cfg(feature = "widget-feeds")]
 pub mod feeds;
 
@@ -209,73 +208,6 @@ pub trait Widget: Send + Sync {
     /// paint the highlight inside their title.
     fn set_shortcut(&mut self, _shortcut: Option<char>) {}
 
-    /// The letter actually granted (or `None` if all preferences were
-    /// taken). Default returns `None`; widgets that store their
-    /// shortcut should override to return their cached field.
-    /// Used by composite widgets (stacks) to surface each child's
-    /// shortcut in their tab strip without each child having to
-    /// expose internal fields.
-    fn shortcut(&self) -> Option<char> {
-        None
-    }
-
-    /// Dynamic suffix that the widget would normally append to its
-    /// own title (e.g. "47 articles", "[imap] alice@example.com").
-    /// Returns `None` when the widget has no metadata to surface.
-    ///
-    /// Used by stack widgets to render `<tab> <tab> — <active metadata>`
-    /// on the top border row in place of the active child's full
-    /// title, since the stack owns that row. Should not include the
-    /// widget's display name — only the suffix after it.
-    fn title_metadata(&self) -> Option<String> {
-        None
-    }
-
-    /// IDs of widgets owned by this widget (used by stack widgets only).
-    /// Returns an empty vec for leaf widgets. The shortcut dispatcher
-    /// walks these to assign `Shift+<letter>` to children inside a
-    /// stack — see `app::assign_shortcuts`.
-    fn composite_children(&self) -> Vec<String> {
-        Vec::new()
-    }
-
-    /// Borrow a child by id (composite widgets only). Default returns
-    /// `None`, which means the leaf widget owns no children. Stack
-    /// widgets return `Some(&mut child)` so the shortcut dispatcher
-    /// can call `set_shortcut` on the right widget and so the runtime
-    /// can route Shift+letter into the right pane.
-    fn composite_child_mut(&mut self, _child_id: &str) -> Option<&mut dyn Widget> {
-        None
-    }
-
-    /// Read-only sibling of [`composite_child_mut`]. Used by the help
-    /// overlay so it can list every stack child's keybindings — even
-    /// the hidden tabs — without needing mutable access to the manager.
-    fn composite_child(&self, _child_id: &str) -> Option<&dyn Widget> {
-        None
-    }
-
-    /// For composite widgets: make the named child the active one.
-    /// Returns `true` when the id matched and the widget switched.
-    /// Default returns `false` (leaf widgets have nothing to switch).
-    fn switch_to_composite_child(&mut self, _child_id: &str) -> bool {
-        false
-    }
-
-    /// For composite widgets (stacks): the currently-active child's
-    /// index. `None` for leaf widgets. Used by the runtime to
-    /// persist active-tab state across runs.
-    fn composite_active_index(&self) -> Option<usize> {
-        None
-    }
-
-    /// For composite widgets (stacks): set the active child by
-    /// index. No-op (and returns `false`) for leaf widgets or for
-    /// out-of-range indices.
-    fn set_composite_active_index(&mut self, _idx: usize) -> bool {
-        false
-    }
-
     /// Returns `true` while the widget is actively capturing text input —
     /// i.e., a navigation key like `Tab` or `Shift+<letter>` should be
     /// treated as a literal character rather than a focus gesture.
@@ -292,27 +224,23 @@ pub trait Widget: Send + Sync {
     /// Drain any "please bring me to the front" signal the widget has
     /// queued internally. The app polls this each tick; when `Some`,
     /// it promotes the named widget the same way `Shift+<letter>`
-    /// does — walking the stack ancestry to flip the right tab
-    /// visible and shifting input focus. The default returns `None`;
+    /// does, shifting input focus to it. The default returns `None`;
     /// widgets opt in when they need to grab attention (timer alarm
     /// fires, urgent notification, …). The returned id should be the
-    /// widget's *own* id (or a child id when the widget itself is a
-    /// composite). Treat this as a one-shot — the widget must clear
-    /// its internal flag inside this call so the app doesn't promote
-    /// repeatedly.
+    /// widget's own id. Treat this as a one-shot — the widget must
+    /// clear its internal flag inside this call so the app doesn't
+    /// promote repeatedly.
     fn take_focus_request(&mut self) -> Option<FocusRequest> {
         None
     }
 }
 
 /// Widget-initiated attention grab. The app's tick loop polls every
-/// widget via `take_focus_request` and, on `Some`, walks the layout
-/// to surface the named widget.
+/// widget via `take_focus_request` and, on `Some`, focuses the named
+/// widget.
 #[derive(Debug, Clone)]
 pub struct FocusRequest {
-    /// Id of the widget that should become focused. If the widget is
-    /// a stack child, the app flips its parent stack's active tab to
-    /// match before shifting focus.
+    /// Id of the widget that should become focused.
     pub widget_id: String,
 }
 

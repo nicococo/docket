@@ -2515,25 +2515,6 @@ impl Widget for EmailWidget {
     fn set_shortcut(&mut self, shortcut: Option<char>) {
         self.shortcut = shortcut;
     }
-
-    fn shortcut(&self) -> Option<char> {
-        self.shortcut
-    }
-
-    fn title_metadata(&self) -> Option<String> {
-        // Match the standalone email title's suffix: `[imap]
-        // alice@example.com` when the account has resolved; just
-        // `[imap]` until then.
-        let label = self.provider_label.as_str();
-        if label.is_empty() {
-            return None;
-        }
-        let account = self.state.lock().ok().and_then(|st| st.account.clone());
-        match account {
-            Some(addr) => Some(format!("[{label}] {addr}")),
-            None => Some(format!("[{label}]")),
-        }
-    }
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────────

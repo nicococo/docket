@@ -2,7 +2,6 @@
 // Copyright (C) 2026 ntrospect0
 // Copyright (C) 2026 nicococo
 
-pub mod layout;
 pub mod types;
 pub mod watcher;
 
@@ -11,7 +10,6 @@ use std::sync::RwLock;
 
 use anyhow::{Context, Result};
 
-pub use layout::LayoutConfig;
 pub use types::Config;
 pub use types::ZoomMargin;
 
@@ -189,7 +187,6 @@ mod tests {
     fn default_config_parses() {
         let cfg: Config = toml::from_str(DEFAULT_CONFIG_TOML).expect("default config should parse");
         assert_eq!(cfg.version, 1);
-        assert_eq!(cfg.layout.cells.len(), 4);
         assert_eq!(cfg.global.command_key, ":");
     }
 
@@ -197,7 +194,6 @@ mod tests {
     fn minimal_config_uses_defaults() {
         let cfg: Config = toml::from_str("").expect("empty config should parse");
         assert_eq!(cfg.version, 1);
-        assert_eq!(cfg.layout.cells.len(), 4);
     }
 
     #[test]

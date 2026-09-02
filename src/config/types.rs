@@ -8,8 +8,6 @@ use serde::{
 };
 use std::fmt;
 
-use super::layout::LayoutConfig;
-
 #[derive(Debug, Clone, Deserialize)]
 pub struct Config {
     #[allow(dead_code)] // read when migrating configs across versions.
@@ -18,9 +16,6 @@ pub struct Config {
 
     #[serde(default)]
     pub global: GlobalConfig,
-
-    #[serde(default)]
-    pub layout: LayoutConfig,
 }
 
 fn default_version() -> u32 {
@@ -52,14 +47,15 @@ pub struct GlobalConfig {
     #[serde(default)]
     pub mouse_scroll: MouseScroll,
 
-    /// Polling cadence multiplier for widgets hidden inside a stack.
-    /// `1` = full rate; `20` (default) = hidden children's `update()`
-    /// is called every 20th tick (~5s at the 250ms tick rate); higher
-    /// = even less frequent. Saves CPU + API calls for stacks the user
-    /// doesn't actively switch through. Visible / non-stacked widgets
-    /// are unaffected.
-    #[serde(default = "default_stack_hidden_poll_ratio")]
-    pub stack_hidden_poll_ratio: u32,
+    /// Polling cadence multiplier for widgets in the background while
+    /// zoom is active. `1` = full rate; `20` (default) = a backdrop
+    /// widget's `update()` is called every 20th tick (~5s at the
+    /// 250ms tick rate); higher = even less frequent. Saves CPU + API
+    /// calls for the three panes you're not looking at while zoomed
+    /// into the fourth. The zoomed widget itself always updates at
+    /// full rate.
+    #[serde(default = "default_background_poll_ratio")]
+    pub background_poll_ratio: u32,
 
     /// Bottom-of-screen status bar (`docket vX.Y.Z │ clock │ Focus │
     /// Scheme │ hints`). `true` (default) shows the row; `false` hides
@@ -87,7 +83,7 @@ pub struct GlobalConfig {
     pub zoom_margin: ZoomMargin,
 }
 
-fn default_stack_hidden_poll_ratio() -> u32 {
+fn default_background_poll_ratio() -> u32 {
     20
 }
 
@@ -128,7 +124,7 @@ impl Default for GlobalConfig {
             log_level: default_log_level(),
             log_file: None,
             mouse_scroll: MouseScroll::default(),
-            stack_hidden_poll_ratio: default_stack_hidden_poll_ratio(),
+            background_poll_ratio: default_background_poll_ratio(),
             show_status_bar: default_show_status_bar(),
             zoom_margin: ZoomMargin::default(),
         }
@@ -140,7 +136,6 @@ impl Default for Config {
         Self {
             version: default_version(),
             global: GlobalConfig::default(),
-            layout: LayoutConfig::default(),
         }
     }
 }

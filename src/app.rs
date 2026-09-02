@@ -27,6 +27,7 @@ use crate::{
     config::{self, Config},
     event::{Event, EventReader},
     llm::{self, LlmConfig, LlmProvider},
+    pane_layout::{PaneAreas, FOCUS_ORDER},
     theme::{self, Theme},
     ui,
     widgets::{parse_widget_ref, registry, AppContext, EventResult, WidgetCtx, WidgetManager},
@@ -42,16 +43,12 @@ pub struct App {
     theme: Arc<Theme>,
     manager: WidgetManager,
     focus_idx: usize,
-    /// Widget ids in layout order (Tab cycles through this).
+    /// Widget ids in fixed pane order (Tab cycles through this). A
+    /// subset of `pane_layout::FOCUS_ORDER` — panes whose widget
+    /// feature isn't compiled in are skipped.
     focus_order: Vec<String>,
-    /// `Shift+<letter>` → `(focus_target_id, optional_child_id)`. For
-    /// leaf widgets the child is `None`; for widgets inside a stack
-    /// the child id is the kind-specific widget id and the focus
-    /// target id is the stack's synthetic id. The dispatcher in
-    /// `handle_global_key` uses the child id to also call
-    /// `switch_to_composite_child` so the right tab becomes visible
-    /// before focus lands.
-    shortcuts: HashMap<char, (String, Option<String>)>,
+    /// `Shift+<letter>` → target widget id.
+    shortcuts: HashMap<char, String>,
     should_quit: bool,
     show_help: bool,
     help_scroll: u16,
@@ -66,12 +63,6 @@ pub struct App {
     /// `FEEDBACK_TTL` so the message disappears on its own without the
     /// user having to dismiss it.
     command_feedback: Option<(String, ui::FeedbackSeverity, Instant)>,
-    /// Snapshot of stack active-tab indices as of the last
-    /// `runtime_state.toml` write. After each input tick we recompute
-    /// the current snapshot and save only if it differs from this —
-    /// avoids a disk write on every keypress while still persisting
-    /// every meaningful change.
-    last_persisted_stack_state: HashMap<String, usize>,
     /// Cached pixels + bookkeeping from the previous draw. The
     /// partial-render path blits unchanged cells from here into the
     /// new frame instead of re-running their `render()`. See
@@ -82,9 +73,9 @@ pub struct App {
     /// overlay in `ui::render` and the zoom-active event dispatch branch.
     zoom_target: Option<ZoomTarget>,
     /// Wrapping tick counter used to throttle backdrop widget polls while zoom
-    /// is active.  Incremented every `Event::Tick`; backdrop widgets only call
-    /// `update()` when `counter % stack_hidden_poll_ratio == 0` (mirroring how
-    /// `StackWidget` gates hidden children).  Reset to 0 at startup.
+    /// is active. Incremented every `Event::Tick`; backdrop widgets only call
+    /// `update()` when `counter % background_poll_ratio == 0`. Reset to 0 at
+    /// startup.
     zoom_backdrop_tick_counter: u64,
 }
 
@@ -123,36 +114,10 @@ impl App {
         }
 
         let mut manager = WidgetManager::new();
-        register_widgets_from_layout(
-            &mut manager,
-            &config,
-            theme.clone(),
-            llm_provider.clone(),
-            &cache,
-        );
+        register_default_widgets(&mut manager, theme.clone(), llm_provider, &cache);
 
-        // If the layout produced no recognizable widgets (empty layout, or
-        // every cell references an unknown kind), fall back to the original
-        // five-widget seed so first-run with an empty config still shows
-        // something useful.
-        if manager.ids().is_empty() {
-            register_default_widgets(&mut manager, theme.clone(), llm_provider, &cache);
-        }
-
-        // Restore each stack's previously-visible tab from the
-        // runtime-state file (or default to slot 0 if no entry).
-        // Done after registration so the targets exist in the
-        // manager.
-        let runtime_state = crate::runtime_state::load();
-        for (stack_id, entry) in &runtime_state.stacks {
-            if let Some(widget) = manager.get_mut(stack_id) {
-                widget.set_composite_active_index(entry.active_tab);
-            }
-        }
-
-        let focus_order = focus_order_from_layout(&config, &manager);
+        let focus_order = focus_order_from_manager(&manager);
         let shortcuts = assign_shortcuts(&mut manager);
-        let last_persisted_stack_state = collect_stack_snapshot(&manager);
         Self {
             config,
             theme,
@@ -166,43 +131,10 @@ impl App {
             help_scroll_max: Cell::new(0),
             command_buffer: None,
             command_feedback: None,
-            last_persisted_stack_state,
             partial_draw: ui::PartialDrawCache::default(),
             zoom_target: None,
             zoom_backdrop_tick_counter: 0,
         }
-    }
-
-    /// Walk all registered widgets and persist any stack-active-tab
-    /// changes since the last save. Cheap when nothing changed (just a
-    /// HashMap rebuild + comparison); does the disk write only on
-    /// diff. Called from the event loop after every input tick.
-    fn persist_runtime_state_if_dirty(&mut self) {
-        let current = collect_stack_snapshot(&self.manager);
-        if current == self.last_persisted_stack_state {
-            return;
-        }
-        // Load existing state first so we don't wipe per-widget data
-        // (e.g. clock timer durations) when writing back just the
-        // stack snapshot. Widgets manage their own keys; this routine
-        // only owns the `stacks` section.
-        let mut payload = crate::runtime_state::load();
-        payload.stacks = current
-            .iter()
-            .map(|(id, active)| {
-                (
-                    id.clone(),
-                    crate::runtime_state::StackEntry {
-                        active_tab: *active,
-                    },
-                )
-            })
-            .collect();
-        if let Err(err) = crate::runtime_state::save(&payload) {
-            tracing::warn!(error = %err, "failed to persist runtime state");
-            return;
-        }
-        self.last_persisted_stack_state = current;
     }
 
     /// Adjust the help overlay's vertical scroll by `delta` rows. Clamps
@@ -275,7 +207,6 @@ impl App {
     /// instead of three identical edits.
     fn render_state(&self) -> ui::RenderState<'_> {
         ui::RenderState {
-            layout: &self.config.layout,
             manager: &self.manager,
             focused: self.focused_widget(),
             show_help: self.show_help,
@@ -303,62 +234,25 @@ impl App {
         };
     }
 
-    /// Shift input focus + visible-stack-tab to the widget with the
-    /// given id. Mirrors the `Shift+<letter>` dispatcher's promotion
-    /// logic but is addressable by widget id rather than shortcut
-    /// letter — used by widget-initiated focus requests (timer alarm,
-    /// etc.) and any future "jump to this widget" plumbing. Returns
+    /// Shift input focus to the widget with the given id — used by
+    /// widget-initiated focus requests (timer alarm, etc.). Returns
     /// `true` when the widget was found and focus was changed.
     fn promote_to_widget(&mut self, target_id: &str) -> bool {
-        // Direct top-level match.
         if let Some(pos) = self.focus_order.iter().position(|w| w == target_id) {
             self.focus_idx = pos;
             return true;
         }
-        // Otherwise the target is a stack child. Snapshot the
-        // (parent_id, children) pairs first so we can mutate the
-        // manager inside the loop without aliasing.
-        let parents: Vec<(String, Vec<String>)> = self
-            .focus_order
-            .iter()
-            .map(|id| {
-                let children = self
-                    .manager
-                    .get(id)
-                    .map(|w| w.composite_children())
-                    .unwrap_or_default();
-                (id.clone(), children)
-            })
-            .collect();
-        for (i, (parent_id, children)) in parents.iter().enumerate() {
-            if children.iter().any(|c| c == target_id) {
-                self.focus_idx = i;
-                if let Some(parent) = self.manager.get_mut(parent_id) {
-                    parent.switch_to_composite_child(target_id);
-                }
-                return true;
-            }
-        }
         false
     }
 
-    /// Drain every widget's pending focus request (including stack
-    /// children) and honor them in id order. Called from the tick
-    /// loop after `update` so widgets that decide to grab attention
-    /// inside `update` see the focus shift on the same frame.
-    /// Returns `true` when at least one request was honored, so the
-    /// caller can force a redraw even when no widget marked itself
-    /// dirty (focus changes don't auto-set the dirty bit).
+    /// Drain every widget's pending focus request and honor them in id
+    /// order. Called from the tick loop after `update` so widgets that
+    /// decide to grab attention inside `update` see the focus shift on
+    /// the same frame. Returns `true` when at least one request was
+    /// honored, so the caller can force a redraw even when no widget
+    /// marked itself dirty (focus changes don't auto-set the dirty bit).
     fn process_focus_requests(&mut self) -> bool {
-        // Collect ids first (top-level + stack children) so the
-        // manager borrow stays clean while we iterate.
-        let mut all_ids: Vec<String> = Vec::new();
-        for id in self.manager.ids() {
-            all_ids.push(id.clone());
-            if let Some(w) = self.manager.get(id) {
-                all_ids.extend(w.composite_children());
-            }
-        }
+        let all_ids: Vec<String> = self.manager.ids().to_vec();
         let mut promoted = false;
         for id in all_ids {
             let req = self
@@ -382,8 +276,7 @@ impl App {
         let Some(focused_id) = self.focused_widget().map(str::to_string) else {
             return;
         };
-        let zoom = self.zoom_target_for_widget_id(focused_id);
-        self.zoom_target = Some(zoom);
+        self.zoom_target = Some(ZoomTarget { widget_id: focused_id });
     }
 
     /// Exit zoom, clearing `zoom_target` and landing focus on the widget
@@ -392,28 +285,8 @@ impl App {
         let Some(zoom) = self.zoom_target.take() else {
             return;
         };
-        // Restore focus_idx to the position of the zoom target's parent.
-        if let Some(pos) = self
-            .focus_order
-            .iter()
-            .position(|w| w == &zoom.parent_id)
-        {
+        if let Some(pos) = self.focus_order.iter().position(|w| w == &zoom.widget_id) {
             self.focus_idx = pos;
-        }
-    }
-
-    /// Build a `ZoomTarget` for the given top-level widget id. If the widget
-    /// is a composite (stack), resolve its currently-active child by index so
-    /// the zoom frame shows the correct child in isolation (CEO Q1).
-    fn zoom_target_for_widget_id(&self, parent_id: String) -> ZoomTarget {
-        let child_id = self.manager.get(&parent_id).and_then(|w| {
-            let idx = w.composite_active_index()?;
-            let children = w.composite_children();
-            children.into_iter().nth(idx)
-        });
-        ZoomTarget {
-            parent_id,
-            child_id,
         }
     }
 
@@ -421,11 +294,7 @@ impl App {
     /// `is_zoom_retarget_suppressed` and `display_name` lookups.
     fn resolve_zoom_widget(&self) -> Option<&dyn crate::widgets::Widget> {
         let zoom = self.zoom_target.as_ref()?;
-        let parent = self.manager.get(&zoom.parent_id)?;
-        match &zoom.child_id {
-            None => Some(parent),
-            Some(cid) => parent.composite_child(cid),
-        }
+        self.manager.get(&zoom.widget_id)
     }
 
     /// Returns `true` when the currently-zoomed widget is actively capturing
@@ -439,21 +308,15 @@ impl App {
     }
 
     /// Retarget zoom to the widget assigned shortcut letter `letter`. Moves
-    /// both `zoom_target` and `focus_idx` so they stay synchronized; also
-    /// flips a stack's active tab when the shortcut points at a child.
+    /// both `zoom_target` and `focus_idx` so they stay synchronized.
     fn retarget_zoom_by_letter(&mut self, letter: char) {
-        let Some((parent_id, child_id)) = self.shortcuts.get(&letter).cloned() else {
+        let Some(widget_id) = self.shortcuts.get(&letter).cloned() else {
             return;
         };
-        if let Some(pos) = self.focus_order.iter().position(|w| w == &parent_id) {
+        if let Some(pos) = self.focus_order.iter().position(|w| w == &widget_id) {
             self.focus_idx = pos;
         }
-        if let Some(ref child) = child_id {
-            if let Some(parent) = self.manager.get_mut(&parent_id) {
-                parent.switch_to_composite_child(child);
-            }
-        }
-        self.zoom_target = Some(ZoomTarget { parent_id, child_id });
+        self.zoom_target = Some(ZoomTarget { widget_id });
     }
 
     /// Advance the zoom target by one step in focus order. `forward = true`
@@ -470,9 +333,8 @@ impl App {
             (self.focus_idx + n - 1) % n
         };
         self.focus_idx = new_idx;
-        let parent_id = self.focus_order[new_idx].clone();
-        let zoom = self.zoom_target_for_widget_id(parent_id);
-        self.zoom_target = Some(zoom);
+        let widget_id = self.focus_order[new_idx].clone();
+        self.zoom_target = Some(ZoomTarget { widget_id });
     }
 
     /// Handle a key event while zoom is active. The focused widget already
@@ -589,20 +451,12 @@ impl App {
             // `Shift+<letter>` jumps to the widget that claimed that
             // letter. Some terminals drop the SHIFT modifier on
             // shifted alphabetic keys, so we match on case rather
-            // than `KeyModifiers::SHIFT`. For widgets hidden inside a
-            // stack, the dispatcher also flips the stack to that
-            // child via `switch_to_composite_child` so the user
-            // doesn't have to manually rotate first.
+            // than `KeyModifiers::SHIFT`.
             (_, KeyCode::Char(c)) if c.is_ascii_uppercase() => {
                 let lower = c.to_ascii_lowercase();
-                if let Some((parent_id, child_id)) = self.shortcuts.get(&lower).cloned() {
-                    if let Some(pos) = self.focus_order.iter().position(|w| w == &parent_id) {
+                if let Some(widget_id) = self.shortcuts.get(&lower).cloned() {
+                    if let Some(pos) = self.focus_order.iter().position(|w| w == &widget_id) {
                         self.focus_idx = pos;
-                    }
-                    if let Some(child) = child_id {
-                        if let Some(parent) = self.manager.get_mut(&parent_id) {
-                            parent.switch_to_composite_child(&child);
-                        }
                     }
                 }
             }
@@ -849,11 +703,11 @@ fn apply_config_change(app: &mut App, path: &std::path::Path) {
     }
 
     // Live-reload guard: if a config change removed the currently-zoomed widget
-    // from the manager (e.g., kind or instance changed), clear zoom so the overlay
-    // doesn't render a ghost target.
+    // from the manager (e.g., a slim build dropped its feature), clear zoom so
+    // the overlay doesn't render a ghost target.
     if let Some(ref zoom) = app.zoom_target.clone() {
-        if app.manager.get(&zoom.parent_id).is_none() {
-            tracing::info!(widget = %zoom.parent_id, "zoomed widget no longer in manager after config reload — clearing zoom");
+        if app.manager.get(&zoom.widget_id).is_none() {
+            tracing::info!(widget = %zoom.widget_id, "zoomed widget no longer in manager after config reload — clearing zoom");
             app.zoom_target = None;
         }
     }
@@ -873,12 +727,11 @@ fn invert_scroll(kind: MouseEventKind) -> MouseEventKind {
     }
 }
 
-/// Route a mouse event to the zoomed widget. Resolves the zoom target to the
-/// correct widget (or composite child), forwarding `mouse` into its `handle_mouse`.
-/// `inner_rect` is the zoom frame's interior (excluding the border), already
-/// computed by the caller so we don't have to repeat the layout maths here.
-/// Returns `true` when the zoomed widget consumed the event (i.e. something
-/// changed and a repaint is warranted).
+/// Route a mouse event to the zoomed widget, forwarding `mouse` into its
+/// `handle_mouse`. `inner_rect` is the zoom frame's interior (excluding the
+/// border), already computed by the caller so we don't have to repeat the
+/// layout maths here. Returns `true` when the zoomed widget consumed the
+/// event (i.e. something changed and a repaint is warranted).
 fn route_mouse_to_zoom_widget(
     app: &mut App,
     mouse: crossterm::event::MouseEvent,
@@ -887,22 +740,15 @@ fn route_mouse_to_zoom_widget(
     let Some(zoom) = app.zoom_target.clone() else {
         return false;
     };
-    let parent = match app.manager.get_mut(&zoom.parent_id) {
-        Some(p) => p,
-        None => return false,
+    let Some(widget) = app.manager.get_mut(&zoom.widget_id) else {
+        return false;
     };
-    match zoom.child_id {
-        None => parent.handle_mouse(mouse, inner_rect) == EventResult::Handled,
-        Some(ref cid) => match parent.composite_child_mut(cid) {
-            Some(child) => child.handle_mouse(mouse, inner_rect) == EventResult::Handled,
-            None => false,
-        },
-    }
+    widget.handle_mouse(mouse, inner_rect) == EventResult::Handled
 }
 
-/// Returns the (widget id, cell area) under screen coordinates `(col, row)`,
+/// Returns the (widget id, pane area) under screen coordinates `(col, row)`,
 /// if any. The bottom row is the status bar and is intentionally not focusable.
-fn widget_at(app: &App, full_area: Rect, col: u16, row: u16) -> Option<(String, Rect)> {
+fn widget_at(_app: &App, full_area: Rect, col: u16, row: u16) -> Option<(String, Rect)> {
     if full_area.width == 0 || full_area.height == 0 {
         return None;
     }
@@ -911,61 +757,41 @@ fn widget_at(app: &App, full_area: Rect, col: u16, row: u16) -> Option<(String, 
         return None;
     }
     let main_area = Rect::new(full_area.x, full_area.y, full_area.width, main_height);
-    for resolved in app.config.layout.resolve(main_area) {
-        let r = resolved.area;
+    let panes = PaneAreas::resolve(main_area);
+    for (id, r) in panes.iter() {
         let in_x = col >= r.x && col < r.x + r.width;
         let in_y = row >= r.y && row < r.y + r.height;
         if in_x && in_y {
-            return Some((resolved.cell.render_target_id()?, r));
+            return Some((id.to_string(), r));
         }
     }
     None
 }
 
 /// First-fit assignment of `Shift+<letter>` shortcuts in registration
-/// order. Walks into composite widgets (stacks) so children hidden
-/// inside a stack can still claim a letter — the runtime dispatcher
-/// then uses the `(parent_id, child_id)` pair to switch the stack to
-/// that child before focusing the cell.
+/// order.
 ///
-/// Returns the letter → `(parent_id, child_id)` map; each widget (or
-/// composite child) is notified via `set_shortcut`, including `None`
-/// for widgets whose preferences were all taken.
-fn assign_shortcuts(manager: &mut WidgetManager) -> HashMap<char, (String, Option<String>)> {
-    // First pass: gather every (parent_id, child_id, prefs) triple.
-    let mut targets: Vec<(String, Option<String>, Vec<char>)> = Vec::new();
-    for parent_id in manager.ids().to_vec() {
-        let children: Vec<String> = manager
-            .get(&parent_id)
-            .map(|w| w.composite_children())
-            .unwrap_or_default();
-        if children.is_empty() {
+/// Returns the letter → widget id map; each widget is notified via
+/// `set_shortcut`, including `None` for widgets whose preferences were
+/// all taken.
+fn assign_shortcuts(manager: &mut WidgetManager) -> HashMap<char, String> {
+    let targets: Vec<(String, Vec<char>)> = manager
+        .ids()
+        .iter()
+        .map(|id| {
             let prefs = manager
-                .get(&parent_id)
+                .get(id)
                 .map(|w| w.shortcut_preferences().to_vec())
                 .unwrap_or_default();
-            targets.push((parent_id.clone(), None, prefs));
-        } else {
-            // Composite: each child contributes its own pref list.
-            for child_id in children {
-                let prefs = if let Some(parent) = manager.get_mut(&parent_id) {
-                    parent
-                        .composite_child_mut(&child_id)
-                        .map(|c| c.shortcut_preferences().to_vec())
-                        .unwrap_or_default()
-                } else {
-                    Vec::new()
-                };
-                targets.push((parent_id.clone(), Some(child_id), prefs));
-            }
-        }
-    }
+            (id.clone(), prefs)
+        })
+        .collect();
 
-    // Second pass: first-fit assignment. Insertion order preserves
-    // registration-order ties.
-    let mut shortcuts: HashMap<char, (String, Option<String>)> = HashMap::new();
-    let mut assigned_letters: HashMap<(String, Option<String>), char> = HashMap::new();
-    for (parent_id, child_id, prefs) in &targets {
+    // First-fit assignment. Insertion order preserves registration-order
+    // ties.
+    let mut shortcuts: HashMap<char, String> = HashMap::new();
+    let mut assigned_letters: HashMap<String, char> = HashMap::new();
+    for (id, prefs) in &targets {
         for letter in prefs {
             let letter = letter.to_ascii_lowercase();
             if !letter.is_ascii_alphabetic() {
@@ -976,130 +802,32 @@ fn assign_shortcuts(manager: &mut WidgetManager) -> HashMap<char, (String, Optio
                 continue;
             }
             if !shortcuts.contains_key(&letter) {
-                shortcuts.insert(letter, (parent_id.clone(), child_id.clone()));
-                assigned_letters.insert((parent_id.clone(), child_id.clone()), letter);
+                shortcuts.insert(letter, id.clone());
+                assigned_letters.insert(id.clone(), letter);
                 break;
             }
         }
     }
 
-    // Third pass: notify each widget (or composite child) of its
-    // granted letter (or `None` if all preferences were taken).
-    for (parent_id, child_id, _) in &targets {
-        let letter = assigned_letters
-            .get(&(parent_id.clone(), child_id.clone()))
-            .copied();
-        if let Some(parent) = manager.get_mut(parent_id) {
-            match child_id {
-                Some(child) => {
-                    if let Some(c) = parent.composite_child_mut(child) {
-                        c.set_shortcut(letter);
-                    }
-                }
-                None => parent.set_shortcut(letter),
-            }
+    // Notify each widget of its granted letter (or `None` if all
+    // preferences were taken).
+    for (id, _) in &targets {
+        let letter = assigned_letters.get(id).copied();
+        if let Some(widget) = manager.get_mut(id) {
+            widget.set_shortcut(letter);
         }
     }
     shortcuts
 }
 
-/// Focus-cycling order matches layout-cell order, skipping unknown widgets.
-fn focus_order_from_layout(config: &Config, manager: &WidgetManager) -> Vec<String> {
-    let mut order: Vec<String> = Vec::new();
-    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
-    for cell in &config.layout.cells {
-        // For stacks, Tab cycles to the stack as a single focusable unit
-        // (the active tab inside it is what receives input). For
-        // single-widget cells, the widget id IS the focus target.
-        let Some(id) = cell.render_target_id() else {
-            continue;
-        };
-        if !seen.insert(id.clone()) {
-            continue;
-        }
-        if manager.get(&id).is_some() {
-            order.push(id);
-        }
-    }
-    order
-}
-
-/// Register each unique `(kind, instance)` pair found in the layout via
-/// the widget registry. Unknown kinds log a warning and skip. Stack
-/// cells register a wrapping `StackWidget` under a synthetic id
-/// (`stack:<child1>+<child2>+…`) that the render path looks up via
-/// `GridCell::render_target_id()`.
-fn register_widgets_from_layout(
-    manager: &mut WidgetManager,
-    config: &Config,
-    theme: Arc<Theme>,
-    llm_provider: Option<Arc<dyn LlmProvider>>,
-    cache: &Cache,
-) {
-    let mut seen: std::collections::HashSet<(String, String)> = std::collections::HashSet::new();
-    let mut seen_stack: std::collections::HashSet<String> = std::collections::HashSet::new();
-    for cell in &config.layout.cells {
-        if cell.is_stack() {
-            // Stack children are built as fresh widget instances owned
-            // by the StackWidget (widgets aren't `Clone`). They share
-            // the on-disk cache scope with any standalone registration
-            // of the same `(kind, instance)`.
-            let stack_id = match cell.render_target_id() {
-                Some(id) => id,
-                None => continue,
-            };
-            if !seen_stack.insert(stack_id.clone()) {
-                continue;
-            }
-            let mut children: Vec<Box<dyn crate::widgets::Widget>> = Vec::new();
-            for child_ref in cell.stack_widget_refs() {
-                let (kind, instance) = parse_widget_ref(&child_ref);
-                let scoped = cache.scoped(&kind, &instance);
-                let llm = llm_provider.clone();
-                let theme_c = theme.clone();
-                let built = registry::build_for(&kind, &instance, move |instance| WidgetCtx {
-                    instance,
-                    theme: theme_c,
-                    llm,
-                    cache: scoped,
-                });
-                match built {
-                    Some(w) => children.push(w),
-                    None => tracing::warn!(
-                        kind = %kind,
-                        instance = %instance,
-                        "unknown widget kind in stack, skipping"
-                    ),
-                }
-            }
-            if children.is_empty() {
-                continue;
-            }
-            let stack = crate::widgets::stack::StackWidget::new(
-                stack_id.clone(),
-                children,
-                config.global.stack_hidden_poll_ratio,
-                theme.clone(),
-            );
-            manager.register_boxed(Box::new(stack));
-            continue;
-        }
-        let Some(primary) = cell.primary_widget() else {
-            continue;
-        };
-        let (kind, instance) = parse_widget_ref(&primary);
-        if !seen.insert((kind.clone(), instance.clone())) {
-            continue;
-        }
-        register_widget(
-            manager,
-            &kind,
-            &instance,
-            theme.clone(),
-            llm_provider.clone(),
-            cache,
-        );
-    }
+/// Focus-cycling order: the fixed pane order, skipping any pane whose
+/// widget feature isn't compiled in (slim builds).
+fn focus_order_from_manager(manager: &WidgetManager) -> Vec<String> {
+    FOCUS_ORDER
+        .iter()
+        .filter(|id| manager.get(id).is_some())
+        .map(|id| id.to_string())
+        .collect()
 }
 
 fn register_widget(
@@ -1120,39 +848,31 @@ fn register_widget(
     match widget {
         Some(w) => manager.register_boxed(w),
         None => {
-            tracing::warn!(kind = %kind, instance = %instance, "unknown widget kind in layout, skipping");
+            tracing::warn!(kind = %kind, instance = %instance, "unknown widget kind, skipping");
         }
     }
 }
 
-/// Collect every composite (stack) widget's current active-tab index
-/// into a `(stack_id → tab_index)` map. Used to detect when the
-/// runtime state file needs to be re-saved.
-fn collect_stack_snapshot(manager: &WidgetManager) -> HashMap<String, usize> {
-    let mut out = HashMap::new();
-    for id in manager.ids() {
-        if let Some(widget) = manager.get(id) {
-            if let Some(active) = widget.composite_active_index() {
-                out.insert(id.clone(), active);
-            }
-        }
-    }
-    out
-}
-
-/// Fallback when the layout produces no recognised widgets — seed every
-/// descriptor with `default_in_first_run = true`.
+/// Register the fixed 4-pane dashboard: calendar, the "ai" feeds
+/// instance, notes, email. A pane's widget silently doesn't appear
+/// when its feature isn't compiled in (slim builds) — `registry::find`
+/// returns `None` and `register_widget` logs and skips.
 fn register_default_widgets(
     manager: &mut WidgetManager,
     theme: Arc<Theme>,
     llm_provider: Option<Arc<dyn LlmProvider>>,
     cache: &Cache,
 ) {
-    for kind in registry::default_kinds() {
+    for (kind, instance) in [
+        ("calendar", "main"),
+        ("feeds", "ai"),
+        ("notes", "main"),
+        ("email", "main"),
+    ] {
         register_widget(
             manager,
             kind,
-            "main",
+            instance,
             theme.clone(),
             llm_provider.clone(),
             cache,
@@ -1220,19 +940,9 @@ pub async fn run(config_path_override: Option<PathBuf>) -> Result<()> {
                     // Zoom-active dispatch: route key to the zoomed widget first,
                     // then to the zoom-modal global handler on Ignored.
                     let consumed = {
-                        let (parent_id, child_id) = {
-                            let zoom = app.zoom_target.as_ref().unwrap();
-                            (zoom.parent_id.clone(), zoom.child_id.clone())
-                        };
-                        if let Some(parent) = app.manager.get_mut(&parent_id) {
-                            let result = match child_id {
-                                None => parent.handle_key(key),
-                                Some(ref cid) => match parent.composite_child_mut(cid) {
-                                    Some(child) => child.handle_key(key),
-                                    None => EventResult::Ignored,
-                                },
-                            };
-                            result == EventResult::Handled
+                        let widget_id = app.zoom_target.as_ref().unwrap().widget_id.clone();
+                        if let Some(widget) = app.manager.get_mut(&widget_id) {
+                            widget.handle_key(key) == EventResult::Handled
                         } else {
                             false
                         }
@@ -1240,7 +950,6 @@ pub async fn run(config_path_override: Option<PathBuf>) -> Result<()> {
                     if !consumed {
                         app.handle_global_zoom_key(key);
                     }
-                    app.persist_runtime_state_if_dirty();
                 } else {
                     let consumed = if let Some(id) = app.focused_widget().map(str::to_string) {
                         if let Some(widget) = app.manager.get_mut(&id) {
@@ -1254,11 +963,6 @@ pub async fn run(config_path_override: Option<PathBuf>) -> Result<()> {
                     if !consumed {
                         app.handle_global_key(key);
                     }
-                    // After every key event, persist any stack
-                    // active-tab change (rotation via `,` / `.`, or
-                    // Shift+letter walking into a stack child) so the
-                    // user's choice survives a restart.
-                    app.persist_runtime_state_if_dirty();
                 }
             }
             Event::Mouse(mut mouse) => {
@@ -1329,14 +1033,13 @@ pub async fn run(config_path_override: Option<PathBuf>) -> Result<()> {
                                 } else if !app.is_zoom_retarget_suppressed() {
                                     if let Some((id, _)) = target {
                                         // Click on a backdrop widget: retarget zoom to it.
-                                        let parent_id = id.clone();
+                                        let widget_id = id.clone();
                                         if let Some(pos) =
-                                            app.focus_order.iter().position(|w| w == &parent_id)
+                                            app.focus_order.iter().position(|w| w == &widget_id)
                                         {
                                             app.focus_idx = pos;
                                         }
-                                        let zoom = app.zoom_target_for_widget_id(parent_id);
-                                        app.zoom_target = Some(zoom);
+                                        app.zoom_target = Some(ZoomTarget { widget_id });
                                         mouse_acted = true;
                                     } else {
                                         // Click in the empty margin: exit zoom.
@@ -1428,22 +1131,20 @@ pub async fn run(config_path_override: Option<PathBuf>) -> Result<()> {
             }
             Event::Tick => {
                 // While zoomed, throttle backdrop widget updates to
-                // `stack_hidden_poll_ratio` cadence — mirrors how StackWidget
-                // gates hidden children.  The zoom target always updates at
-                // full rate so its data stays live inside the frame (Req 4).
+                // `background_poll_ratio` cadence. The zoom target always
+                // updates at full rate so its data stays live inside the
+                // frame (Req 4).
                 app.zoom_backdrop_tick_counter =
                     app.zoom_backdrop_tick_counter.wrapping_add(1);
-                let ratio = app.config.global.stack_hidden_poll_ratio.max(1) as u64;
+                let ratio = app.config.global.background_poll_ratio.max(1) as u64;
                 let allow_backdrop_tick = app.zoom_target.is_none()
                     || ratio == 1
                     || app.zoom_backdrop_tick_counter % ratio == 0;
-                let zoom_parent_id: Option<String> =
-                    app.zoom_target.as_ref().map(|z| z.parent_id.clone());
+                let zoomed_id: Option<String> =
+                    app.zoom_target.as_ref().map(|z| z.widget_id.clone());
                 for id in app.manager.ids().to_vec() {
                     // Skip backdrop widgets on non-quota ticks while zoomed.
-                    if !allow_backdrop_tick
-                        && zoom_parent_id.as_deref() != Some(id.as_str())
-                    {
+                    if !allow_backdrop_tick && zoomed_id.as_deref() != Some(id.as_str()) {
                         continue;
                     }
                     if let Some(w) = app.manager.get_mut(&id) {
@@ -1587,7 +1288,7 @@ mod tests {
 
     #[cfg(feature = "widgets-all")]
     #[test]
-    fn focus_cycles_in_layout_order() {
+    fn focus_cycles_in_fixed_pane_order() {
         let config = Config::default();
         let mut app = App::new(config);
         assert_eq!(
@@ -1614,154 +1315,15 @@ mod tests {
 
     #[cfg(feature = "widgets-all")]
     #[test]
-    fn multi_instance_widgets_register_under_composed_ids() {
-        // Two calendars (home + office) + one news should yield three
-        // widgets with ids "calendar@home", "calendar@office", "news".
-        use crate::config::layout::{GridCell, LayoutConfig};
-        let mut config = Config::default();
-        config.layout = LayoutConfig {
-            columns: vec![50, 50],
-            rows: vec![50, 50],
-            cells: vec![
-                GridCell {
-                    widget: Some("calendar@home".into()),
-                    widgets: None,
-                    col: 0,
-                    row: 0,
-                    col_span: 1,
-                    row_span: 1,
-                },
-                GridCell {
-                    widget: Some("calendar@office".into()),
-                    widgets: None,
-                    col: 1,
-                    row: 0,
-                    col_span: 1,
-                    row_span: 1,
-                },
-                GridCell {
-                    widget: Some("news".into()),
-                    widgets: None,
-                    col: 0,
-                    row: 1,
-                    col_span: 2,
-                    row_span: 1,
-                },
-            ],
-        };
-        let app = App::new(config);
-        let ids: Vec<&str> = app.manager.ids().iter().map(String::as_str).collect();
-        assert!(ids.contains(&"calendar@home"), "got {ids:?}");
-        assert!(ids.contains(&"calendar@office"), "got {ids:?}");
-        assert!(ids.contains(&"news"), "got {ids:?}");
-        assert_eq!(ids.len(), 3, "no extra widgets registered: {ids:?}");
-
-        // Two calendars should claim *different* letters from the
-        // shortcut preference list — the second falls through once the
-        // first letter is taken.
-        let home_letter = app
-            .shortcuts
-            .iter()
-            .find_map(|(k, (parent, _child))| (parent == "calendar@home").then_some(*k));
-        let office_letter = app
-            .shortcuts
-            .iter()
-            .find_map(|(k, (parent, _child))| (parent == "calendar@office").then_some(*k));
-        assert!(
-            home_letter.is_some(),
-            "calendar@home should have a shortcut"
-        );
-        assert!(
-            office_letter.is_some(),
-            "calendar@office should have a shortcut"
-        );
-        assert_ne!(home_letter, office_letter);
-    }
-
-    #[cfg(feature = "widgets-all")]
-    #[test]
-    fn shortcuts_resolve_preference_conflicts_by_load_order() {
-        // Two calendar instances compete for the same first-choice
-        // letter ('c') — the second falls through to its next
-        // preference ('d') since load order is registration order.
-        use crate::config::layout::{GridCell, LayoutConfig};
-        let mut config = Config::default();
-        config.layout = LayoutConfig {
-            columns: vec![50, 50],
-            rows: vec![100],
-            cells: vec![
-                GridCell {
-                    widget: Some("calendar@a".into()),
-                    widgets: None,
-                    col: 0,
-                    row: 0,
-                    col_span: 1,
-                    row_span: 1,
-                },
-                GridCell {
-                    widget: Some("calendar@b".into()),
-                    widgets: None,
-                    col: 1,
-                    row: 0,
-                    col_span: 1,
-                    row_span: 1,
-                },
-            ],
-        };
-        let app = App::new(config);
-        let parent = |k: &char| app.shortcuts.get(k).map(|(p, _)| p.as_str());
-        assert_eq!(parent(&'c'), Some("calendar@a"));
-        assert_eq!(
-            parent(&'d'),
-            Some("calendar@b"),
-            "calendar@b should fall through to 'd' since calendar@a claimed 'c'"
-        );
-    }
-
-    #[cfg(feature = "widgets-all")]
-    #[test]
-    fn stack_cell_shortcuts_walk_into_children() {
-        // A stack containing calendar + news should yield shortcuts
-        // whose `parent_id` is the stack's synthetic id but whose
-        // `child_id` is the kind ("calendar"/"news"), so the
-        // dispatcher can flip the stack and focus it in one step.
-        use crate::config::layout::{GridCell, LayoutConfig};
-        let mut config = Config::default();
-        config.layout = LayoutConfig {
-            columns: vec![100],
-            rows: vec![100],
-            cells: vec![GridCell {
-                widget: None,
-                widgets: Some(vec!["calendar".into(), "news".into()]),
-                col: 0,
-                row: 0,
-                col_span: 1,
-                row_span: 1,
-            }],
-        };
-        let app = App::new(config);
-
-        // Stack must be registered under its synthetic id.
-        let ids: Vec<&str> = app.manager.ids().iter().map(String::as_str).collect();
-        assert_eq!(ids, vec!["stack:calendar+news"]);
-
-        // Both child kinds must end up addressable via Shift+letter.
-        let calendar_short = app.shortcuts.iter().find_map(|(letter, (parent, child))| {
-            (parent == "stack:calendar+news" && child.as_deref() == Some("calendar"))
-                .then_some(*letter)
-        });
-        let news_short = app.shortcuts.iter().find_map(|(letter, (parent, child))| {
-            (parent == "stack:calendar+news" && child.as_deref() == Some("news")).then_some(*letter)
-        });
-        assert!(
-            calendar_short.is_some(),
-            "calendar-inside-stack should claim a letter"
-        );
-        assert!(
-            news_short.is_some(),
-            "news-inside-stack should claim a letter"
-        );
-        assert_ne!(calendar_short, news_short);
+    fn shortcuts_never_assign_z_and_target_real_widgets() {
+        let app = App::new(Config::default());
+        assert!(!app.shortcuts.contains_key(&'z'));
+        for widget_id in app.shortcuts.values() {
+            assert!(
+                app.manager.get(widget_id).is_some(),
+                "shortcut target {widget_id:?} should be a registered widget"
+            );
+        }
     }
 
     #[test]
@@ -1799,7 +1361,7 @@ mod tests {
         assert_eq!(app.focused_widget(), Some("calendar"));
         app.zoom_enter();
         assert_eq!(
-            app.zoom_target.as_ref().map(|z| z.parent_id.as_str()),
+            app.zoom_target.as_ref().map(|z| z.widget_id.as_str()),
             Some("calendar")
         );
     }
@@ -1855,18 +1417,18 @@ mod tests {
     fn retarget_zoom_cycle_wraps() {
         let mut app = App::new(Config::default());
         app.zoom_enter();
-        // focus_order for default config should be [calendar, news].
+        // focus_order for the fixed layout is [calendar, feeds@ai, notes, email].
         let n = app.focus_order.len();
         assert!(n > 1);
-        let start_id = app.zoom_target.as_ref().unwrap().parent_id.clone();
+        let start_id = app.zoom_target.as_ref().unwrap().widget_id.clone();
         app.retarget_zoom_cycle(true);
-        let next_id = app.zoom_target.as_ref().unwrap().parent_id.clone();
+        let next_id = app.zoom_target.as_ref().unwrap().widget_id.clone();
         assert_ne!(start_id, next_id);
         // Cycle back and forward (n-1) more times to get back to start.
         for _ in 0..(n - 1) {
             app.retarget_zoom_cycle(true);
         }
-        let final_id = app.zoom_target.as_ref().unwrap().parent_id.clone();
+        let final_id = app.zoom_target.as_ref().unwrap().widget_id.clone();
         assert_eq!(start_id, final_id, "cycling forward n times should wrap back to start");
     }
 
@@ -1879,19 +1441,6 @@ mod tests {
         assert!(
             !shortcuts.contains_key(&'z'),
             "assign_shortcuts must never assign 'z' (reserved for zoom toggle)"
-        );
-    }
-
-    /// `zoom_target_for_widget_id` returns a leaf ZoomTarget for a non-composite widget.
-    #[cfg(feature = "widgets-all")]
-    #[test]
-    fn zoom_target_for_leaf_widget_has_no_child() {
-        let app = App::new(Config::default());
-        let zt = app.zoom_target_for_widget_id("calendar".into());
-        assert_eq!(zt.parent_id, "calendar");
-        assert!(
-            zt.child_id.is_none(),
-            "calendar is not a composite; child_id should be None"
         );
     }
 
