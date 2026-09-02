@@ -2676,8 +2676,7 @@ fn extract_row_lines(theme: &Theme, selected: bool, added: bool, text: &str, wid
 pub const KIND: &str = "email";
 
 pub fn build(ctx: &super::WidgetCtx) -> Box<dyn super::Widget> {
-    let cfg: EmailConfig =
-        crate::config::load_widget_toml_for_instance(KIND, &ctx.instance).unwrap_or_default();
+    let cfg: EmailConfig = serde_json::from_value(ctx.config.clone()).unwrap_or_default();
     Box::new(EmailWidget::with_config_and_llm(
         ctx.instance.clone(),
         cfg,

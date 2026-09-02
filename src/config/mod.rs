@@ -13,34 +13,6 @@ use anyhow::{Context, Result};
 pub use types::Config;
 pub use types::ZoomMargin;
 
-/// Load a per-widget TOML config from `~/.config/docket/<name>.toml`. Returns
-/// `T::default()` if the file does not exist.
-pub fn load_widget_toml<T>(name: &str) -> Result<T>
-where
-    T: serde::de::DeserializeOwned + Default,
-{
-    let path = config_dir()?.join(format!("{name}.toml"));
-    if !path.exists() {
-        return Ok(T::default());
-    }
-    let contents = std::fs::read_to_string(&path)
-        .with_context(|| format!("failed to read widget config at {}", path.display()))?;
-    let value: T = toml::from_str(&contents)
-        .with_context(|| format!("failed to parse widget config at {}", path.display()))?;
-    Ok(value)
-}
-
-/// Like `load_widget_toml`, but resolves to `<kind>@<instance>.toml` for
-/// non-main instances. Falls back to `T::default()` when the file doesn't
-/// exist.
-pub fn load_widget_toml_for_instance<T>(kind: &str, instance: &str) -> Result<T>
-where
-    T: serde::de::DeserializeOwned + Default,
-{
-    let stem = crate::widgets::widget_config_stem(kind, instance);
-    load_widget_toml(&stem)
-}
-
 static CONFIG_DIR_OVERRIDE: RwLock<Option<PathBuf>> = RwLock::new(None);
 
 /// Point the config dir at an explicit directory, bypassing the default XDG
@@ -103,14 +75,41 @@ pub fn load(override_path: Option<&Path>) -> Result<Config> {
     Ok(cfg)
 }
 
-/// Default `config.toml` contents written by `--init`.
+/// Parse `config.toml` as a raw TOML value — used to pull out individual
+/// widget sections (`[calendar]`, `[feeds]`, …) as `serde_json::Value` for
+/// `WidgetCtx`/hot-reload, without requiring every widget config struct to
+/// implement `Serialize` just to round-trip through the app-level typed
+/// `Config`. Mirrors `load`'s path resolution and missing-file fallback
+/// (an empty table, so every section resolves to `Value::Null` below).
+pub fn load_raw(override_path: Option<&Path>) -> Result<toml::Value> {
+    let path: PathBuf = match override_path {
+        Some(p) => p.to_path_buf(),
+        None => config_path()?,
+    };
+    if !path.exists() {
+        return Ok(toml::Value::Table(Default::default()));
+    }
+    let contents = std::fs::read_to_string(&path)
+        .with_context(|| format!("failed to read config file at {}", path.display()))?;
+    toml::from_str(&contents)
+        .with_context(|| format!("failed to parse config file at {}", path.display()))
+}
+
+/// Extract one top-level table from a `load_raw` value as a
+/// `serde_json::Value`, ready for `serde_json::from_value(..).unwrap_or_default()`
+/// — the same bridge `Widget::apply_config` uses for hot-reload. `Value::Null`
+/// when the section is absent (widget falls back to its own `Default`).
+pub fn widget_section_json(raw: &toml::Value, key: &str) -> serde_json::Value {
+    raw.get(key)
+        .and_then(|v| serde_json::to_value(v).ok())
+        .unwrap_or(serde_json::Value::Null)
+}
+
+/// Default `config.toml` contents written by `--init` — one file with
+/// `[global]`, `[calendar]`, `[feeds]`, and `[llm]` tables. Notes and
+/// email ship no seed content (widgets fall back to their own
+/// `Default` impl) — same as before consolidation.
 pub const DEFAULT_CONFIG_TOML: &str = include_str!("defaults/config.toml");
-
-pub const DEFAULT_FEEDS_AI_TOML: &str = include_str!("defaults/feeds@ai.toml");
-
-pub const DEFAULT_COLORSCHEMES_TOML: &str = include_str!("defaults/colorschemes.toml");
-
-pub const DEFAULT_LLM_TOML: &str = include_str!("defaults/llm.toml");
 
 pub const DEFAULT_ANTHROPIC_KEY_TEMPLATE: &str = include_str!("defaults/credentials/anthropic.toml");
 
@@ -120,20 +119,14 @@ pub const DEFAULT_CALDAV_TEMPLATE: &str = include_str!("defaults/credentials/cal
 
 pub const DEFAULT_ICS_TEMPLATE: &str = include_str!("defaults/credentials/ics.toml");
 
-pub const DEFAULT_CALENDAR_TOML: &str = include_str!("defaults/calendar.toml");
-
-/// Create `~/.config/docket/` and seed the default config + credential
+/// Create `~/.config/docket/` and seed `config.toml` + credential
 /// template files if they do not already exist. Idempotent — existing files
 /// are left untouched. Returns the path of the main `config.toml`.
 pub fn init_default_config() -> Result<PathBuf> {
     let dir = config_dir()?;
     std::fs::create_dir_all(&dir)
         .with_context(|| format!("failed to create docket root at {}", dir.display()))?;
-    seed(&dir.join("colorschemes.toml"), DEFAULT_COLORSCHEMES_TOML)?;
     seed(&dir.join("config.toml"), DEFAULT_CONFIG_TOML)?;
-    seed(&dir.join("calendar.toml"), DEFAULT_CALENDAR_TOML)?;
-    seed(&dir.join("feeds@ai.toml"), DEFAULT_FEEDS_AI_TOML)?;
-    seed(&dir.join("llm.toml"), DEFAULT_LLM_TOML)?;
 
     let creds = dir.join("credentials");
     std::fs::create_dir_all(&creds)
@@ -197,94 +190,24 @@ mod tests {
     }
 
     #[test]
-    fn default_colorschemes_seed_parses_and_has_default_scheme() {
-        let file: crate::theme::ColorSchemesFile =
-            toml::from_str(DEFAULT_COLORSCHEMES_TOML).expect("colorschemes seed should parse");
-        assert!(
-            file.schemes.contains_key("default"),
-            "default scheme must exist so the unmodified config.toml resolves"
-        );
-        for expected in [
-            "chalktone",
-            "gruvbox",
-            "tokyonight",
-            "rosepine",
-            "nord",
-            "bluloco",
-            "onedark",
-            "miasma",
-        ] {
-            assert!(
-                file.schemes.contains_key(expected),
-                "expected scheme {expected:?} in seed"
-            );
-        }
-    }
-
-    #[test]
-    fn seeded_schemes_populate_every_themable_role() {
-        // Guards against the quoted-dotted-key bug (`"border.focused"`
-        // silently parses as a single key) AND against new roles being
-        // added without each seeded scheme being updated. Every scheme
-        // ships values for every role exposed in colorschemes.toml.
-        let file: crate::theme::ColorSchemesFile =
-            toml::from_str(DEFAULT_COLORSCHEMES_TOML).expect("seed parses");
-        for (name, scheme) in &file.schemes {
-            assert!(
-                scheme.border.focused.is_some(),
-                "scheme {name:?} should set border.focused (use unquoted dotted keys)"
-            );
-            assert!(
-                scheme.widget_title.focused.is_some(),
-                "scheme {name:?} should set widget_title.focused"
-            );
-            assert!(
-                scheme.widget_title.unfocused.is_some(),
-                "scheme {name:?} should set widget_title.unfocused"
-            );
-            assert!(
-                scheme.metadata.focused.is_some(),
-                "scheme {name:?} should set metadata.focused"
-            );
-            assert!(
-                scheme.metadata.unfocused.is_some(),
-                "scheme {name:?} should set metadata.unfocused"
-            );
-            assert!(
-                scheme.text.focused.is_some(),
-                "scheme {name:?} should set text.focused (use unquoted dotted keys)"
-            );
-        }
-    }
-
-    #[test]
-    fn default_widget_seed_files_parse() {
-        // Each widget's seed is checked only when that widget is compiled
-        // in — slim builds drop the type references but the TOML strings
-        // themselves stay so `seed_defaults` keeps populating them at
-        // install time.
+    fn default_config_seed_populates_every_widget_table() {
+        // Each widget's section is checked only when that widget is
+        // compiled in — slim builds drop the type references but the
+        // TOML itself stays so `init_default_config` keeps populating
+        // it at install time.
+        let cfg: Config = toml::from_str(DEFAULT_CONFIG_TOML).expect("default config should parse");
         #[cfg(feature = "widget-calendar")]
-        {
-            let cal: crate::widgets::calendar::CalendarConfig =
-                toml::from_str(DEFAULT_CALENDAR_TOML).expect("calendar seed should parse");
-            assert!(
-                !cal.events.is_empty(),
-                "calendar seed should ship example events"
-            );
-        }
+        assert!(
+            !cfg.calendar.events.is_empty(),
+            "[calendar] seed should ship example events"
+        );
         #[cfg(feature = "widget-feeds")]
-        {
-            let ai: crate::widgets::feeds::FeedsConfig =
-                toml::from_str(DEFAULT_FEEDS_AI_TOML).expect("feeds@ai seed should parse");
-            assert!(
-                !ai.feeds.is_empty(),
-                "feeds@ai seed should ship example feeds — it's in the default layout"
-            );
-        }
-        let llm: crate::llm::LlmConfig =
-            toml::from_str(DEFAULT_LLM_TOML).expect("llm seed should parse");
-        assert!(llm.enabled);
-        assert_eq!(llm.provider.name, "anthropic");
+        assert!(
+            !cfg.feeds.feeds.is_empty(),
+            "[feeds] seed should ship example feeds — it's in the fixed layout"
+        );
+        assert!(cfg.llm.enabled);
+        assert_eq!(cfg.llm.provider.name, "anthropic");
     }
 
     #[test]
@@ -292,5 +215,20 @@ mod tests {
         let cfg = load(Some(Path::new("/nonexistent/docket/config.toml")))
             .expect("missing file should not error");
         assert_eq!(cfg.version, 1);
+    }
+
+    #[test]
+    fn load_raw_missing_file_returns_empty_table() {
+        let raw = load_raw(Some(Path::new("/nonexistent/docket/config.toml")))
+            .expect("missing file should not error");
+        assert_eq!(widget_section_json(&raw, "calendar"), serde_json::Value::Null);
+    }
+
+    #[test]
+    fn widget_section_json_extracts_named_table() {
+        let raw: toml::Value = toml::from_str("[calendar]\ndefault_view = \"week\"\n").unwrap();
+        let section = widget_section_json(&raw, "calendar");
+        assert_eq!(section["default_view"], serde_json::json!("week"));
+        assert_eq!(widget_section_json(&raw, "notes"), serde_json::Value::Null);
     }
 }

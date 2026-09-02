@@ -85,14 +85,17 @@ mod notes_impl {
     }
 
     fn load_todo_note() -> Result<(std::path::PathBuf, String, Option<store::Note>)> {
-        // Read the user's actual notes.toml `notes_dir` rather than
-        // assuming docket's built-in default — the main Notes
-        // instance is very often pointed at something like an
-        // Obsidian vault, and landing "Email Todos" somewhere the
-        // user never opens defeats the point.
-        let config: crate::widgets::notes::NotesConfig =
-            crate::config::load_widget_toml_for_instance("notes", "main").unwrap_or_default();
-        let (root, _) = store::resolve_root(config.notes_dir.as_deref())?;
+        // Read the user's actual configured `notes_dir` rather than
+        // assuming docket's built-in default — Notes is very often
+        // pointed at something like an Obsidian vault, and landing
+        // "Email Todos" somewhere the user never opens defeats the
+        // point. Re-reads config.toml directly (cheap, infrequent —
+        // only on extract-popup add/remove) rather than threading the
+        // already-loaded app Config through email's key-handling path.
+        let notes_dir = crate::config::load(None)
+            .ok()
+            .and_then(|cfg| cfg.notes.notes_dir);
+        let (root, _) = store::resolve_root(notes_dir.as_deref())?;
         let instance = "main".to_string();
         let note = store::load_all(&root, &instance)
             .into_iter()

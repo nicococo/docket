@@ -2737,8 +2737,7 @@ impl CalendarWidget {
 
 
 pub fn build(ctx: &super::WidgetCtx) -> Box<dyn super::Widget> {
-    let cfg: CalendarConfig =
-        crate::config::load_widget_toml_for_instance(KIND, &ctx.instance).unwrap_or_default();
+    let cfg: CalendarConfig = serde_json::from_value(ctx.config.clone()).unwrap_or_default();
     Box::new(CalendarWidget::with_config(
         ctx.instance.clone(),
         cfg,

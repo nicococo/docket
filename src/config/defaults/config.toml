@@ -1,10 +1,9 @@
 version = 1
 
 [global]
-# Active color scheme — looked up in colorschemes.toml under [schemes.<name>].
-# Ships with "default", "chalktone", "gruvbox", "tokyonight",
-# "rosepine", "nord", "bluloco", "onedark", and "miasma". An
-# unrecognized name falls
+# Active color scheme — one of the built-in palettes compiled into
+# docket: "default", "chalktone", "gruvbox", "tokyonight", "rosepine",
+# "nord", "bluloco", "onedark", "miasma". An unrecognized name falls
 # back to docket's built-in palette.
 theme = "default"
 command_key = ":"
@@ -14,7 +13,7 @@ log_level = "info"
 # Vertical mouse-wheel direction.
 #   "natural"  — wheel-up scrolls a list selection / pane content up (default).
 #   "inverted" — wheel-up scrolls down. Pick this if your trackpad / mouse
-#                feels backwards in news, email, and other scrollable
+#                feels backwards in the feeds, email, and other scrollable
 #                widgets. Applied once at the platform boundary so every
 #                widget honors the choice without per-widget config.
 mouse_scroll = "natural"
@@ -30,3 +29,164 @@ show_status_bar = true
 # bottom]; 4 values set [top, right, bottom, left]. Each side must be 0–45
 # and top+bottom / left+right must each be ≤90. Invalid values fall back to 5.
 zoom_margin = 5
+
+[calendar]
+# Default view: "day", "week", or "month".
+default_view = "day"
+poll_interval_secs = 60
+
+# Which weekday starts the week in Week + Month views. Lowercase
+# chrono weekday name — sunday (US default), monday (ISO/Europe),
+# tuesday, wednesday, thursday, friday, or saturday.
+first_day_of_week = "sunday"
+
+# Calendar sources. Each [[calendar.providers]] entry pulls events from one
+# backend; add multiple entries to merge timelines (e.g. work Google +
+# personal Outlook). The default config is "local" — events listed below —
+# which works offline. Comment in any of these and `docket --auth <name>`
+# to connect a real backend.
+#
+# [[calendar.providers]]
+# kind = "google"            # run `docket --auth google` first
+# calendar_ids = ["primary"] # or e.g. ["team@group.calendar.google.com"]
+#
+# [[calendar.providers]]
+# kind = "outlook"           # run `docket --auth microsoft` first
+# calendar_ids = []          # empty = the account's default calendar
+#
+# [[calendar.providers]]
+# kind = "caldav"            # fill in credentials/caldav.toml
+# calendar_ids = []          # empty = auto-discover every calendar
+#
+# [[calendar.providers]]
+# kind = "ics"               # fill in credentials/ics.toml — no OAuth, just
+#                            # a feed URL (e.g. Google's "Secret address in
+#                            # iCal format"); updates lag a few hours behind
+# account = "default"        # matches a [[feeds]] label in credentials/ics.toml
+
+# CalDAV-only: optional explicit calendar URLs used when a `caldav` provider
+# entry doesn't supply its own `calendar_ids`. Auto-discovers when empty.
+# [calendar.caldav]
+# calendars = []
+
+# Example events for the built-in "local" provider — timed events use RFC3339
+# timestamps with a timezone offset; all-day events use bare YYYY-MM-DD.
+
+[[calendar.events]]
+title = "Team standup"
+start = "2026-05-20T09:30:00-07:00"
+end = "2026-05-20T10:00:00-07:00"
+calendar = "work"
+location = "Zoom"
+
+[[calendar.events]]
+title = "Coffee with Sara"
+start = "2026-05-20T15:00:00-07:00"
+end = "2026-05-20T16:00:00-07:00"
+calendar = "personal"
+
+[[calendar.events]]
+title = "Project review"
+start = "2026-05-21T13:00:00-07:00"
+end = "2026-05-21T14:30:00-07:00"
+calendar = "work"
+
+[[calendar.events]]
+title = "Conference"
+start = "2026-05-23"
+end = "2026-05-24"
+all_day = true
+calendar = "personal"
+
+[feeds]
+# AI / ML news — a tabbed single-source reader, one tab per feed
+# below. `docket --init` seeds this alongside the fixed feeds pane
+# so there's real content on first launch.
+poll_interval_secs = 900
+default_summary_length = "medium"
+
+# Preferred Shift+<letter> shortcut keys. First-fit: the app claims
+# the first letter not already taken by another widget.
+shortcuts = ["A", "I"]
+
+# Command aliases — :ai <terms>, :ai-summary, :ai-refresh on top of
+# the always-available kind-level :feeds* commands.
+commands = ["ai"]
+
+# Active feeds — each becomes a tab (←/→ to switch). Comment one out
+# to disable it, or add your own.
+
+[[feeds.feeds]]
+topic = "Research"
+url = "https://www.marktechpost.com/feed"
+
+[[feeds.feeds]]
+topic = "HF"
+url = "https://huggingface.co/blog/feed.xml"
+
+[[feeds.feeds]]
+topic = "Venture"
+url = "https://venturebeat.com/category/ai/feed/"
+
+[[feeds.feeds]]
+topic = "News"
+url = "https://aiwire.net/feed/"
+
+[[feeds.feeds]]
+topic = "Weekly"
+url = "https://lastweekin.ai/feed/"
+
+[[feeds.feeds]]
+topic = "Papers"
+url = "https://www.thegradient.pub/rss/"
+
+[[feeds.feeds]]
+topic = "OpenAI"
+url = "https://openai.com/news/rss.xml"
+
+[[feeds.feeds]]
+topic = "r/LocalLLaMA"
+url = "https://www.reddit.com/r/LocalLLaMA/.rss"
+
+[[feeds.feeds]]
+topic = "r/MLNews"
+url = "https://www.reddit.com/r/machinelearningnews/.rss"
+
+[[feeds.feeds]]
+topic = "Data Science"
+url = "https://towardsdatascience.com/feed"
+
+# ── LLM ──────────────────────────────────────────────────────────────────────
+# Master switch. If false, every LLM-backed feature falls back to its
+# structured-only counterpart (keyword filtering, raw RSS summaries, …).
+[llm]
+enabled = true
+
+# docket can use one LLM provider at a time. Switch by changing `name`
+# (and the matching credentials file — see `model` notes below).
+#
+#   name = "anthropic"
+#     model     — e.g. "claude-sonnet-4-6", "claude-haiku-4-5"
+#     api_base  — https://api.anthropic.com
+#     key file  — credentials/anthropic_key.toml
+#
+#   name = "openai"
+#     model     — e.g. "gpt-5-mini", "gpt-4o-mini", "gpt-4o"
+#     api_base  — https://api.openai.com
+#     key file  — credentials/openai_key.toml
+#
+# `model` is free-form — any model name the provider's API accepts works,
+# so you can track new releases without waiting for a docket update.
+[llm.provider]
+name = "anthropic"
+model = "claude-sonnet-4-6"
+api_base = "https://api.anthropic.com"
+max_tokens = 512
+
+# Cached entries also expire 7 days after insertion regardless of capacity.
+[llm.limits]
+max_requests_per_minute = 20
+cache_capacity = 128
+
+# Per-widget LLM toggles live in each widget's own table — e.g. email has
+# `summarize_with_llm = true`. Nothing widget-specific belongs in [llm].

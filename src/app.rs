@@ -26,11 +26,11 @@ use crate::{
     cache::Cache,
     config::{self, Config},
     event::{Event, EventReader},
-    llm::{self, LlmConfig, LlmProvider},
+    llm::{self, LlmProvider},
     pane_layout::{PaneAreas, FOCUS_ORDER},
     theme::{self, Theme},
     ui,
-    widgets::{parse_widget_ref, registry, AppContext, EventResult, WidgetCtx, WidgetManager},
+    widgets::{registry, AppContext, EventResult, WidgetCtx, WidgetManager},
     zoom::ZoomTarget,
 };
 
@@ -85,12 +85,11 @@ impl App {
         // missing API keys all log a warning and continue with sensible
         // defaults (built-in palette, no LLM).
         let theme = theme::load(&config.global.theme).unwrap_or_else(|err| {
-            tracing::warn!(error = %err, "failed to load colorschemes.toml, using built-in defaults");
+            tracing::warn!(error = %err, "failed to resolve color scheme, using built-in defaults");
             Arc::new(Theme::builtin_defaults())
         });
 
-        let llm_cfg: LlmConfig = config::load_widget_toml("llm").unwrap_or_default();
-        let llm_provider = llm::build_provider(&llm_cfg).unwrap_or_else(|err| {
+        let llm_provider = llm::build_provider(&config.llm).unwrap_or_else(|err| {
             tracing::warn!(error = %err, "failed to build LLM provider");
             None
         });
@@ -113,8 +112,18 @@ impl App {
             tracing::info!(removed, "cache sweep: dropped stale entries");
         }
 
+        let raw_sections = config::load_raw(None).unwrap_or_else(|err| {
+            tracing::warn!(error = %err, "failed to parse config.toml for widget sections");
+            toml::Value::Table(Default::default())
+        });
         let mut manager = WidgetManager::new();
-        register_default_widgets(&mut manager, theme.clone(), llm_provider, &cache);
+        register_default_widgets(
+            &mut manager,
+            theme.clone(),
+            llm_provider,
+            &cache,
+            &raw_sections,
+        );
 
         let focus_order = focus_order_from_manager(&manager);
         let shortcuts = assign_shortcuts(&mut manager);
@@ -516,17 +525,14 @@ impl App {
         }
     }
 
-    /// `:scheme <name>` — re-read `colorschemes.toml` and propagate the new
-    /// palette to every widget. Missing/unknown names surface a feedback
-    /// line listing the available schemes.
+    /// `:scheme <name>` — switch among the built-in color schemes and
+    /// propagate the new palette to every widget. Unknown names surface a
+    /// feedback line listing the available schemes.
     fn execute_scheme_command(&mut self, args: &[&str]) {
         let file = match theme::load_schemes_file() {
             Ok(f) => f,
             Err(err) => {
-                self.set_feedback(
-                    format!("colorschemes.toml: {err}"),
-                    ui::FeedbackSeverity::Error,
-                );
+                self.set_feedback(format!("color schemes: {err}"), ui::FeedbackSeverity::Error);
                 return;
             }
         };
@@ -539,7 +545,7 @@ impl App {
 
         let Some(name) = args.first() else {
             let msg = if available.is_empty() {
-                "usage: :scheme <name> — (no schemes defined in colorschemes.toml)".to_string()
+                "usage: :scheme <name> — (no built-in schemes found)".to_string()
             } else {
                 format!("usage: :scheme <name>. Available: {available_csv}")
             };
@@ -549,7 +555,7 @@ impl App {
 
         let Some(scheme) = file.schemes.get(*name) else {
             let msg = if available.is_empty() {
-                format!("unknown scheme {name:?} — colorschemes.toml has no [schemes.*] blocks")
+                format!("unknown scheme {name:?} — no built-in schemes found")
             } else {
                 format!("unknown scheme {name:?}. Available: {available_csv}")
             };
@@ -659,48 +665,59 @@ impl App {
     }
 }
 
-/// Re-read a widget TOML file and pipe the value through `Widget::apply_config`.
-/// Parse failures log and skip — the next save event will retry.
+/// Re-read `config.toml` after a filesystem-watcher event and propagate it:
+/// theme, LLM provider, and every registered widget's own section. `path`
+/// is whatever changed inside `~/.config/docket/` — only react when it's
+/// `config.toml` itself; edits to `credentials/`, `notes/`, the runtime
+/// state file, or the log are not config changes. Parse failures log and
+/// skip — the next save event will retry.
 fn apply_config_change(app: &mut App, path: &std::path::Path) {
-    let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
+    let Ok(config_path) = config::config_path() else {
         return;
     };
-    // Stem is `<kind>` or `<kind>@<instance>`. Non-widget files (llm.toml,
-    // colorschemes.toml, credentials/…) won't resolve to a manager entry.
-    let (kind, instance) = parse_widget_ref(stem);
-    let widget_id: String = if instance == "main" {
-        kind.clone()
-    } else {
-        format!("{kind}@{instance}")
-    };
-    if app.manager.get(&widget_id).is_none() {
+    if path.file_name() != config_path.file_name() {
         return;
     }
-    let Ok(contents) = std::fs::read_to_string(path) else {
-        return;
-    };
-    let toml_value: toml::Value = match toml::from_str(&contents) {
-        Ok(v) => v,
+
+    let new_config: Config = match config::load(None) {
+        Ok(c) => c,
         Err(err) => {
-            tracing::warn!(file = %path.display(), error = %err, "config parse failed, will retry on next event");
+            tracing::warn!(error = %err, "config.toml parse failed, will retry on next event");
             return;
         }
     };
-    let json: serde_json::Value = match serde_json::to_value(toml_value) {
-        Ok(v) => v,
-        Err(err) => {
-            tracing::warn!(file = %path.display(), error = %err, "toml→json conversion failed");
-            return;
+    let raw_sections = config::load_raw(None).unwrap_or_else(|err| {
+        tracing::warn!(error = %err, "failed to re-parse config.toml for widget sections");
+        toml::Value::Table(Default::default())
+    });
+
+    // Theme: re-resolve against the (possibly unchanged) scheme name and
+    // push it to every widget, same as `:scheme` does.
+    let new_theme = theme::load(&new_config.global.theme).unwrap_or_else(|err| {
+        tracing::warn!(error = %err, "failed to reload theme on config change, using built-in defaults");
+        Arc::new(Theme::builtin_defaults())
+    });
+    app.theme = new_theme.clone();
+
+    for (kind, widget_id) in [
+        ("calendar", "calendar"),
+        ("feeds", "feeds@ai"),
+        ("notes", "notes"),
+        ("email", "email"),
+    ] {
+        let Some(widget) = app.manager.get_mut(widget_id) else {
+            continue;
+        };
+        let json = config::widget_section_json(&raw_sections, kind);
+        if let Err(err) = widget.apply_config(json) {
+            tracing::warn!(widget = %widget_id, error = %err, "apply_config failed");
+        } else {
+            tracing::info!(widget = %widget_id, "live-reloaded config");
         }
-    };
-    let Some(widget) = app.manager.get_mut(&widget_id) else {
-        return;
-    };
-    if let Err(err) = widget.apply_config(json) {
-        tracing::warn!(widget = %widget_id, error = %err, "apply_config failed");
-    } else {
-        tracing::info!(widget = %widget_id, "live-reloaded config");
+        widget.set_app_theme(new_theme.clone());
     }
+
+    app.config = new_config;
 
     // Live-reload guard: if a config change removed the currently-zoomed widget
     // from the manager (e.g., a slim build dropped its feature), clear zoom so
@@ -837,6 +854,7 @@ fn register_widget(
     theme: Arc<Theme>,
     llm_provider: Option<Arc<dyn LlmProvider>>,
     cache: &Cache,
+    config_json: serde_json::Value,
 ) {
     let scoped = cache.scoped(kind, instance);
     let widget = registry::build_for(kind, instance, |instance| WidgetCtx {
@@ -844,6 +862,7 @@ fn register_widget(
         theme,
         llm: llm_provider,
         cache: scoped,
+        config: config_json,
     });
     match widget {
         Some(w) => manager.register_boxed(w),
@@ -854,14 +873,17 @@ fn register_widget(
 }
 
 /// Register the fixed 4-pane dashboard: calendar, the "ai" feeds
-/// instance, notes, email. A pane's widget silently doesn't appear
-/// when its feature isn't compiled in (slim builds) — `registry::find`
-/// returns `None` and `register_widget` logs and skips.
+/// instance, notes, email. Each widget's config comes from its own
+/// top-level table in `config.toml` (`[calendar]`, `[feeds]`, `[notes]`,
+/// `[email]`) via `raw_sections`. A pane's widget silently doesn't
+/// appear when its feature isn't compiled in (slim builds) —
+/// `registry::find` returns `None` and `register_widget` logs and skips.
 fn register_default_widgets(
     manager: &mut WidgetManager,
     theme: Arc<Theme>,
     llm_provider: Option<Arc<dyn LlmProvider>>,
     cache: &Cache,
+    raw_sections: &toml::Value,
 ) {
     for (kind, instance) in [
         ("calendar", "main"),
@@ -869,6 +891,7 @@ fn register_default_widgets(
         ("notes", "main"),
         ("email", "main"),
     ] {
+        let config_json = config::widget_section_json(raw_sections, kind);
         register_widget(
             manager,
             kind,
@@ -876,6 +899,7 @@ fn register_default_widgets(
             theme.clone(),
             llm_provider.clone(),
             cache,
+            config_json,
         );
     }
 }

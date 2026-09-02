@@ -1,8 +1,9 @@
-# Color schemes for docket's chrome (borders, titles) and a handful of
-# semantic text roles. Pick the active scheme via `[global] theme = "..."` in
-# config.toml — or live-switch with `:scheme <name>` from the command bar.
-# Per-widget overrides go in a `[colors]` block inside each widget's TOML
-# (clock.toml, stocks.toml, …).
+# Built-in color schemes for docket's chrome (borders, titles) and a handful
+# of semantic text roles. Compiled into the binary (see src/theme/mod.rs) —
+# not a user-editable file. Pick the active scheme via `[global] theme = "..."`
+# in config.toml, or live-switch with `:scheme <name>` from the command bar.
+# Per-widget overrides go in a `[colors]` block inside each widget's config
+# table.
 #
 # StyleSpec format — either a shorthand string ("light_cyan", "#7dd3fc") that
 # sets the foreground only, or a table with fg / bg / modifiers:

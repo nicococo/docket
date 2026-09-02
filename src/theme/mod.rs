@@ -4,7 +4,7 @@
 
 //! Color scheme system.
 //!
-//! Loads `~/.config/docket/colorschemes.toml`, picks the active scheme named in
+//! Picks the active scheme (compiled in, see `builtin_schemes.toml`) named in
 //! `config.toml`'s `[global] theme`, and resolves it into a [`Theme`] struct of
 //! ready-to-use Ratatui [`Style`]s. Missing roles fall back to built-in
 //! defaults so a scheme can override one or two things and leave the rest
@@ -30,13 +30,11 @@
 //! literals like `"#7dd3fc"`. `"default"`/`"reset"`/`"none"` mean "inherit
 //! from the terminal".
 
-use std::{collections::HashMap, path::PathBuf, sync::Arc};
+use std::{collections::HashMap, sync::Arc, sync::LazyLock};
 
 use anyhow::{Context, Result};
 use ratatui::style::{Color, Modifier, Style};
 use serde::{Deserialize, Deserializer};
-
-use crate::config::{config_dir, docket_root};
 
 /// A single style declaration, decoupled from Ratatui's [`Style`] so we can
 /// distinguish "absent" (inherit) from "explicit default". Convert into a
@@ -109,8 +107,8 @@ impl<'de> Deserialize<'de> for StyleSpec {
 }
 
 /// Partial scheme — every role is optional so users can override one thing
-/// without restating the rest. Used both for full schemes in
-/// `colorschemes.toml` and for per-widget overrides in widget TOMLs.
+/// without restating the rest. Used both for the full built-in schemes and
+/// for per-widget overrides in widget config tables.
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct ColorScheme {
     #[serde(default)]
@@ -200,8 +198,8 @@ impl Default for Theme {
 
 impl Theme {
     /// Hardcoded fallback palette — matches the colors docket shipped with
-    /// before the theme system existed. Returned when no `colorschemes.toml`
-    /// is present and used to fill in any roles a scheme omits.
+    /// before the theme system existed. Used to fill in any roles a scheme
+    /// omits.
     pub fn builtin_defaults() -> Self {
         Self {
             border_focused: Style::default()
@@ -287,7 +285,7 @@ impl Theme {
     }
 }
 
-/// On-disk shape of `colorschemes.toml`:
+/// Shape of `builtin_schemes.toml` (compiled in, see [`BUILTIN_SCHEMES`]):
 ///
 /// ```toml
 /// [schemes.default]
@@ -308,42 +306,26 @@ pub struct ColorSchemesFile {
     pub schemes: HashMap<String, ColorScheme>,
 }
 
-/// Path to the **global** colorscheme library at the docket root. This is
-/// shared across profiles; a profile may add/override schemes via its own
-/// `colorschemes.toml` (see [`load_schemes_file`]).
-pub fn colorschemes_path() -> Result<PathBuf> {
-    Ok(docket_root()?.join("colorschemes.toml"))
-}
+/// The built-in color schemes, compiled into the binary from
+/// `src/theme/builtin_schemes.toml` (not a user-editable file — docket is
+/// an opinionated 4-pane app, not a themeable-from-disk one). Parsed once,
+/// lazily, on first access.
+static BUILTIN_SCHEMES: LazyLock<ColorSchemesFile> = LazyLock::new(|| {
+    toml::from_str(include_str!("builtin_schemes.toml"))
+        .expect("builtin_schemes.toml is compiled in and must always parse")
+});
 
-/// Load the colorscheme library: the global root file as a base, with an
-/// optional per-profile `<config_dir>/colorschemes.toml` overlaid — schemes
-/// merge by name, profile definitions winning on collision. A missing file
-/// at either tier contributes nothing. Callers fall back to built-in
-/// defaults when the merged set lacks the requested scheme.
+/// Returns the compiled-in colorscheme library. Infallible in practice
+/// (the source is embedded at compile time) — kept as a `Result` so call
+/// sites written against the old disk-backed API don't need to change.
 pub fn load_schemes_file() -> Result<ColorSchemesFile> {
-    let mut merged = read_schemes_file(&colorschemes_path()?)?;
-    let profile_override = config_dir()?.join("colorschemes.toml");
-    if profile_override.exists() {
-        for (name, scheme) in read_schemes_file(&profile_override)?.schemes {
-            merged.schemes.insert(name, scheme); // profile wins
-        }
-    }
-    Ok(merged)
+    Ok(BUILTIN_SCHEMES.clone())
 }
 
-fn read_schemes_file(path: &std::path::Path) -> Result<ColorSchemesFile> {
-    if !path.exists() {
-        return Ok(ColorSchemesFile::default());
-    }
-    let contents = std::fs::read_to_string(path)
-        .with_context(|| format!("failed to read {}", path.display()))?;
-    toml::from_str(&contents).with_context(|| format!("failed to parse {}", path.display()))
-}
-
-/// Load the app theme. Looks up scheme `name` in `~/.config/docket/colorschemes.toml`
-/// and overlays it on the built-in defaults. Missing file → defaults only.
-/// Missing scheme name → warn and use defaults. Missing roles within a
-/// scheme → silently fall back to the built-in for that role.
+/// Load the app theme. Looks up scheme `name` among the compiled-in
+/// schemes and overlays it on the built-in defaults. Missing scheme name
+/// → warn and use defaults. Missing roles within a scheme → silently fall
+/// back to the built-in for that role.
 pub fn load(name: &str) -> Result<Arc<Theme>> {
     let file = load_schemes_file()?;
     let base = Theme::builtin_defaults();
@@ -352,7 +334,7 @@ pub fn load(name: &str) -> Result<Arc<Theme>> {
             tracing::warn!(
                 scheme = %name,
                 available = ?file.schemes.keys().collect::<Vec<_>>(),
-                "color scheme not found in colorschemes.toml, using built-in defaults"
+                "color scheme not found among built-in schemes, using built-in defaults"
             );
         }
         return Ok(Arc::new(base));
@@ -566,6 +548,64 @@ fn parse_modifier(s: &str) -> Option<Modifier> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn builtin_schemes_parse_and_have_default_scheme() {
+        let file = &*BUILTIN_SCHEMES;
+        assert!(
+            file.schemes.contains_key("default"),
+            "default scheme must exist so an unmodified config.toml resolves"
+        );
+        for expected in [
+            "chalktone",
+            "gruvbox",
+            "tokyonight",
+            "rosepine",
+            "nord",
+            "bluloco",
+            "onedark",
+            "miasma",
+        ] {
+            assert!(
+                file.schemes.contains_key(expected),
+                "expected scheme {expected:?} among the built-ins"
+            );
+        }
+    }
+
+    #[test]
+    fn builtin_schemes_populate_every_themable_role() {
+        // Guards against the quoted-dotted-key bug (`"border.focused"`
+        // silently parses as a single key) AND against new roles being
+        // added without each built-in scheme being updated.
+        let file = &*BUILTIN_SCHEMES;
+        for (name, scheme) in &file.schemes {
+            assert!(
+                scheme.border.focused.is_some(),
+                "scheme {name:?} should set border.focused (use unquoted dotted keys)"
+            );
+            assert!(
+                scheme.widget_title.focused.is_some(),
+                "scheme {name:?} should set widget_title.focused"
+            );
+            assert!(
+                scheme.widget_title.unfocused.is_some(),
+                "scheme {name:?} should set widget_title.unfocused"
+            );
+            assert!(
+                scheme.metadata.focused.is_some(),
+                "scheme {name:?} should set metadata.focused"
+            );
+            assert!(
+                scheme.metadata.unfocused.is_some(),
+                "scheme {name:?} should set metadata.unfocused"
+            );
+            assert!(
+                scheme.text.focused.is_some(),
+                "scheme {name:?} should set text.focused (use unquoted dotted keys)"
+            );
+        }
+    }
 
     #[test]
     fn shorthand_string_sets_fg_only() {

@@ -38,15 +38,23 @@ pub struct AppContext;
 /// dependency lands here once instead of in every widget's constructor.
 pub struct WidgetCtx {
     /// `"main"` for the canonical instance, otherwise the suffix from
-    /// `widget@<instance>` in the layout cell.
+    /// `widget@<instance>` in the fixed pane id (e.g. `feeds@ai`) — used
+    /// only for cache-scoping and diagnostics now that config lives in
+    /// one file rather than `<kind>@<instance>.toml`.
     pub instance: String,
     pub theme: std::sync::Arc<Theme>,
-    /// `None` when llm.toml has `enabled = false` or no API key is on disk.
+    /// `None` when `[llm] enabled = false` or no API key is on disk.
     /// Widgets that opt into LLM features must handle this case.
     pub llm: Option<std::sync::Arc<dyn LlmProvider>>,
     /// Per-widget persistent cache, already namespaced to `(kind, instance)`.
     /// See `src/cache/mod.rs` for the load/store/invalidate primitives.
     pub cache: ScopedCache,
+    /// This widget's own section of `config.toml` (e.g. `[calendar]`),
+    /// already isolated by the caller — `serde_json::Value::Null` when the
+    /// section is absent. Widgets deserialize it with
+    /// `serde_json::from_value(ctx.config.clone()).unwrap_or_default()`,
+    /// the same bridge `Widget::apply_config` already uses for hot-reload.
+    pub config: serde_json::Value,
 }
 
 /// The function pointer every widget exposes for the registry.
@@ -77,17 +85,6 @@ pub fn parse_widget_ref(s: &str) -> (String, String) {
                 (kind.to_string(), instance.to_string())
             }
         }
-    }
-}
-
-/// Returns the per-instance TOML filename (without extension) for a
-/// `(kind, instance)` pair.  `("clock","main")` → `"clock"`;
-/// `("clock","home")` → `"clock@home"`. Used by `load_widget_toml`.
-pub fn widget_config_stem(kind: &str, instance: &str) -> String {
-    if instance == "main" {
-        kind.to_string()
-    } else {
-        format!("{kind}@{instance}")
     }
 }
 
@@ -382,15 +379,4 @@ mod tests {
         );
     }
 
-    #[test]
-    fn widget_config_stem_main_drops_suffix() {
-        assert_eq!(widget_config_stem("clock", "main"), "clock");
-        assert_eq!(widget_config_stem("stocks", "main"), "stocks");
-    }
-
-    #[test]
-    fn widget_config_stem_appends_instance_for_non_main() {
-        assert_eq!(widget_config_stem("clock", "home"), "clock@home");
-        assert_eq!(widget_config_stem("stocks", "compare"), "stocks@compare");
-    }
 }

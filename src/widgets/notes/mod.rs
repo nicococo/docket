@@ -3130,8 +3130,7 @@ fn resolve_root_or_emergency(
 }
 
 pub fn build(ctx: &WidgetCtx) -> Box<dyn Widget> {
-    let cfg: NotesConfig =
-        crate::config::load_widget_toml_for_instance(KIND, &ctx.instance).unwrap_or_default();
+    let cfg: NotesConfig = serde_json::from_value(ctx.config.clone()).unwrap_or_default();
     Box::new(NotesWidget::with_config(
         ctx.instance.clone(),
         cfg,

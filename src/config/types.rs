@@ -16,6 +16,36 @@ pub struct Config {
 
     #[serde(default)]
     pub global: GlobalConfig,
+
+    // Each widget's own table (`[calendar]`, `[feeds]`, …). Registration
+    // threads a widget's config to it via a separate raw-TOML→JSON bridge
+    // (`config::widget_section_json`) rather than these typed fields, so
+    // widget config structs don't need to derive `Serialize` just to
+    // round-trip through here — these exist for direct in-memory access
+    // (e.g. `notes.notes_dir`, read by email's extract-actions) and as the
+    // single source of truth the `default_config.toml` seed is verified
+    // against in tests.
+    #[cfg(feature = "widget-calendar")]
+    #[allow(dead_code)]
+    #[serde(default)]
+    pub calendar: crate::widgets::calendar::CalendarConfig,
+
+    #[cfg(feature = "widget-feeds")]
+    #[allow(dead_code)]
+    #[serde(default)]
+    pub feeds: crate::widgets::feeds::FeedsConfig,
+
+    #[cfg(feature = "widget-notes")]
+    #[serde(default)]
+    pub notes: crate::widgets::notes::NotesConfig,
+
+    #[cfg(feature = "widget-email")]
+    #[allow(dead_code)]
+    #[serde(default)]
+    pub email: crate::widgets::email::EmailConfig,
+
+    #[serde(default)]
+    pub llm: crate::llm::LlmConfig,
 }
 
 fn default_version() -> u32 {
@@ -136,6 +166,15 @@ impl Default for Config {
         Self {
             version: default_version(),
             global: GlobalConfig::default(),
+            #[cfg(feature = "widget-calendar")]
+            calendar: Default::default(),
+            #[cfg(feature = "widget-feeds")]
+            feeds: Default::default(),
+            #[cfg(feature = "widget-notes")]
+            notes: Default::default(),
+            #[cfg(feature = "widget-email")]
+            email: Default::default(),
+            llm: Default::default(),
         }
     }
 }

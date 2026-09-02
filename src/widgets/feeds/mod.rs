@@ -2016,8 +2016,7 @@ impl Widget for FeedsWidget {
 }
 
 pub fn build(ctx: &WidgetCtx) -> Box<dyn Widget> {
-    let cfg: FeedsConfig =
-        crate::config::load_widget_toml_for_instance(KIND, &ctx.instance).unwrap_or_default();
+    let cfg: FeedsConfig = serde_json::from_value(ctx.config.clone()).unwrap_or_default();
     Box::new(FeedsWidget::with_config(
         ctx.instance.clone(),
         cfg,

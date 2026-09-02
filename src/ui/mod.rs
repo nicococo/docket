@@ -754,6 +754,7 @@ mod tests {
                 theme: theme.clone(),
                 llm: None,
                 cache: cache.scoped("calendar", "main"),
+                config: serde_json::Value::Null,
             }
         });
         if let Some(w) = widget {
@@ -1641,10 +1642,9 @@ fn build_help_sections(manager: &WidgetManager, active_scheme: &str) -> Vec<help
         });
     }
 
-    // Append a "Color schemes" section that lists every named scheme in
-    // ~/.config/docket/colorschemes.toml so the user doesn't have to
-    // remember them. Marks the active one with `●`. Read errors and the
-    // missing-file case both yield an empty section (skipped silently).
+    // Append a "Color schemes" section listing every built-in scheme so
+    // the user doesn't have to remember them. Marks the active one with
+    // `●`.
     if let Ok(file) = crate::theme::load_schemes_file() {
         let mut names: Vec<&str> = file.schemes.keys().map(String::as_str).collect();
         names.sort_unstable();
