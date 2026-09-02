@@ -66,23 +66,6 @@ pub(crate) fn inner_cols(area: Rect) -> u16 {
     area.width.saturating_sub(2)
 }
 
-/// Split `total` rows between two sections A and B.
-///
-/// A gets `min(total, budget_a)` rows; B gets the remainder. Both values
-/// are non-negative. Use this for the "up-to-N-rows for one section,
-/// remainder for another" pattern (e.g., sparkline budget + process list).
-///
-/// ```text
-/// row_split(22, 10) == (10, 12)  // sparkline capped, list gets rest
-/// row_split(5, 10)  == (5, 0)    // budget exceeds total; B gets nothing
-/// row_split(10, 10) == (10, 0)   // at-budget; B gets nothing
-/// row_split(0, 10)  == (0, 0)    // nothing to split
-/// ```
-pub(crate) fn row_split(total: u16, budget_a: u16) -> (u16, u16) {
-    let a = total.min(budget_a);
-    (a, total - a)
-}
-
 /// Upper bound for the `Compact` tier (inclusive on the `Compact` side).
 /// Any rect narrower than `COMPACT_MAX_W + 1` columns resolves to `Compact`.
 pub const COMPACT_MAX_W: u16 = 31;
@@ -282,30 +265,4 @@ mod tests {
         assert_eq!(inner_cols(r(0, 30)), 0);
     }
 
-    // --- row_split ---
-
-    #[test]
-    fn row_split_budget_below_total() {
-        // A takes its full budget; B gets the remainder.
-        assert_eq!(row_split(22, 10), (10, 12));
-    }
-
-    #[test]
-    fn row_split_budget_equals_total() {
-        // A takes everything; B gets nothing.
-        assert_eq!(row_split(10, 10), (10, 0));
-    }
-
-    #[test]
-    fn row_split_budget_above_total() {
-        // A is capped at total; B gets nothing.
-        assert_eq!(row_split(5, 10), (5, 0));
-    }
-
-    #[test]
-    fn row_split_total_zero() {
-        // Nothing to split; both get 0.
-        assert_eq!(row_split(0, 10), (0, 0));
-        assert_eq!(row_split(0, 0), (0, 0));
-    }
 }

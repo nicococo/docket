@@ -3,7 +3,6 @@
 // Copyright (C) 2026 nicococo
 
 pub mod big_digits;
-pub mod chart;
 pub mod help;
 pub mod modal;
 pub mod status;

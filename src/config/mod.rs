@@ -108,8 +108,6 @@ pub fn load(override_path: Option<&Path>) -> Result<Config> {
 /// Default `config.toml` contents written by `--init`.
 pub const DEFAULT_CONFIG_TOML: &str = include_str!("defaults/config.toml");
 
-pub const DEFAULT_NEWS_TOML: &str = include_str!("defaults/news.toml");
-
 pub const DEFAULT_FEEDS_AI_TOML: &str = include_str!("defaults/feeds@ai.toml");
 
 pub const DEFAULT_COLORSCHEMES_TOML: &str = include_str!("defaults/colorschemes.toml");
@@ -136,7 +134,6 @@ pub fn init_default_config() -> Result<PathBuf> {
     seed(&dir.join("colorschemes.toml"), DEFAULT_COLORSCHEMES_TOML)?;
     seed(&dir.join("config.toml"), DEFAULT_CONFIG_TOML)?;
     seed(&dir.join("calendar.toml"), DEFAULT_CALENDAR_TOML)?;
-    seed(&dir.join("news.toml"), DEFAULT_NEWS_TOML)?;
     seed(&dir.join("feeds@ai.toml"), DEFAULT_FEEDS_AI_TOML)?;
     seed(&dir.join("llm.toml"), DEFAULT_LLM_TOML)?;
 
@@ -270,16 +267,6 @@ mod tests {
         // in — slim builds drop the type references but the TOML strings
         // themselves stay so `seed_defaults` keeps populating them at
         // install time.
-        #[cfg(feature = "widget-clock")]
-        {
-            let _: crate::widgets::clock::ClockConfig =
-                toml::from_str(DEFAULT_CLOCK_TOML).expect("clock seed should parse");
-        }
-        #[cfg(feature = "widget-weather")]
-        {
-            let _: crate::widgets::weather::WeatherConfig =
-                toml::from_str(DEFAULT_WEATHER_TOML).expect("weather seed should parse");
-        }
         #[cfg(feature = "widget-calendar")]
         {
             let cal: crate::widgets::calendar::CalendarConfig =
@@ -287,15 +274,6 @@ mod tests {
             assert!(
                 !cal.events.is_empty(),
                 "calendar seed should ship example events"
-            );
-        }
-        #[cfg(feature = "widget-news")]
-        {
-            let news: crate::widgets::news::NewsConfig =
-                toml::from_str(DEFAULT_NEWS_TOML).expect("news seed should parse");
-            assert!(
-                !news.feeds.is_empty(),
-                "news seed should ship example feeds"
             );
         }
         #[cfg(feature = "widget-feeds")]
@@ -311,13 +289,6 @@ mod tests {
             toml::from_str(DEFAULT_LLM_TOML).expect("llm seed should parse");
         assert!(llm.enabled);
         assert_eq!(llm.provider.name, "anthropic");
-        #[cfg(feature = "widget-stocks")]
-        {
-            let stocks: crate::widgets::stocks::StocksConfig =
-                toml::from_str(DEFAULT_STOCKS_TOML).expect("stocks seed should parse");
-            assert!(!stocks.indices.is_empty());
-            assert!(!stocks.watchlist.is_empty());
-        }
     }
 
     #[test]

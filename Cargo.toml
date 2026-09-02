@@ -35,20 +35,14 @@ default = ["widgets-all"]
 # unconditional — gating it would either need every widget to opt in or
 # break the runtime, neither of which is worth the LOC.
 widget-calendar = ["dep:roxmltree", "dep:ical"]
-widget-news = ["dep:feed-rs", "dep:readability", "dep:url"]
 widget-email = ["dep:imap", "dep:native-tls", "dep:mail-parser", "dep:html2text"]
-widget-resources = ["dep:sysinfo"]
 widget-notes = []
-# Feeds depends on news's sanitize_summary helper and renders article
-# images via ratatui-image, so it pulls both widget-news and the image
-# stack directly. Hosts the tabbed single-source RSS reader (WSJ,
-# Barron's, MarketWatch, …).
-widget-feeds = ["widget-news", "dep:image", "dep:ratatui-image"]
+# Renders article images via ratatui-image, so it pulls the image stack
+# directly. Hosts the tabbed multi-source RSS reader.
+widget-feeds = ["dep:feed-rs", "dep:image", "dep:ratatui-image"]
 widgets-all = [
   "widget-calendar",
-  "widget-news",
   "widget-email",
-  "widget-resources",
   "widget-notes",
   "widget-feeds",
 ]
@@ -88,7 +82,7 @@ async-trait = "0.1"
 futures = "0.3"
 open = "5"
 urlencoding = "2"
-feed-rs = { version = "2", optional = true }   # widget-news (+ widget-feeds via news)
+feed-rs = { version = "2", optional = true }   # widget-feeds
 lru = "0.12"
 roxmltree = { version = "0.20", optional = true } # widget-calendar (CalDAV provider)
 ical = { version = "0.11", optional = true }     # widget-calendar (CalDAV provider)
@@ -101,13 +95,6 @@ notify = "6"
 # math against text that can contain CJK / emoji / wide glyphs (where
 # `chars().count()` no longer matches what the terminal renders).
 unicode-width = "0.1"
-# Mozilla's Readability port for Rust — used by the news widget to extract
-# the readable article body from an HTML page before handing it to the
-# LLM for summarization. Lazy / on-demand; only fires when the user
-# explicitly opts into the LLM summary via `s`.
-readability = { version = "0.3", optional = true }
-# `readability::extract` takes a `&Url` for resolving relative links.
-url = { version = "2", optional = true }
 dirs = "5"
 clap = { version = "4", features = ["derive"] }
 
@@ -118,11 +105,7 @@ clap = { version = "4", features = ["derive"] }
 # Cmd+V silently paste stale content.
 arboard = "3"
 
-# System metrics (powers the Resources widget). Cross-platform read-only
-# CPU / memory / process snapshots; no FFI of our own.
-sysinfo = { version = "0.32", default-features = false, features = ["system"], optional = true }
-
-# Inline image rendering (powers the Gallery widget). Detects the host
+# Inline image rendering (powers the Feeds widget's article images). Detects the host
 # terminal's image protocol — iTerm2, Kitty, Sixel — and falls back to
 # unicode halfblocks when none is available. Pulls in the `image` crate
 # for PNG/JPEG/GIF decoding.

@@ -9,13 +9,9 @@ pub use view_tier::ViewTier;
 pub mod calendar;
 #[cfg(feature = "widget-email")]
 pub mod email;
-#[cfg(feature = "widget-news")]
-pub mod news;
 #[cfg(feature = "widget-notes")]
 pub mod notes;
 pub mod registry;
-#[cfg(feature = "widget-resources")]
-pub mod resources;
 pub mod stack;
 #[cfg(feature = "widget-feeds")]
 pub mod feeds;

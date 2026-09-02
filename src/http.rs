@@ -50,7 +50,6 @@ pub fn shared() -> reqwest::Client {
 /// specifically penalize that classic RFC-crawler pattern harder than an
 /// anonymous browser UA, even though both eventually hit the same per-IP
 /// rate limits. Paired with the Accept/Sec-Fetch-* headers a real browser
-/// sends on a top-level navigation; see callers in `widgets::news::provider`,
-/// `widgets::feeds::provider`, and `widgets::news::fetch_and_extract_body`.
+/// sends on a top-level navigation; see callers in `widgets::feeds::provider`.
 pub const BROWSER_USER_AGENT: &str =
     "Mozilla/5.0 (X11; Linux x86_64; rv:120.0) Gecko/20100101 Firefox/120.0";

@@ -41,22 +41,10 @@ pub const WIDGETS: &[WidgetDescriptor] = &[
         factory: super::calendar::build,
         default_in_first_run: true,
     },
-    #[cfg(feature = "widget-news")]
-    WidgetDescriptor {
-        kind: super::news::KIND,
-        factory: super::news::build,
-        default_in_first_run: true,
-    },
     #[cfg(feature = "widget-email")]
     WidgetDescriptor {
         kind: super::email::KIND,
         factory: super::email::build,
-        default_in_first_run: false,
-    },
-    #[cfg(feature = "widget-resources")]
-    WidgetDescriptor {
-        kind: super::resources::KIND,
-        factory: super::resources::build,
         default_in_first_run: false,
     },
     #[cfg(feature = "widget-notes")]
@@ -131,10 +119,10 @@ mod tests {
     /// Core-widget smoke test for the default-features dashboard. Mirrors
     /// the seed layout in `config::DEFAULT_CONFIG_TOML` — if either drifts,
     /// the empty-config first-run experience breaks.
-    #[cfg(all(feature = "widget-calendar", feature = "widget-news"))]
+    #[cfg(all(feature = "widget-calendar", feature = "widget-feeds"))]
     #[test]
     fn core_widgets_are_present() {
-        for kind in ["calendar", "news"] {
+        for kind in ["calendar", "feeds"] {
             assert!(
                 find(kind).is_some(),
                 "core widget {kind} missing from registry"
