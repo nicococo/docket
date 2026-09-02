@@ -10,9 +10,9 @@ in Rust with [ratatui](https://ratatui.rs).
 
 ![docket dashboard: calendar, an AI news feed, a kanban notes board, and an email inbox](assets/screenshot.png)
 
-No accounts, no telemetry, no OAuth. Everything is plain TOML under
-`~/.config/docket/` — hand-edit it, back it up, sync it with dotfiles,
-whatever you'd do with any other config.
+No accounts, no telemetry, no OAuth. Everything lives in one plain
+TOML file, `~/.config/docket/config.toml` — hand-edit it, back it up,
+sync it with dotfiles, whatever you'd do with any other config.
 
 ```sh
 git clone https://github.com/nicococo/docket.git && cd docket
@@ -39,9 +39,11 @@ docket                          # first run seeds a working default layout
   directly; hand-edit credentials under `credentials/` (0600 perms).
   No accounts, no telemetry, no OAuth, nothing phones home beyond the
   provider you point a widget at yourself.
-- **Configurable, not the point** — live TOML reload, a composable
-  grid, nine colour schemes, Focus Zoom (`z`). All there when you want
-  to shape it, none of it what docket is actually for.
+- **One layout, on purpose** — calendar, feeds, notes, and email in a
+  fixed 4-pane arrangement. No grid to assemble, no widget catalogue
+  to pick from; docket already decided the shape so you don't have
+  to. Live TOML reload, nine colour schemes, and Focus Zoom (`z`) are
+  still there — just not the point.
 
 ---
 
@@ -64,15 +66,16 @@ docket --version
 | `make test` | run the test suite |
 | `make uninstall` / `make clean` | remove the binary / `cargo clean` |
 
-**Slim builds** — every widget is its own Cargo feature; the default
-`widgets-all` turns them all on:
+**Slim builds** — each of the 4 panes is its own Cargo feature; the
+default `widgets-all` turns them all on:
 
 ```sh
-cargo install --path . --no-default-features --features widget-calendar,widget-news
+cargo install --path . --no-default-features --features widget-calendar,widget-feeds
 ```
 
-Available: `widget-calendar`, `widget-news`, `widget-feeds`,
-`widget-email`, `widget-notes`, `widget-resources`.
+Available: `widget-calendar`, `widget-feeds`, `widget-email`,
+`widget-notes`. A pane whose feature isn't compiled in just renders
+empty.
 
 **Updating**: `git pull && make install PREFIX=~/.local`.
 
@@ -84,14 +87,12 @@ terminal; force one with `TERMINAL=alacritty …`).
 
 ## Quickstart
 
-First launch writes `~/.config/docket/config.toml` (a starter
-calendar + AI news + notes + email layout) plus a default TOML per
-widget kind. From there:
+First launch writes one `~/.config/docket/config.toml` with working
+example content already filled in under `[calendar]`, `[feeds]`,
+`[notes]`, `[email]`, and `[llm]`. From there:
 
-1. Hand-edit `config.toml`'s `[layout]` to add/remove/rearrange panes.
-2. Edit each widget's own TOML (`calendar.toml`, `news.toml`, …) for
-   feeds, providers, folders.
-3. Fill in credentials where needed — templates are seeded under
+1. Hand-edit each table for your own feeds, providers, and folders.
+2. Fill in credentials where needed — templates are seeded under
    `credentials/`; no OAuth, just TOML. See
    [INSTRUCTIONS.md](INSTRUCTIONS.md) for the walkthrough per provider.
 
@@ -105,22 +106,21 @@ keybinding overlay.
 
 Everything lives under `~/.config/docket/`:
 
-| file | what it controls |
+| path | what it controls |
 |---|---|
-| `config.toml` | theme, mouse-scroll direction, grid layout + cell placements |
-| `colorschemes.toml` | theme palettes (`default`, `gruvbox`, `nord`, `tokyonight`, …) |
-| `calendar.toml` / `email.toml` / `news.toml` / `feeds.toml` / `notes.toml` / `resources.toml` | per-widget settings |
-| `llm.toml` | active LLM provider, model, rate limit |
+| `config.toml` | one file: `[global]` (theme, mouse-scroll, …) plus a `[calendar]` / `[feeds]` / `[notes]` / `[email]` / `[llm]` table per pane |
 | `credentials/` | API keys + app passwords, 0600 perms |
 | `notes/<instance>/` | one `.md` file per note |
 
-Hand-edit anything — the config watcher picks up changes live, no
-`:reload` needed. Any widget's TOML can also carry a `[colors]` block
-to override the active theme just for that widget:
+Colour palettes (`default`, `gruvbox`, `nord`, `tokyonight`, …) are
+built into the binary — switch with `:scheme <name>`, no file to edit.
+
+Hand-edit `config.toml` — the config watcher picks up changes live,
+no `:reload` needed. Any pane's table can also carry a `[colors]`
+block to override the active theme just for that pane:
 
 ```toml
-# calendar.toml
-[colors]
+[calendar.colors]
 border.focused = { fg = "#e07b00", modifiers = ["bold"] }
 ```
 
@@ -135,8 +135,7 @@ border.focused = { fg = "#e07b00", modifiers = ["bold"] }
 | `Tab` / `Shift+Tab` | cycle focused widget |
 | `Shift+<letter>` | jump to a widget by its shortcut letter |
 | `z` / `Esc` | zoom the focused widget in / out |
-| `.` / `,` | rotate the active widget in a stack pane |
-| `:` | command bar (`:scheme <name>`, `:reload`, `:news <terms>`) |
+| `:` | command bar (`:scheme <name>`, `:reload`, `:ai <terms>`) |
 | `?` | full keybinding overlay (per-widget keys included) |
 | `q` / `Ctrl+C` | quit |
 
@@ -161,7 +160,7 @@ docket --version
 
 | where | what |
 |---|---|
-| `~/.config/docket/*.toml` | your config |
+| `~/.config/docket/config.toml` | your config |
 | `~/.config/docket/credentials/` (0600) | API keys, app passwords |
 | `~/.config/docket/notes/` | notes as plain `.md` |
 | `~/.cache/docket/` | regenerable caches; swept after 30 days |
@@ -186,8 +185,8 @@ if that matters to you, and prefer app passwords over master passwords.
 - **`docket` not found** — make sure `$(PREFIX)/bin` is on `$PATH`.
 - **Feed images look chunky** — your terminal doesn't speak iTerm2 /
   Kitty / Sixel graphics; docket falls back to unicode half-blocks.
-- **A layout cell is empty / logs "unknown widget kind"** — that
-  widget isn't compiled in (slim build) or doesn't exist.
+- **A pane is empty / logs "unknown widget kind"** — that pane's
+  widget isn't compiled in (slim build).
 - **Logs**: `tail -f ~/.config/docket/docket.log`.
 - **Reset**: move aside `~/.config/docket/` and re-run `docket --init`.
 

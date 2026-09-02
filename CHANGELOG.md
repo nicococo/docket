@@ -6,8 +6,53 @@ the `Cargo.toml` `version` field.
 
 ## [Unreleased]
 
+### Changed
+
+- **docket is now a fixed 4-pane app, not a configurable dashboard.**
+  Calendar, Feeds (AI news), Notes, and Email always render in the
+  same arrangement — the `[layout]` grid, per-cell placement, and
+  `stack` (multi-widget tab multiplexing) are gone. This is a
+  deliberate narrowing: docket exists to pull information sources
+  together and move content between them, not to be a customizable
+  widget canvas.
+- **Config collapses to one file**, `~/.config/docket/config.toml`,
+  with a table per pane (`[global]`, `[calendar]`, `[feeds]`,
+  `[notes]`, `[email]`, `[llm]`) instead of `config.toml` +
+  `calendar.toml` + `news.toml`/`feeds@<instance>.toml` +
+  `email.toml` + `notes.toml` + `llm.toml` + `colorschemes.toml`.
+  `credentials/` is unchanged (still a separate directory with 0600
+  perms — secrets don't belong in a file you sync to dotfiles). The
+  config watcher now reparses the one file and reapplies every pane's
+  config on any change, rather than dispatching by changed filename.
+  **Breaking**: existing installs must delete `~/.config/docket/` and
+  re-run `docket --init`, or hand-migrate their settings into the new
+  single-file shape — there is no migration tool.
+- Colour palettes are now compiled into the binary
+  (`src/theme/builtin_schemes.toml`) instead of a user-editable
+  `colorschemes.toml`; `:scheme <name>` still works, just switching
+  between built-in palettes rather than re-reading a file.
+- ICS gained a proper setup walkthrough in `INSTRUCTIONS.md`
+  (including multi-account via `[[feeds]]`), since it's now the
+  documented way to add multiple calendar accounts (CalDAV is
+  single-account; the old multi-account docs covered Google/Outlook
+  OAuth specifically).
+
 ### Removed
 
+- **The Resources and News widgets**, entirely. Resources (CPU/mem
+  monitor) had no dependents and was off-thesis for an
+  information-distillation tool. News (single-feed RSS reader) had
+  been fully superseded by Feeds (the tabbed multi-source RSS reader)
+  in every real layout; Feeds never actually depended on News's code
+  despite a stale `Cargo.toml` comment claiming otherwise. Also
+  removes `ui::chart` and `view_tier::row_split`, which existed solely
+  to serve Resources' sparkline/process-list rendering.
+- **Multi-instance widgets** (`kind@instance`, e.g. `feeds@ai`,
+  `feeds@wsj`). With a fixed one-of-each-kind layout there's no more
+  need for multiple instances of the same widget kind — Feeds already
+  supports multiple *tabs* within its one pane via repeated
+  `[[feeds.feeds]]` entries, which was the only real "multiple
+  sources" need.
 - **Multi-profile support**, entirely: `src/config/profiles.rs`,
   `src/config/migrate.rs` (the old flat-config → profiles migration
   tooling), the `--profile`/`-p`/`--new-profile`/`--list-profiles`/
@@ -40,14 +85,6 @@ the `Cargo.toml` `version` field.
   both existed solely to support OAuth token writes and client
   registrations; every remaining credential file is user-written, so
   `credentials::load` is now the module's only entry point.
-
-### Changed
-
-- ICS gained a proper setup walkthrough in `INSTRUCTIONS.md`
-  (including multi-account via `[[feeds]]`), since it's now the
-  documented way to add multiple calendar accounts (CalDAV is
-  single-account; the old multi-account docs covered Google/Outlook
-  OAuth specifically).
 
 ## [0.1.0] — docket fork
 

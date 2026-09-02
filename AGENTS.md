@@ -3,10 +3,10 @@
 ## What This Is
 
 docket is a keyboard-driven terminal dashboard (Rust + Ratatui) that
-displays calendar, news, a tabbed single-source RSS reader (Feeds),
-email, system resources, and a vim-flavoured notes pad in a
-configurable grid layout. Cells can be single widgets or **stacks**
-that rotate between multiple widgets. A young fork of
+displays calendar, a tabbed multi-source RSS reader (Feeds), a
+vim-flavoured notes pad, and email in one **fixed** 4-pane layout —
+docket is deliberately opinionated, not a configurable canvas (see
+`src/pane_layout.rs`). A young fork of
 [glint](https://github.com/ntrospect0/glint) (see `README.md` →
 Origins); shipping under GPL v3-or-later (see `LICENSE` +
 `CONTRIBUTING.md`).
@@ -23,11 +23,9 @@ For user-facing setup, see `README.md` and `INSTRUCTIONS.md`.
 - **serde + toml** for config; **serde_json** for API responses
 - **chrono + chrono-tz** for timezone-aware date/time
 - **strsim** for fuzzy command matching
+- **feed-rs** for RSS/Atom parsing (Feeds widget)
 - **ratatui-image + image** for the Feeds widget's inline article images
 - **imap + native-tls + mail-parser** for the Email widget's IMAP path
-- **readability + url** for the News widget's optional article-body
-  extraction (LLM summaries)
-- **sysinfo** for the Resources widget's CPU / memory / process info
 - **lru + sha2** for in-memory caches keyed by content hash
 - Config format: **TOML** (not JSON, not YAML)
 
@@ -41,19 +39,17 @@ src/
 ├── http.rs                  # Process-wide shared reqwest::Client (`shared()`)
 ├── clipboard.rs             # OSC-52 clipboard write helper
 ├── runtime_state.rs         # Per-process state persisted to ~/.config/docket/.runtime_state.toml
+├── pane_layout.rs           # PaneAreas — the fixed 4-pane rects (calendar/feeds/notes/email)
 ├── cache/
 │   └── mod.rs               # Persistent on-disk cache (JSON + bytes). See Cache Layer.
 ├── config/
-│   ├── mod.rs               # Per-widget TOML loader; XDG paths; --init seeds
-│   ├── layout.rs            # Grid layout parsing and resolution
-│   ├── types.rs             # Top-level Config struct
-│   └── watcher.rs           # `notify`-based config file watcher
+│   ├── mod.rs               # Single config.toml loader; widget_section_json bridge; XDG paths; --init seed
+│   ├── types.rs             # Top-level Config struct ([global] + one field per widget)
+│   └── watcher.rs           # `notify`-based watcher on config.toml
 ├── widgets/
 │   ├── mod.rs               # Widget trait, WidgetCtx, WidgetManager
 │   ├── registry.rs          # WIDGETS table — add a descriptor to register
-│   ├── stack.rs             # StackWidget — composite cell holding N child widgets
-│   │                        #   with tab-strip rotation via . / ,
-│   ├── calendar/, news/, email/, resources/, notes/, feeds/
+│   ├── calendar/, email/, notes/, feeds/
 │   │   └── mod.rs + helpers — each is a self-contained widget module
 │   │      with `pub const KIND` and `pub fn build(&WidgetCtx)`.
 ├── llm/
@@ -64,7 +60,8 @@ src/
 │   ├── rate_limiter.rs      # Token-bucket request budget tracking
 │   └── cache.rs             # In-memory LRU response cache (L1), TTL-evicted
 ├── theme/
-│   └── mod.rs               # Color scheme loader, per-widget overrides
+│   ├── mod.rs               # Color scheme loader, per-widget overrides
+│   └── builtin_schemes.toml # Compiled-in palettes (not a user-editable file)
 └── ui/
     ├── mod.rs               # Top-level renderer, unified title row helper,
     │                        #   command bar, status bar wiring
@@ -79,10 +76,10 @@ Five extension points define the architecture — know these before
 touching anything material.
 
 ### Widget (src/widgets/mod.rs)
-The runtime contract for everything that lives in a grid cell. The
-trait is broader than this excerpt (mouse, keybindings, shortcut prefs,
-theme reload, composite-child plumbing for stacks) — see the source
-for the full surface.
+The runtime contract for each of the 4 fixed panes. The trait is
+broader than this excerpt (mouse, keybindings, shortcut prefs, theme
+reload) — see the source for the full surface. There is no more
+"stack"/composite-child concept — each pane holds exactly one widget.
 
 ```rust
 pub trait Widget: Send + Sync {
@@ -101,10 +98,6 @@ pub trait Widget: Send + Sync {
     fn set_app_theme(&mut self, _: Arc<Theme>) {}
     fn shortcut_preferences(&self) -> &[char] { &[] }
     fn set_shortcut(&mut self, _: Option<char>) {}
-    fn shortcut(&self) -> Option<char> { None }
-    fn title_metadata(&self) -> Option<String> { None }
-    fn composite_children(&self) -> Vec<String> { vec![] }
-    // ... (more composite hooks used by stack.rs)
 }
 ```
 
@@ -113,10 +106,11 @@ Construction-time bundle every widget factory receives:
 
 ```rust
 pub struct WidgetCtx {
-    pub instance: String,                       // "main" or the @-suffix
+    pub instance: String,                       // "main", or "ai" for the feeds pane — cache-scoping only now
     pub theme: Arc<Theme>,
     pub llm: Option<Arc<dyn LlmProvider>>,      // None when LLM disabled / unconfigured
     pub cache: ScopedCache,                     // already scoped to (kind, instance)
+    pub config: serde_json::Value,              // this widget's table from config.toml, e.g. `[calendar]`
 }
 ```
 
@@ -152,14 +146,18 @@ The single registration point for widget kinds:
 pub struct WidgetDescriptor {
     pub kind: &'static str,
     pub factory: WidgetFactory,                // &WidgetCtx -> Box<dyn Widget>
-    pub default_in_first_run: bool,
-    pub auth_requirements: &'static [AuthRequirement],
 }
 
-pub const WIDGETS: &[WidgetDescriptor] = &[ /* ... 6 entries ... */ ];
+pub const WIDGETS: &[WidgetDescriptor] = &[ /* calendar, email, notes, feeds */ ];
 ```
 
 ## Adding a New Widget
+
+docket is deliberately a **fixed 4-pane app**, not an extensible
+widget canvas — adding a 5th pane means also deciding where it lives
+in `src/pane_layout.rs` and `app.rs`'s `register_default_widgets`,
+which is a real design decision, not a drop-in extension point like
+it used to be. If you're doing this anyway:
 
 1. Create `src/widgets/<name>/mod.rs` implementing the `Widget` trait.
 2. Export at module level: `pub const KIND: &str = "<name>";` and
@@ -169,12 +167,15 @@ pub const WIDGETS: &[WidgetDescriptor] = &[ /* ... 6 entries ... */ ];
    `src/widgets/mod.rs`. Add to the `widgets-all` umbrella.
 4. Append a `WidgetDescriptor` to `WIDGETS` in
    `src/widgets/registry.rs`.
+5. Add it to `PaneAreas`/`FOCUS_ORDER` in `src/pane_layout.rs` and to
+   `register_default_widgets` in `src/app.rs` — this is the part that
+   used to be config-driven and now isn't.
+6. Add its config struct as a field on `Config` in `src/config/types.rs`
+   and to the merged seed at `src/config/defaults/config.toml`.
 
-That's it. No edits to `app.rs` or `main.rs` are needed. The cache
-scope is granted automatically by the factory contract; a fresh
-instance's TOML is whatever `T::default()` produces (no interactive
-setup flow generates it for you — see `config::init_default_config`
-for how the default seed files themselves are written).
+The cache scope is granted automatically by the factory contract; a
+fresh instance's config is whatever `T::default()` produces if its
+table is absent from `config.toml`.
 
 If your widget fetches remote data, use `ctx.cache` (see **Cache
 Layer** below) and `crate::http::shared()` for the HTTP client unless
@@ -191,30 +192,41 @@ per-widget TOML flag (`summarize_with_llm = true`).
 
 ## Config System
 
-All config lives at `~/.config/docket/`:
+Everything lives in one file, `~/.config/docket/config.toml`:
 
 ```
-config.toml           — [global], [layout] grid, [[layout.cells]] placements
-colorschemes.toml     — named [schemes.*] palettes
-calendar.toml         — providers, calendar_ids, [[events]]
-news.toml             — [[feeds]], [[topics]], summarize_with_llm
-feeds.toml            — [[feeds]] for one tabbed single-source instance
-email.toml            — provider, folders, summarize_with_llm
-resources.toml        — poll cadence, top-N processes
-notes.toml            — per-instance shortcut + colour overrides
-llm.toml              — [provider] name (anthropic / openai), model, [limits]
-notes/<instance>/     — one .md per note; mtime sorts the list
-credentials/          — API keys, IMAP/CalDAV passwords (0600)
+[global]              — theme, mouse_scroll, background_poll_ratio, zoom_margin, …
+[calendar]             — providers, calendar_ids, [[calendar.events]]
+[feeds]                 — [[feeds.feeds]] (one tabbed multi-source RSS pane)
+[email]                 — provider, [[email.accounts]], summarize_with_llm
+[notes]                 — notes_dir
+[llm]                   — [llm.provider] name (anthropic / openai), model, [llm.limits]
+notes/<instance>/      — one .md per note; mtime sorts the list
+credentials/            — API keys, IMAP/CalDAV passwords (0600) — the one thing NOT in config.toml
 ```
 
-Cells in `config.toml` reference widgets as `kind` (single) or
-`widgets = [kind1, kind2, …]` (stack). The `kind@instance` shorthand
-selects a non-default config file (`feeds@wsj.toml`,
-`calendar@work.toml`, etc.).
+Colour palettes are compiled into the binary (`src/theme/builtin_schemes.toml`,
+embedded via `include_str!` + `LazyLock`) — no on-disk colorschemes file.
 
-Config is layered: built-in defaults → user TOML → CLI flags → env vars.
-Files are watched via `notify`; changes trigger live reload via
-`apply_config()`. The user can also force reload with `:reload`.
+`config::load_raw()` parses `config.toml` once into a raw `toml::Value`;
+`config::widget_section_json(raw, "calendar")` pulls out one table as
+`serde_json::Value` for `WidgetCtx.config` — this is the bridge that
+lets widget config structs skip deriving `Serialize`. `Config` in
+`src/config/types.rs` also carries typed fields (`calendar`, `feeds`,
+`notes`, `email`, `llm`) for direct in-memory reads (e.g. email's
+extract-actions reading `config.notes.notes_dir`) and as what the
+seed file is verified against in tests.
+
+`config.toml` is watched via `notify` (parent-dir, non-recursive —
+editors rename-on-save). On any change, `apply_config_change` reparses
+the whole file and calls `apply_config` on all 4 registered panes
+unconditionally (cheap, idempotent — no per-file dispatch needed
+anymore since there's only one file). The user can also force reload
+with `:reload`. **Known gap**: `[llm]` changes reparse into
+`app.config.llm` but aren't pushed into already-constructed widgets'
+`Arc<dyn LlmProvider>` — that needs a new `Widget` trait hook across
+every LLM-consuming widget, restart still required for LLM provider
+changes.
 
 ## LLM Integration
 
@@ -269,7 +281,7 @@ any flat key namespace per widget (`articles`, `quotes-1d`, `messages`,
 On startup the app runs `Cache::sweep_older_than(30d)` to drop orphan
 cache files left by removed widgets or renamed instances.
 
-### Fetch-payload pattern (reference: `news/mod.rs`)
+### Fetch-payload pattern (reference: `feeds/mod.rs`)
 
 1. In the constructor, `cache.load::<T>(key)` and seed the in-memory state.
 2. Translate `entry.age()` into a synthetic `Instant` so the existing
@@ -278,7 +290,7 @@ cache files left by removed widgets or renamed instances.
 3. After a successful fetch, `cache.store(key, &payload)`. Failures log
    and continue — caching is best-effort.
 
-### LLM-derivation pattern (reference: `news/mod.rs`, `email/mod.rs`)
+### LLM-derivation pattern (reference: `feeds/mod.rs`, `email/mod.rs`)
 
 Cache per-record derivations (article summaries, message summaries)
 when they're content-stable. Key by a SHA-256 prefix of the record's
@@ -299,8 +311,8 @@ widgets don't reinvent them.
 ### Shared HTTP client (src/http.rs)
 
 `crate::http::shared()` returns a process-wide `reqwest::Client` (docket
-UA, 30s timeout, no cookies). Callers include news, feeds, calendar
-(CalDAV, ICS), LLM providers. Per-request timeout overrides via
+UA, 30s timeout, no cookies). Callers include feeds, calendar (CalDAV,
+ICS), LLM providers. Per-request timeout overrides via
 `RequestBuilder::timeout` where a shorter bound matters.
 
 Bespoke clients deliberately kept for callers needing client-scoped state:
@@ -310,7 +322,7 @@ Bespoke clients deliberately kept for callers needing client-scoped state:
 ### Bounded in-memory state
 
 Every widget that accumulates data has a defined upper bound:
-- News: drops summaries for articles that rotated out of the feed.
+- Feeds: drops summaries for articles that rotated out of the feed.
 - Email: caps in-memory body length at 4 KB (full message read via `o`
   opens the user's mail client).
 - LLM cache: 128 entries with 7-day TTL.
@@ -323,9 +335,10 @@ collector.
 - **Graph rendering**: braille characters (U+2800–U+28FF) for the
   intraday + multi-period traces. Box-drawing fallback available.
 - **Colours**: ANSI semantic colours (Red, Green, etc.) for default
-  text inherit from the terminal theme. Each colour scheme in
-  `colorschemes.toml` overrides those defaults; per-widget `[colors]`
-  blocks further override per pane.
+  text inherit from the terminal theme. Each compiled-in colour scheme
+  (`src/theme/builtin_schemes.toml`) overrides those defaults;
+  per-pane `[colors]` blocks in `config.toml` further override per
+  pane.
 - **Cache**: persistent JSON + bytes under `~/.cache/docket/`; widgets
   seed on construction, refresh in background, persist on success.
 - **Command routing**: focused widget gets priority; `:cmd` falls
@@ -359,7 +372,7 @@ collector.
 cargo build --features widgets-all          # debug build, all widgets
 cargo run                                    # debug binary with default config
 cargo run -- --init                          # seed ~/.config/docket/
-cargo test --features widgets-all            # full suite (~540 tests)
+cargo test --features widgets-all            # full suite (~450 tests)
 cargo clippy --features widgets-all          # lint
 cargo fmt                                    # format
 make install PREFIX=~/.local                 # build + copy to ~/.local/bin

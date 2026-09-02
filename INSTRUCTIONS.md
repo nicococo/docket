@@ -30,10 +30,11 @@ you just fill it in.
    username = "your.apple.id@icloud.com"
    app_password = "abcd-efgh-ijkl-mnop"
    ```
-5. Add a `[[providers]]` block with `kind = "caldav"` to `~/.config/docket/calendar.toml`:
+5. Add a `[[calendar.providers]]` block with `kind = "caldav"` to
+   `~/.config/docket/config.toml`:
 
    ```toml
-   [[providers]]
+   [[calendar.providers]]
    kind = "caldav"
    ```
 
@@ -86,15 +87,15 @@ label = "family"
 url = "https://calendar.google.com/calendar/ical/y/basic.ics"
 ```
 
-Then add one `[[providers]]` block per feed in `~/.config/docket/calendar.toml`,
-matching `account` to the feed's `label`:
+Then add one `[[calendar.providers]]` block per feed in
+`~/.config/docket/config.toml`, matching `account` to the feed's `label`:
 
 ```toml
-[[providers]]
+[[calendar.providers]]
 kind = "ics"
 account = "work"
 
-[[providers]]
+[[calendar.providers]]
 kind = "ics"
 account = "family"
 ```
@@ -134,9 +135,10 @@ username = "alice@gmail.com"
 app_password = "abcd-efgh-ijkl-mnop"
 ```
 
-Then in `email.toml`:
+Then in `config.toml`'s `[email]` table:
 
 ```toml
+[email]
 provider = "imap"
 folders = ["INBOX"]
 ```
@@ -147,10 +149,10 @@ Docket will connect lazily on the first fetch.
 
 ## LLM provider key (optional, for summaries)
 
-The news + email widgets can summarise expanded items using a
+The feeds + email panes can summarise expanded items using a
 configurable LLM. Docket ships two providers out of the box:
 **Anthropic (Claude)** and **OpenAI (GPT)**. You pick one — the
-widgets call whichever is active in `llm.toml`.
+panes call whichever is active in `config.toml`'s `[llm]` table.
 
 ### Anthropic (Claude)
 
@@ -169,23 +171,25 @@ widgets call whichever is active in `llm.toml`.
    ```toml
    api_key = "sk-..."
    ```
-3. The default OpenAI model is `gpt-5-mini`. Change it in `llm.toml`
-   if you want a different model — the field is sent verbatim to the
-   OpenAI Chat Completions API, so any model name your account can
-   call (e.g. `gpt-4o-mini`, `gpt-4o`) works.
+3. The default OpenAI model is `gpt-5-mini`. Change it in
+   `config.toml`'s `[llm.provider]` table if you want a different
+   model — the field is sent verbatim to the OpenAI Chat Completions
+   API, so any model name your account can call (e.g. `gpt-4o-mini`,
+   `gpt-4o`) works.
 
 ### Activating LLM features
 
 After the key is on disk:
 
-- `llm.toml` carries `[provider] name = "anthropic"` or `"openai"` —
+- `[llm.provider] name = "anthropic"` or `"openai"` in `config.toml` —
   set this by hand to pick which provider is active.
-- `summarize_with_llm = true` in `news.toml` / `email.toml` opts each
-  widget into summaries. Both default to `true` once a key is configured.
+- `summarize_with_llm = true` in the `[email]` table opts email into
+  summaries; it defaults to `true` once a key is configured. The feeds
+  pane always offers `s summarize` regardless.
 
-If no key is configured (or `enabled = false` in `llm.toml`), the
-`s summarize` keyboard hint stays hidden in the email widget; the
-news widget renders the raw RSS excerpt instead.
+If no key is configured (or `enabled = false` in `[llm]`), the
+`s summarize` keyboard hint stays hidden in the email pane; the feeds
+pane renders the raw RSS excerpt instead.
 
 ---
 
@@ -226,19 +230,19 @@ This wipes everything — config, tokens, cache. `docket --init` seeds fresh def
 
 ```
 ~/.config/docket/
-├── config.toml               # [global] + [layout] + [[layout.cells]]
-├── colorschemes.toml         # named [schemes.*] palettes
-├── calendar.toml  news.toml  feeds@<instance>.toml
-├── resources.toml  email.toml
-├── notes.toml  llm.toml
-├── credentials/               # account secrets (0700)
+├── config.toml                # [global] + [calendar] + [feeds] + [notes] + [email] + [llm]
+├── credentials/                # account secrets (0700)
 │   ├── caldav.toml  ics.toml  imap.toml
 │   ├── anthropic_key.toml  openai_key.toml
-├── notes/<instance>/<id>.md   # each note as a plain markdown file
+├── notes/<instance>/<id>.md    # each note as a plain markdown file
 └── .runtime_state.toml  docket.log
 ```
 
-Every `.toml` is plain text — edit in your favourite editor and either restart docket or hit `:reload` from the runtime command bar.
+Colour palettes are compiled into the binary, not a file on disk —
+switch with `:scheme <name>`.
+
+`config.toml` is plain text — edit in your favourite editor; the
+config watcher picks up changes live, no restart or `:reload` needed.
 
 ---
 
