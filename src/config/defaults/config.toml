@@ -156,6 +156,10 @@ url = "https://www.reddit.com/r/machinelearningnews/.rss"
 topic = "Data Science"
 url = "https://towardsdatascience.com/feed"
 
+[[feeds.feeds]]
+topic = "arXiv"
+url = "https://rss.arxiv.org/rss/cs.AI"
+
 # ── LLM ──────────────────────────────────────────────────────────────────────
 # Master switch. If false, every LLM-backed feature falls back to its
 # structured-only counterpart (keyword filtering, raw RSS summaries, …).
