@@ -2351,7 +2351,7 @@ impl Widget for CalendarWidget {
                 spans.push(Span::styled("]", base));
                 spans.push(Span::raw(" "));
             }
-            spans.push(Span::styled("  ←/→ nav  ·  o open", self.theme.text_dim));
+            spans.push(Span::styled("  ←/→ nav", self.theme.text_dim));
             frame.render_widget(Paragraph::new(Line::from(spans)), hint_area);
         }
 

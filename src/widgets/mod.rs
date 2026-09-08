@@ -230,6 +230,17 @@ pub trait Widget: Send + Sync {
     fn take_focus_request(&mut self) -> Option<FocusRequest> {
         None
     }
+
+    /// Drain any "please zoom/un-zoom me" signal the widget has queued
+    /// internally. The app polls this right after key dispatch; `Some(true)`
+    /// enters Focus Zoom on this widget, `Some(false)` exits zoom (only if
+    /// this widget is the current zoom target). The default returns `None`;
+    /// widgets opt in when they render content that needs full-screen room
+    /// on demand (e.g. Email's Enter popup). Treat this as one-shot — the
+    /// widget must clear its internal flag inside this call.
+    fn take_zoom_request(&mut self) -> Option<bool> {
+        None
+    }
 }
 
 /// Widget-initiated attention grab. The app's tick loop polls every

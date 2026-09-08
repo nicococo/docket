@@ -353,6 +353,11 @@ struct EmailState {
     summary_view: std::collections::HashMap<String, bool>,
     /// `Some` while the Enter popup is open for a message.
     popup: Option<AiPopup>,
+    /// One-shot signal for [`EmailWidget::take_zoom_request`]: `Some(true)`
+    /// when the popup just opened and wants full-screen room, `Some(false)`
+    /// when it just closed and should hand zoom back. Drained by the app
+    /// right after key dispatch.
+    zoom_request: Option<bool>,
     /// Last-rendered row layout for the message list: `(msg_idx, row_start, row_end_exclusive)`
     /// in offsets relative to the list_area's top. Populated on every
     /// render so `handle_mouse` can map a click row back to a message
@@ -862,7 +867,7 @@ impl EmailWidget {
         let new_idx = (st.selected as isize + delta).clamp(0, filtered.len() as isize - 1) as usize;
         st.selected = new_idx;
         // Scrolling/selecting must never mark a message read — only the
-        // explicit `u` keybinding (toggle_read_state) changes read state.
+        // explicit `space` keybinding (toggle_read_state) changes read state.
     }
 
     fn jump_to(&mut self, idx: usize) {
@@ -874,7 +879,7 @@ impl EmailWidget {
         st.selected = idx.min(filtered.len() - 1);
     }
 
-    /// Press-`u` entry point: flip the selected message between read and
+    /// Press-`space` entry point: flip the selected message between read and
     /// unread. Updates the local seen-store immediately (so the UI reacts
     /// with no network latency), then fires an async IMAP `STORE` to push
     /// the same state to the server — see [`Self::spawn_set_seen`].
@@ -1056,7 +1061,7 @@ impl EmailWidget {
     }
 
     /// Toggle expanded state on the selected message. Does *not* change
-    /// read state — only the explicit `u` keybinding
+    /// read state — only the explicit `space` keybinding
     /// ([`Self::toggle_read_state`]) does that.
     fn toggle_expand(&mut self) {
         let mut st = self.state.lock().expect("email state poisoned");
@@ -1082,6 +1087,10 @@ impl EmailWidget {
             scroll: 0,
             extract_selected: 0,
         });
+        // Ask the app to zoom this widget so the popup renders at
+        // near-full-screen size instead of being capped to the Email
+        // pane's grid cell — see `EmailWidget::take_zoom_request`.
+        st.zoom_request = Some(true);
     }
 
     /// Key dispatch while the AI popup is open. `j`/`k`/arrows scroll;
@@ -1139,6 +1148,7 @@ impl EmailWidget {
             _ => {
                 let mut st = self.state.lock().expect("email state poisoned");
                 st.popup = None;
+                st.zoom_request = Some(false);
             }
         }
         EventResult::Handled
@@ -1178,7 +1188,27 @@ impl EmailWidget {
             let result = if extract_actions::todo_marker_present(&id) {
                 extract_actions::remove_todo(&id)
             } else {
-                extract_actions::add_todo(text, &id)
+                let msg = self
+                    .filtered_messages()
+                    .into_iter()
+                    .find(|m| m.id == message_id);
+                let Some(msg) = msg else { return };
+                let sender = format_sender(&msg.from_name, &msg.from_address);
+                let subject = if msg.subject.trim().is_empty() {
+                    "(no subject)".to_string()
+                } else {
+                    msg.subject.clone()
+                };
+                let received = msg.received.format("%Y-%m-%d").to_string();
+                extract_actions::add_todo(
+                    text,
+                    &id,
+                    &extract_actions::EmailContext {
+                        sender: &sender,
+                        subject: &subject,
+                        received: &received,
+                    },
+                )
             };
             if let Err(err) = result {
                 tracing::warn!(error = %err, "email extract: todo add/remove failed");
@@ -1445,7 +1475,7 @@ impl EmailWidget {
 
     /// Press-`s` entry point. Drives the per-message Body ⇄ Summary
     /// toggle with a side-effect of expanding when the user hits it from
-    /// collapsed mode. Never changes read state — only `u`
+    /// collapsed mode. Never changes read state — only `space`
     /// ([`Self::toggle_read_state`]) does that.
     ///
     /// - **Collapsed**: expand, switch to Summary view, fire the LLM
@@ -1581,6 +1611,22 @@ impl EmailWidget {
                         .starts_with("insufficient content to")
                     {
                         SummaryState::Failed
+                    } else if action == AiAction::ExtractTodo
+                        && parse_extracted_items(text).is_none()
+                    {
+                        // A non-conforming reply here (prose instead of the
+                        // requested bare JSON, wrong schema, …) must NOT be
+                        // cached as `Ready` — `request_ai` short-circuits on
+                        // any cached result for `(id, action)` regardless of
+                        // its parseability, so an unparseable "success"
+                        // would get stuck forever with no way to retry.
+                        // `Failed` lets the user press `t` again to retry.
+                        tracing::warn!(
+                            id = %id,
+                            response = %text,
+                            "email extract: LLM response didn't parse as the expected JSON shape"
+                        );
+                        SummaryState::Failed
                     } else {
                         SummaryState::Ready(text.to_string())
                     }
@@ -1602,8 +1648,8 @@ impl EmailWidget {
     }
 
     /// True if the message should display the unread `●` indicator.
-    /// Priority: an explicit `u`-forced-unread override always wins; next a
-    /// "seen via docket" mark (auto-set on expand, or via `u`) always reads
+    /// Priority: an explicit `space`-forced-unread override always wins; next a
+    /// "seen via docket" mark (auto-set on expand, or via `space`) always reads
     /// as read; otherwise falls back to the server's own unread state.
     fn is_unread(&self, msg: &EmailMessage) -> bool {
         let seen = self.seen.lock().expect("seen-store poisoned");
@@ -2193,14 +2239,14 @@ impl Widget for EmailWidget {
         // that hint to avoid implying a binding that does nothing in this mode.
         let footer_text = if read_area.is_some() {
             if summarize_usable {
-                "↑/↓ select · ←/→ folder · ⏎ open popup · s summarize · u read/unread · d delete · r refresh"
+                "↑/↓ select · ←/→ folder · ⏎ open popup · s summarize · space read/unread · d delete · r refresh"
             } else {
-                "↑/↓ select · ←/→ folder · ⏎ open popup · u read/unread · d delete · r refresh"
+                "↑/↓ select · ←/→ folder · ⏎ open popup · space read/unread · d delete · r refresh"
             }
         } else if summarize_usable {
-            "↑/↓ select · ←/→ folder · e/click expand · ⏎ open popup · s summarize · u read/unread · d delete · r refresh"
+            "↑/↓ select · ←/→ folder · e/click expand · ⏎ open popup · s summarize · space read/unread · d delete · r refresh"
         } else {
-            "↑/↓ select · ←/→ folder · e/click expand · ⏎ open popup · u read/unread · d delete · r refresh"
+            "↑/↓ select · ←/→ folder · e/click expand · ⏎ open popup · space read/unread · d delete · r refresh"
         };
         let footer = Paragraph::new(Line::from(Span::styled(footer_text, self.theme.text_dim)))
             .alignment(Alignment::Right);
@@ -2326,7 +2372,7 @@ impl Widget for EmailWidget {
                 self.mark_dirty();
                 EventResult::Handled
             }
-            KeyCode::Char('u') => {
+            KeyCode::Char(' ') => {
                 self.toggle_read_state();
                 EventResult::Handled
             }
@@ -2344,6 +2390,10 @@ impl Widget for EmailWidget {
             }
             _ => EventResult::Ignored,
         }
+    }
+
+    fn take_zoom_request(&mut self) -> Option<bool> {
+        self.state.lock().expect("email state poisoned").zoom_request.take()
     }
 
     fn handle_mouse(&mut self, mouse: MouseEvent, area: Rect) -> EventResult {
@@ -2448,14 +2498,14 @@ impl Widget for EmailWidget {
             ("g / Home", "jump to top"),
             ("End", "jump to bottom"),
             ("e / click", "expand selected (inline)"),
-            ("Enter", "open full message in a popup"),
+            ("Enter", "open full message in a full-screen popup"),
             ("s (popup)", "AI summarize (when enabled)"),
             ("x (popup)", "AI explain (when enabled)"),
             ("t (popup)", "AI extract todos/dates → selectable list (when enabled)"),
             ("j/k (extract list)", "select a todo/date"),
             ("space (extract list)", "add/remove: todo → Notes, date → Calendar"),
             ("s", "request inline LLM summary (when enabled)"),
-            ("u", "toggle read/unread (IMAP: syncs to server)"),
+            ("space", "toggle read/unread (IMAP: syncs to server)"),
             ("d", "delete to Trash — recoverable ~30d (IMAP only, y to confirm)"),
             ("r", "force refresh"),
         ]

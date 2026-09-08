@@ -35,6 +35,17 @@ pub fn todo_item_id(message_id: &str, item_text: &str) -> String {
     item_id("todo", message_id, item_text)
 }
 
+/// Source-email context stashed alongside an extracted todo so the note
+/// entry is self-describing without having to reopen the email — sender,
+/// subject and received date, formatted by the caller (email/mod.rs) from
+/// its own `EmailMessage`/`format_sender` so this module stays free of
+/// provider-specific formatting rules.
+pub struct EmailContext<'a> {
+    pub sender: &'a str,
+    pub subject: &'a str,
+    pub received: &'a str,
+}
+
 pub fn date_item_id(message_id: &str, title: &str, date: &str) -> String {
     item_id("date", message_id, &format!("{title}\u{0}{date}"))
 }
@@ -54,7 +65,7 @@ pub fn notes_integration_available() -> bool {
 
 #[cfg(feature = "widget-notes")]
 mod notes_impl {
-    use super::{marker_line, TODO_COLUMN, TODO_NOTE_TITLE};
+    use super::{marker_line, EmailContext, TODO_COLUMN, TODO_NOTE_TITLE};
     use crate::widgets::notes::{board, store};
     use anyhow::Result;
 
@@ -108,7 +119,7 @@ mod notes_impl {
         matches!(load_todo_note(), Ok((_, _, Some(note))) if note.body.contains(&marker))
     }
 
-    pub fn add(item_text: &str, id: &str) -> Result<()> {
+    pub fn add(item_text: &str, id: &str, ctx: &EmailContext<'_>) -> Result<()> {
         let marker = marker_line(id);
         let (root, instance, existing) = load_todo_note()?;
         let mut note = match existing {
@@ -148,7 +159,15 @@ mod notes_impl {
             .expect("just ensured the Todo column exists");
         let insert_at =
             board::column_insert_line(&model, col, line_count(&note.body)).unwrap_or(0);
-        note.body = insert_lines_at(&note.body, insert_at, &[&marker, &format!("- [ ] {item_text}")]);
+        // Keep the source email's sender/subject/date on the same
+        // checklist line (rather than a trailing line) — `remove()` only
+        // ever drops the marker plus exactly one following line, so a
+        // second content line would be orphaned on removal.
+        let line = format!(
+            "- [ ] {item_text} — {}, \"{}\" ({})",
+            ctx.sender, ctx.subject, ctx.received
+        );
+        note.body = insert_lines_at(&note.body, insert_at, &[&marker, &line]);
         store::save(&root, &instance, &mut note)
     }
 
@@ -187,11 +206,11 @@ pub fn todo_marker_present(_id: &str) -> bool {
 }
 
 #[cfg(feature = "widget-notes")]
-pub fn add_todo(item_text: &str, id: &str) -> anyhow::Result<()> {
-    notes_impl::add(item_text, id)
+pub fn add_todo(item_text: &str, id: &str, ctx: &EmailContext<'_>) -> anyhow::Result<()> {
+    notes_impl::add(item_text, id, ctx)
 }
 #[cfg(not(feature = "widget-notes"))]
-pub fn add_todo(_item_text: &str, _id: &str) -> anyhow::Result<()> {
+pub fn add_todo(_item_text: &str, _id: &str, _ctx: &EmailContext<'_>) -> anyhow::Result<()> {
     Ok(())
 }
 
@@ -242,13 +261,21 @@ mod tests {
     use super::*;
     use crate::widgets::test_support::IsolatedConfigHome;
 
+    fn ctx() -> EmailContext<'static> {
+        EmailContext {
+            sender: "Jane Doe <jane@example.com>",
+            subject: "Q3 planning",
+            received: "2026-09-01",
+        }
+    }
+
     #[test]
     fn add_then_marker_present_then_remove_round_trips() {
         let _cfg = IsolatedConfigHome::new();
         let id = todo_item_id("msg-1", "Reply with numbers");
         assert!(!todo_marker_present(&id));
 
-        add_todo("Reply with numbers", &id).unwrap();
+        add_todo("Reply with numbers", &id, &ctx()).unwrap();
         assert!(todo_marker_present(&id));
 
         remove_todo(&id).unwrap();
@@ -259,14 +286,18 @@ mod tests {
     fn add_is_idempotent_and_creates_the_note_once() {
         let _cfg = IsolatedConfigHome::new();
         let id = todo_item_id("msg-2", "Send the deck");
-        add_todo("Send the deck", &id).unwrap();
-        add_todo("Send the deck", &id).unwrap();
+        add_todo("Send the deck", &id, &ctx()).unwrap();
+        add_todo("Send the deck", &id, &ctx()).unwrap();
 
         let (root, _) = crate::widgets::notes::store::resolve_root(None).unwrap();
         let notes = crate::widgets::notes::store::load_all(&root, "main");
         assert_eq!(notes.len(), 1, "add_todo must not create duplicate notes");
         let card_count = notes[0].body.matches("- [ ] Send the deck").count();
         assert_eq!(card_count, 1, "second add_todo call must be a no-op");
+        assert!(
+            notes[0].body.contains("Jane Doe <jane@example.com>"),
+            "extracted todo should carry the source email's sender"
+        );
     }
 
     #[test]

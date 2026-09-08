@@ -277,6 +277,42 @@ impl App {
         promoted
     }
 
+    /// Drain every widget's pending zoom request and honor the first one
+    /// found. `Some(true)` means "zoom me" (focuses + zooms the widget,
+    /// idempotent if it's already the zoom target); `Some(false)` means
+    /// "un-zoom me" (only acts if the widget is the *current* zoom
+    /// target — a stale request from a widget that lost zoom some other
+    /// way is a no-op). Called right after key dispatch so a widget's
+    /// own key handler (e.g. Email's Enter opening its popup) can ask
+    /// for zoom on the same keypress rather than waiting a tick.
+    fn process_zoom_requests(&mut self) -> bool {
+        let all_ids: Vec<String> = self.manager.ids().to_vec();
+        for id in all_ids {
+            let req = self.manager.get_mut(&id).and_then(|w| w.take_zoom_request());
+            match req {
+                Some(true) => {
+                    if self.zoom_target.as_ref().map(|z| z.widget_id.as_str()) != Some(id.as_str())
+                    {
+                        if let Some(pos) = self.focus_order.iter().position(|w| w == &id) {
+                            self.focus_idx = pos;
+                        }
+                        self.zoom_target = Some(ZoomTarget { widget_id: id });
+                    }
+                    return true;
+                }
+                Some(false) => {
+                    if self.zoom_target.as_ref().map(|z| z.widget_id.as_str()) == Some(id.as_str())
+                    {
+                        self.exit_zoom();
+                    }
+                    return true;
+                }
+                None => {}
+            }
+        }
+        false
+    }
+
     // ── Zoom methods ─────────────────────────────────────────────────────
 
     /// Enter zoom for the currently-focused widget. No-op when `focus_order`
@@ -988,6 +1024,11 @@ pub async fn run(config_path_override: Option<PathBuf>) -> Result<()> {
                         app.handle_global_key(key);
                     }
                 }
+                // A widget may have queued a zoom request while handling
+                // that key (e.g. Email's Enter popup asking to be shown
+                // full-screen) — honor it immediately rather than waiting
+                // for the next tick, so the popup opens already-sized big.
+                app.process_zoom_requests();
             }
             Event::Mouse(mut mouse) => {
                 let mut mouse_acted = false;
