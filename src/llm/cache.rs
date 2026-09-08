@@ -95,6 +95,7 @@ mod tests {
             }],
             max_tokens: 200,
             cache_system: false,
+            timeout_secs: None,
         }
     }
 

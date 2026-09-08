@@ -42,7 +42,7 @@ use ratatui::{
     Frame,
 };
 use ratatui_image::{Resize, StatefulImage};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::cache::ScopedCache;
 use crate::llm::{LlmMessage, LlmProvider, LlmRequest, Role};
@@ -219,6 +219,53 @@ enum SummaryState {
     Failed(String),
 }
 
+/// One article referenced by the AI digest — a subset of `FeedArticle`'s
+/// fields, just enough to render a leaf row and jump back to the real
+/// article (looked up by `url` in `FeedsState.articles`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct DigestItem {
+    title: String,
+    url: String,
+    source: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct DigestSubtopic {
+    title: String,
+    items: Vec<DigestItem>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct DigestTopic {
+    title: String,
+    subtopics: Vec<DigestSubtopic>,
+}
+
+/// The AI-generated cross-feed taxonomy — built only on an explicit
+/// `:feeds-digest` (or `r` while on the Digest tab), never automatically.
+/// `generated_at`/`source_article_count` are stamped by us after a
+/// successful parse, not trusted from the LLM's own output.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct DigestTaxonomy {
+    generated_at: chrono::DateTime<chrono::Utc>,
+    source_article_count: usize,
+    topics: Vec<DigestTopic>,
+}
+
+/// Shape the LLM is asked to return — just the taxonomy tree, no
+/// metadata (we stamp `generated_at`/`source_article_count` ourselves).
+#[derive(Debug, Deserialize)]
+struct RawDigest {
+    topics: Vec<DigestTopic>,
+}
+
+#[derive(Debug, Clone)]
+enum DigestState {
+    Requested,
+    Ready(DigestTaxonomy),
+    Failed(String),
+}
+
 /// Decoded shape of a `:<word>` command for this widget. The
 /// dispatcher accepts both the kind-level `feeds*` triple and any
 /// per-instance alias declared in `FeedsConfig.commands`
@@ -231,6 +278,8 @@ enum CommandAction {
     SummaryLength,
     /// `:<root>-refresh` — force a refresh.
     Refresh,
+    /// `:<root>-digest` — (re)generate the cross-feed AI taxonomy.
+    Digest,
 }
 
 /// Free-text search built by `:feeds <terms>`. Articles match if any
@@ -361,6 +410,21 @@ struct FeedsState {
     /// articles update landing in `articles`.
     fetching: bool,
     poll: crate::polling::PollTracker,
+    /// The last-generated cross-feed AI taxonomy, if any. `None` until
+    /// the user runs `:feeds-digest` (or an equivalent alias) at least
+    /// once; persists across restarts via `ScopedCache`.
+    digest: Option<DigestState>,
+    /// Index into the *flattened leaf items* of `digest`'s taxonomy
+    /// (topic/subtopic headers aren't selectable). Meaningful only
+    /// while `active_tab == DIGEST_TAB_LABEL`.
+    digest_selected: usize,
+    digest_scroll: u16,
+    /// Per-leaf-item `(leaf_idx, abs_y)` captured at render time so
+    /// `handle_mouse` can map a click row back to a leaf index.
+    digest_rows: Vec<(usize, u16)>,
+    /// Last-rendered digest body Rect — used for scroll-wheel routing,
+    /// mirroring `list_rect`/`expanded_rect`.
+    digest_rect: Option<Rect>,
     /// Transient status feedback (e.g. "LLM disabled — set an API key").
     status: Option<TimedFeedback<String>>,
     /// Display-state dirty bit drained by `take_dirty`. Set true by
@@ -371,6 +435,12 @@ struct FeedsState {
 
 const STATUS_TTL: Duration = Duration::from_millis(2500);
 const ALL_TAB_LABEL: &str = "All";
+/// Tab holding the AI-generated cross-feed taxonomy. Placed right after
+/// "All" (ahead of every real topic tab) so it's one keypress from the
+/// default landing tab rather than buried past a long topic list. A
+/// user-configured `[[feeds]] topic = "Digest"` would collide with this
+/// label — a low-risk, documented edge case rather than a runtime guard.
+const DIGEST_TAB_LABEL: &str = "Digest";
 /// Prefix for the dynamic search tab built by `:feeds <terms>`. Matches
 /// the news widget's `🔎 <query>` convention so users transferring
 /// muscle memory between the two read the same icon as "search".
@@ -492,6 +562,9 @@ impl FeedsWidget {
         if let Some(entry) = cache.load::<Vec<FeedArticle>>(CACHE_KEY_ARTICLES) {
             initial_state.poll.seed_from_cache_age(entry.age());
             initial_state.articles = entry.value.into_iter().map(Arc::new).collect();
+        }
+        if let Some(entry) = cache.load::<DigestTaxonomy>(CACHE_KEY_DIGEST) {
+            initial_state.digest = Some(DigestState::Ready(entry.value));
         }
         initial_state
             .poll
@@ -655,10 +728,12 @@ impl FeedsWidget {
         st.expanded_scroll = 0;
     }
 
-    /// Tab labels: "All", one per activated topic, plus a dynamic
-    /// `🔎 <query>` tab when a `:feeds <terms>` search is active.
+    /// Tab labels: "All", then "Digest" (kept right up front so it's one
+    /// keypress away from the default landing tab), then one per
+    /// activated topic, plus a dynamic `🔎 <query>` tab when a
+    /// `:feeds <terms>` search is active.
     fn tab_labels(&self) -> Vec<String> {
-        let mut out = vec![ALL_TAB_LABEL.to_string()];
+        let mut out = vec![ALL_TAB_LABEL.to_string(), DIGEST_TAB_LABEL.to_string()];
         for f in &self.feeds {
             out.push(f.topic.to_string());
         }
@@ -724,6 +799,7 @@ impl FeedsWidget {
             "feeds" => return Some(CommandAction::Search),
             "feeds-summary" => return Some(CommandAction::SummaryLength),
             "feeds-refresh" => return Some(CommandAction::Refresh),
+            "feeds-digest" => return Some(CommandAction::Digest),
             _ => {}
         }
         // Per-instance aliases. Empty trims and case-insensitive
@@ -752,6 +828,12 @@ impl FeedsWidget {
                 && cmd[alias.len()..].eq_ignore_ascii_case("-refresh")
             {
                 return Some(CommandAction::Refresh);
+            }
+            if cmd.len() == alias.len() + "-digest".len()
+                && cmd[..alias.len()].eq_ignore_ascii_case(alias)
+                && cmd[alias.len()..].eq_ignore_ascii_case("-digest")
+            {
+                return Some(CommandAction::Digest);
             }
         }
         None
@@ -840,6 +922,7 @@ impl FeedsWidget {
                 }],
                 max_tokens: length_static.max_tokens(),
                 cache_system: true,
+                timeout_secs: None,
             };
             let outcome = match llm.complete(request).await {
                 Ok(resp) => {
@@ -868,6 +951,182 @@ impl FeedsWidget {
         let mut st = self.state.lock().expect("feeds state poisoned");
         st.expand_user_set = true;
         st.expanded = !st.expanded;
+    }
+
+    /// `:feeds-digest` (or `r` while on the Digest tab): gather the
+    /// newest `MAX_DIGEST_ITEMS` cached articles across every tab,
+    /// send title/topic/url/short-excerpt to the LLM in one call, and
+    /// ask it to group them into a topic → subtopic → items taxonomy.
+    /// Explicit only — never fired by a poll tick or tab switch.
+    /// Idempotent while a request is already in flight.
+    fn trigger_digest(&self) {
+        {
+            let st = self.state.lock().expect("feeds state poisoned");
+            if matches!(st.digest, Some(DigestState::Requested)) {
+                return;
+            }
+        }
+        let Some(llm) = self.llm.clone() else {
+            self.set_status("LLM disabled — set an API key in ~/.config/docket/config.toml");
+            let mut st = self.state.lock().expect("feeds state poisoned");
+            st.digest = Some(DigestState::Failed("LLM not configured".into()));
+            st.active_tab = DIGEST_TAB_LABEL.to_string();
+            st.digest_selected = 0;
+            st.dirty = true;
+            return;
+        };
+        let mut articles: Vec<Arc<FeedArticle>> = {
+            let st = self.state.lock().expect("feeds state poisoned");
+            st.articles.clone()
+        };
+        if articles.is_empty() {
+            self.set_status("No articles yet — refresh feeds first");
+            return;
+        }
+        articles.sort_by_key(|a| std::cmp::Reverse(a.published));
+        articles.truncate(MAX_DIGEST_ITEMS);
+        let source_count = articles.len();
+        let valid_urls: std::collections::HashSet<String> =
+            articles.iter().map(|a| a.url.clone()).collect();
+
+        let mut input = String::new();
+        for a in &articles {
+            let excerpt: String = a
+                .summary
+                .as_deref()
+                .unwrap_or("")
+                .chars()
+                .take(200)
+                .collect::<String>()
+                .replace('\n', " ");
+            input.push_str(&format!(
+                "- topic: {}\n  title: {}\n  url: {}\n  excerpt: {}\n",
+                a.topic, a.title, a.url, excerpt
+            ));
+        }
+
+        {
+            let mut st = self.state.lock().expect("feeds state poisoned");
+            st.digest = Some(DigestState::Requested);
+            st.active_tab = DIGEST_TAB_LABEL.to_string();
+            st.digest_selected = 0;
+            st.digest_scroll = 0;
+            st.dirty = true;
+        }
+
+        let state = self.state.clone();
+        let cache = self.cache.clone();
+        tokio::spawn(async move {
+            let request = LlmRequest {
+                model: None,
+                system: Some(DIGEST_SYSTEM_PROMPT.to_string()),
+                messages: vec![LlmMessage {
+                    role: Role::User,
+                    content: input,
+                }],
+                max_tokens: DIGEST_MAX_TOKENS,
+                cache_system: true,
+                // A batch of up to MAX_DIGEST_ITEMS articles plus a large
+                // max_tokens budget routinely runs past the shared
+                // client's default 30s on a reasoning model — this is a
+                // deliberate, explicit, infrequent action, so the extra
+                // wait is an acceptable tradeoff for not timing out.
+                timeout_secs: Some(DIGEST_TIMEOUT_SECS),
+            };
+            let outcome = match llm.complete(request).await {
+                Ok(resp) => {
+                    let text = resp.text.trim();
+                    if text.is_empty() {
+                        tracing::warn!("feeds: digest LLM returned empty text");
+                        DigestState::Failed("Empty LLM response".into())
+                    } else {
+                        match parse_digest(text, &valid_urls) {
+                            Some(mut taxonomy) => {
+                                taxonomy.generated_at = chrono::Utc::now();
+                                taxonomy.source_article_count = source_count;
+                                if let Err(err) = cache.store(CACHE_KEY_DIGEST, &taxonomy) {
+                                    tracing::warn!(error = %err, "feeds: digest cache store failed");
+                                }
+                                DigestState::Ready(taxonomy)
+                            }
+                            None => {
+                                // Don't cache an unparseable/empty result as
+                                // Ready — `trigger_digest`'s in-flight gate
+                                // only blocks on `Requested`, so `Failed`
+                                // here is what makes retrying via `r` or
+                                // `:feeds-digest` actually work, matching
+                                // the fix applied to email's extract-todo
+                                // action for the same failure mode.
+                                tracing::warn!(
+                                    response = %text,
+                                    "feeds: digest LLM response didn't parse as the expected JSON shape"
+                                );
+                                DigestState::Failed(
+                                    "Couldn't parse the AI's response — try again".into(),
+                                )
+                            }
+                        }
+                    }
+                }
+                Err(err) => {
+                    tracing::warn!(error = %err, "feeds: digest LLM call failed");
+                    DigestState::Failed(format!("{err}"))
+                }
+            };
+            let mut st = state.lock().expect("feeds state poisoned");
+            st.digest = Some(outcome);
+            st.digest_selected = 0;
+            st.dirty = true;
+        });
+    }
+
+    /// Move the Digest tab's selection among flattened leaf items only
+    /// (topic/subtopic headers aren't selectable rows).
+    fn move_digest_selection(&self, delta: isize) {
+        let mut st = self.state.lock().expect("feeds state poisoned");
+        let Some(DigestState::Ready(taxonomy)) = st.digest.as_ref() else {
+            return;
+        };
+        let total = digest_leaf_count(taxonomy);
+        if total == 0 {
+            return;
+        }
+        let new = (st.digest_selected as isize + delta).clamp(0, total as isize - 1);
+        st.digest_selected = new as usize;
+    }
+
+    /// Resolve the Digest tab's currently-selected leaf item back to a
+    /// real article (by URL) and jump to it exactly where it already
+    /// lives — switches `active_tab` to that article's own topic and
+    /// expands it there, reusing 100% of the existing article-view
+    /// code rather than a parallel Digest-mode viewer. The digest
+    /// itself stays cached, so `←`/`→` back to the Digest tab returns
+    /// to the same tree.
+    fn open_digest_selected(&self) {
+        let leaf = {
+            let st = self.state.lock().expect("feeds state poisoned");
+            let Some(DigestState::Ready(taxonomy)) = st.digest.as_ref() else {
+                return;
+            };
+            digest_leaf(taxonomy, st.digest_selected).cloned()
+        };
+        let Some(item) = leaf else { return };
+        let mut st = self.state.lock().expect("feeds state poisoned");
+        let Some(real_idx) = st.articles.iter().position(|a| a.url == item.url) else {
+            return;
+        };
+        let topic = st.articles[real_idx].topic.clone();
+        st.active_tab = topic;
+        drop(st);
+        let filtered = self.filtered_indices();
+        let Some(pos) = filtered.iter().position(|&i| i == real_idx) else {
+            return;
+        };
+        let mut st = self.state.lock().expect("feeds state poisoned");
+        st.selected = pos;
+        st.expanded = true;
+        st.expand_user_set = true;
+        st.expanded_scroll = 0;
     }
 
     fn jump_to_external(&self) {
@@ -1375,9 +1634,239 @@ impl FeedsWidget {
             );
         }
     }
+
+    /// The Digest tab: a fully-expanded topic → subtopic → item tree.
+    /// Only leaf item rows are selectable (`▶` marker); topic/subtopic
+    /// rows are plain headers. `Enter`/`e`/`Space` on a leaf jumps to
+    /// that article via [`Self::open_digest_selected`].
+    fn render_digest(&self, frame: &mut Frame, area: Rect) {
+        if area.height == 0 || area.width == 0 {
+            return;
+        }
+        let (header_area, body_area) = {
+            let rows = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([Constraint::Length(1), Constraint::Length(1), Constraint::Min(1)])
+                .split(area);
+            (rows[0], rows[2])
+        };
+        let digest = self.state.lock().expect("feeds state poisoned").digest.clone();
+        let header = match &digest {
+            None => "No digest yet — press `r` or run :feeds-digest".to_string(),
+            Some(DigestState::Requested) => "Generating digest…".to_string(),
+            Some(DigestState::Failed(reason)) => format!("Digest failed: {reason} — press `r` to retry"),
+            Some(DigestState::Ready(t)) => format!(
+                "Digest as of {} · {} articles · {} topics — press `r` to regenerate",
+                t.generated_at.format("%H:%M UTC"),
+                t.source_article_count,
+                t.topics.len()
+            ),
+        };
+        let header_style = match &digest {
+            Some(DigestState::Failed(_)) => self.theme.metadata_unfocused,
+            _ => self.theme.text_dim,
+        };
+        frame.render_widget(
+            Paragraph::new(Span::styled(header, header_style)),
+            header_area,
+        );
+
+        {
+            let mut st = self.state.lock().expect("feeds state poisoned");
+            st.digest_rect = Some(body_area);
+        }
+        let Some(DigestState::Ready(taxonomy)) = digest.as_ref() else {
+            self.state.lock().expect("feeds state poisoned").digest_rows.clear();
+            return;
+        };
+
+        let selected = self.state.lock().expect("feeds state poisoned").digest_selected;
+        let mut lines: Vec<Line> = Vec::new();
+        // (leaf_idx, line_offset) — `line_offset` is relative to the top
+        // of `lines`, before scroll is applied; converted to an
+        // absolute row (or dropped if scrolled out of view) below.
+        let mut leaf_line_offsets: Vec<(usize, u16)> = Vec::new();
+        let mut selected_line_offset: u16 = 0;
+        let mut leaf_idx = 0usize;
+        let width = body_area.width as usize;
+        for topic in &taxonomy.topics {
+            lines.push(Line::from(Span::styled(
+                topic.title.clone(),
+                self.theme.text_brilliant,
+            )));
+            for sub in &topic.subtopics {
+                lines.push(Line::from(Span::styled(
+                    format!("  {}", sub.title),
+                    self.theme.text_focused,
+                )));
+                for item in &sub.items {
+                    let is_sel = leaf_idx == selected;
+                    if is_sel {
+                        selected_line_offset = lines.len() as u16;
+                    }
+                    let marker = if is_sel { "▶ " } else { "  " };
+                    let style = if is_sel {
+                        self.theme.text_selected
+                    } else {
+                        self.theme.text_plain
+                    };
+                    let prefix_w = 4 + marker.chars().count() + item.source.chars().count() + 3;
+                    let title = crate::text::truncate(&item.title, width.saturating_sub(prefix_w).max(1));
+                    leaf_line_offsets.push((leaf_idx, lines.len() as u16));
+                    lines.push(Line::from(vec![
+                        Span::raw("    "),
+                        Span::styled(marker, style),
+                        Span::styled(format!("[{}] ", item.source), self.theme.text_dim),
+                        Span::styled(title, style),
+                    ]));
+                    leaf_idx += 1;
+                }
+            }
+        }
+        self.state.lock().expect("feeds state poisoned").digest_selected =
+            selected.min(leaf_idx.saturating_sub(1));
+
+        // Keep the selected leaf's line visible — same clamp-then-nudge
+        // approach as `render_list`'s scroll math, simplified since
+        // every digest row is exactly one line tall.
+        let scroll = {
+            let mut st = self.state.lock().expect("feeds state poisoned");
+            let max_scroll = (lines.len() as u16).saturating_sub(body_area.height);
+            let mut scroll = st.digest_scroll.min(max_scroll);
+            if selected_line_offset < scroll {
+                scroll = selected_line_offset;
+            } else if selected_line_offset >= scroll + body_area.height {
+                scroll = selected_line_offset + 1 - body_area.height;
+            }
+            st.digest_scroll = scroll;
+            scroll
+        };
+        // Absolute click rows: only the leaves currently scrolled into
+        // view get an entry.
+        let rows: Vec<(usize, u16)> = leaf_line_offsets
+            .into_iter()
+            .filter(|&(_, off)| off >= scroll && off < scroll + body_area.height)
+            .map(|(idx, off)| (idx, body_area.y + (off - scroll)))
+            .collect();
+        self.state.lock().expect("feeds state poisoned").digest_rows = rows;
+
+        frame.render_widget(
+            Paragraph::new(lines).wrap(Wrap { trim: false }).scroll((scroll, 0)),
+            body_area,
+        );
+    }
 }
 
 const CACHE_KEY_ARTICLES: &str = "articles";
+const CACHE_KEY_DIGEST: &str = "digest";
+/// Cap on how many of the newest articles (across every tab) get sent to
+/// the LLM for digest generation — bounds token/cost usage regardless of
+/// how many `[[feeds]]` sources are configured.
+const MAX_DIGEST_ITEMS: usize = 60;
+// Generous relative to per-article summaries: this one request has to
+// both reason about up to MAX_DIGEST_ITEMS articles' groupings AND emit
+// a proportionally large JSON tree, and a reasoning model (o-series,
+// gpt-5-*) spends part of this budget on invisible reasoning tokens
+// before it ever gets to visible output — too low a cap here is exactly
+// how you get the "Empty LLM response" failure mode.
+const DIGEST_MAX_TOKENS: u32 = 16000;
+const DIGEST_TIMEOUT_SECS: u64 = 180;
+
+const DIGEST_SYSTEM_PROMPT: &str = "You organize a list of news article \
+headlines into a subject-matter taxonomy. You are given a bullet list of \
+articles, each with a topic (its source feed), title, url, and a short \
+excerpt. Group them into a small number of clear topics, each with one or \
+more subtopics, based ONLY on the underlying subject the article is \
+about — never on which feed it came from. \
+\
+The single most common mistake to avoid: a topic or subtopic that's \
+really just \"everything from source X\" wearing a subject-sounding name. \
+The input's `topic` field is one specific source feed's own label \
+(e.g. a subreddit, a publication section) — it is NOT a valid taxonomy \
+node and must never become one, even indirectly. If most items from one \
+source happen to cluster together, that is a sign to split them further \
+by what they're actually about (e.g. a model release vs. a benchmark \
+result vs. a hardware post vs. a tooling release), not a sign to keep \
+them as one group. Conversely, actively look for articles from different \
+sources that belong together because they cover the same real-world \
+subject, model, technique, or event, and merge them into one subtopic — \
+that cross-source merging is the entire point of this exercise. Example \
+topic shapes for an AI/ML article set (illustrative, not mandatory — \
+derive real topics from what's actually in the input): \"Model releases\", \
+\"Agents & tool use\", \"Benchmarks & evaluation\", \"Hardware & \
+infrastructure\", \"Research techniques\", \"Industry, funding & policy\". \
+\
+Every article must appear in exactly one subtopic; don't invent, omit, \
+merge, or alter any url. Respond with ONLY a single JSON object, no \
+markdown code fence, no commentary, in exactly this shape: \
+{\"topics\": [{\"title\": \"...\", \"subtopics\": [{\"title\": \"...\", \
+\"items\": [{\"title\": \"...\", \"url\": \"...\", \"source\": \"...\"}]}]}]}. \
+`items[].url` must be copied verbatim from the input — never rewritten or \
+guessed. `items[].source` is that article's given topic (the source feed \
+label) — copy it verbatim for display purposes only; it must play no role \
+in how you decide the grouping. Prefer fewer, broader topics over many \
+narrow ones.";
+
+/// Strip an optional ` ```json ` fence and parse into a taxonomy, then
+/// drop any item whose `url` wasn't in the set we actually sent (a
+/// hallucinated/rewritten link) and prune any subtopic/topic left empty
+/// by that filtering. Returns `None` on a parse failure OR when nothing
+/// survives filtering — both cases the caller treats as `Failed` rather
+/// than caching a broken "success".
+fn parse_digest(
+    text: &str,
+    valid_urls: &std::collections::HashSet<String>,
+) -> Option<DigestTaxonomy> {
+    let trimmed = text.trim();
+    let unfenced = trimmed
+        .strip_prefix("```json")
+        .or_else(|| trimmed.strip_prefix("```"))
+        .unwrap_or(trimmed)
+        .trim();
+    let unfenced = unfenced.strip_suffix("```").unwrap_or(unfenced).trim();
+    let raw: RawDigest = serde_json::from_str(unfenced).ok()?;
+    let topics: Vec<DigestTopic> = raw
+        .topics
+        .into_iter()
+        .filter_map(|mut topic| {
+            topic.subtopics.retain_mut(|sub| {
+                sub.items.retain(|item| valid_urls.contains(&item.url));
+                !sub.items.is_empty()
+            });
+            if topic.subtopics.is_empty() {
+                None
+            } else {
+                Some(topic)
+            }
+        })
+        .collect();
+    if topics.is_empty() {
+        return None;
+    }
+    Some(DigestTaxonomy {
+        generated_at: chrono::Utc::now(),
+        source_article_count: 0,
+        topics,
+    })
+}
+
+fn digest_leaf_count(taxonomy: &DigestTaxonomy) -> usize {
+    taxonomy
+        .topics
+        .iter()
+        .flat_map(|t| t.subtopics.iter())
+        .map(|s| s.items.len())
+        .sum()
+}
+
+fn digest_leaf(taxonomy: &DigestTaxonomy, idx: usize) -> Option<&DigestItem> {
+    taxonomy
+        .topics
+        .iter()
+        .flat_map(|t| t.subtopics.iter())
+        .flat_map(|s| s.items.iter())
+        .nth(idx)
+}
 
 /// Merge a fetch round's fresh articles with the previous in-memory list,
 /// carrying forward stale articles for any topic whose feed failed this
@@ -1572,6 +2061,34 @@ impl Widget for FeedsWidget {
         self.render_tabs(frame, body_rows[0]);
         // body_rows[1] is intentionally left blank.
 
+        let on_digest_tab = self.state.lock().expect("feeds state poisoned").active_tab
+            == DIGEST_TAB_LABEL;
+        if on_digest_tab {
+            self.render_digest(frame, body_rows[2]);
+            self.state.lock().expect("feeds state poisoned").expanded_rect = None;
+            if footer_h > 0 {
+                let footer = Rect {
+                    x: inner.x,
+                    y: inner.y + inner.height - 1,
+                    width: inner.width,
+                    height: 1,
+                };
+                let (text, style) = match self.live_status() {
+                    Some(msg) => (msg, self.theme.text_selected),
+                    None => (
+                        "↑/↓ select · ⏎/e open article · ←/→ tabs · r regenerate".to_string(),
+                        self.theme.text_dim,
+                    ),
+                };
+                frame.render_widget(
+                    Paragraph::new(Span::styled(text, style)).alignment(Alignment::Right),
+                    footer,
+                );
+            }
+            return;
+        }
+        self.state.lock().expect("feeds state poisoned").digest_rect = None;
+
         let tier = crate::widgets::ViewTier::from_rect(area);
         let (expanded_stored, expand_user_set) = {
             let st = self.state.lock().expect("feeds state poisoned");
@@ -1708,13 +2225,24 @@ impl Widget for FeedsWidget {
             }
         }
 
+        let on_digest_tab = self.state.lock().expect("feeds state poisoned").active_tab
+            == DIGEST_TAB_LABEL;
+
         match key.code {
             KeyCode::Up | KeyCode::Char('k') => {
-                self.move_selection(-1);
+                if on_digest_tab {
+                    self.move_digest_selection(-1);
+                } else {
+                    self.move_selection(-1);
+                }
                 EventResult::Handled
             }
             KeyCode::Down | KeyCode::Char('j') => {
-                self.move_selection(1);
+                if on_digest_tab {
+                    self.move_digest_selection(1);
+                } else {
+                    self.move_selection(1);
+                }
                 EventResult::Handled
             }
             KeyCode::Left | KeyCode::Char('h') => {
@@ -1729,9 +2257,14 @@ impl Widget for FeedsWidget {
             // Convention: Enter is the in-place primary action
             // (expand), `o` opens externally. `e` and Space are
             // back-compat aliases for users who reach for them
-            // reflexively.
+            // reflexively. On the Digest tab there's nothing to
+            // expand in-place — these jump to the real article instead.
             KeyCode::Enter | KeyCode::Char('e') | KeyCode::Char(' ') => {
-                self.toggle_expanded();
+                if on_digest_tab {
+                    self.open_digest_selected();
+                } else {
+                    self.toggle_expanded();
+                }
                 EventResult::Handled
             }
             KeyCode::Char('o') => {
@@ -1746,8 +2279,14 @@ impl Widget for FeedsWidget {
                 st.expand_user_set = true;
                 EventResult::Handled
             }
+            // `r` means "refresh whatever this tab shows" — regenerate
+            // the digest on the Digest tab, otherwise re-fetch feeds.
             KeyCode::Char('r') => {
-                self.mark_dirty();
+                if on_digest_tab {
+                    self.trigger_digest();
+                } else {
+                    self.mark_dirty();
+                }
                 EventResult::Handled
             }
             // `x` drops any active :feeds <terms> search filter and
@@ -1787,12 +2326,14 @@ impl Widget for FeedsWidget {
         use crossterm::event::{MouseButton, MouseEventKind};
         // Snapshot hit-test rects (release the lock before doing
         // anything that re-locks state).
-        let (list_rect, expanded_rect, list_rows, tab_rects) = {
+        let (list_rect, expanded_rect, digest_rect, list_rows, digest_rows, tab_rects) = {
             let st = self.state.lock().expect("feeds state poisoned");
             (
                 st.list_rect,
                 st.expanded_rect,
+                st.digest_rect,
                 st.list_rows.clone(),
+                st.digest_rows.clone(),
                 st.tab_rects.clone(),
             )
         };
@@ -1804,16 +2345,22 @@ impl Widget for FeedsWidget {
         let over_expanded = expanded_rect
             .map(|r| col >= r.x && col < r.x + r.width && row >= r.y && row < r.y + r.height)
             .unwrap_or(false);
+        let over_digest = digest_rect
+            .map(|r| col >= r.x && col < r.x + r.width && row >= r.y && row < r.y + r.height)
+            .unwrap_or(false);
 
         match mouse.kind {
             // Scroll wheel: route by cursor position. Over the list,
             // wheel = navigate articles. Over the expanded panel,
-            // wheel = scroll the body. Anywhere else (gap, tabs,
-            // footer): ignore.
+            // wheel = scroll the body. Over the digest tree, wheel =
+            // move the leaf selection. Anywhere else: ignore.
             MouseEventKind::ScrollUp => {
                 if over_expanded {
                     let mut st = self.state.lock().expect("feeds state poisoned");
                     st.expanded_scroll = st.expanded_scroll.saturating_sub(3);
+                    EventResult::Handled
+                } else if over_digest {
+                    self.move_digest_selection(-1);
                     EventResult::Handled
                 } else if over_list {
                     self.move_selection(-1);
@@ -1828,6 +2375,9 @@ impl Widget for FeedsWidget {
                     let max = st.expanded_content_height.saturating_sub(1);
                     st.expanded_scroll = st.expanded_scroll.saturating_add(3).min(max);
                     EventResult::Handled
+                } else if over_digest {
+                    self.move_digest_selection(1);
+                    EventResult::Handled
                 } else if over_list {
                     self.move_selection(1);
                     EventResult::Handled
@@ -1838,7 +2388,8 @@ impl Widget for FeedsWidget {
             // Left click: route to whichever hit-tested region the
             // cursor lands in. Tab strip → switch topic filter;
             // list row → select that article (multi-line wrapped
-            // titles all map back to the right index via list_rows).
+            // titles all map back to the right index via list_rows);
+            // digest row → select + open the referenced article.
             MouseEventKind::Down(MouseButton::Left) => {
                 // Tab strip first — its row sits above the list, so
                 // an explicit hit-test on it avoids any ambiguity.
@@ -1855,6 +2406,15 @@ impl Widget for FeedsWidget {
                         st.expanded_scroll = 0;
                     }
                     return EventResult::Handled;
+                }
+                if over_digest {
+                    if let Some(&(leaf_idx, _)) = digest_rows.iter().find(|(_, y)| *y == row) {
+                        self.state.lock().expect("feeds state poisoned").digest_selected =
+                            leaf_idx;
+                        self.open_digest_selected();
+                        return EventResult::Handled;
+                    }
+                    return EventResult::Ignored;
                 }
                 if !over_list {
                     return EventResult::Ignored;
@@ -1930,6 +2490,10 @@ impl Widget for FeedsWidget {
                 self.mark_dirty();
                 Ok(true)
             }
+            CommandAction::Digest => {
+                self.trigger_digest();
+                Ok(true)
+            }
         }
     }
 
@@ -1983,6 +2547,14 @@ impl Widget for FeedsWidget {
             (
                 ":feeds <terms>",
                 "filter articles by keyword (ranked by hits, commas/semicolons ignored)",
+            ),
+            (
+                ":feeds-digest",
+                "AI: group every cached article into a topic/subtopic tree on the Digest tab",
+            ),
+            (
+                "r (Digest tab)",
+                "regenerate the digest; Enter/e/Space on an item jumps to that article",
             ),
         ]
     }

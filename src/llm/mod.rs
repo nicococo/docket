@@ -162,6 +162,12 @@ pub struct LlmRequest {
     /// Hint to the provider that the system prompt should be eligible for
     /// prompt caching (Anthropic only — others may ignore).
     pub cache_system: bool,
+    /// Override the shared HTTP client's default request timeout
+    /// (`crate::http`'s 30s) for this one call. `None` uses the default.
+    /// For a bulk request (many input items, a large `max_tokens`) that
+    /// routinely needs longer than 30s on a reasoning model — e.g. the
+    /// feeds widget's cross-feed digest — pass `Some(90)` or similar.
+    pub timeout_secs: Option<u64>,
 }
 
 #[derive(Debug, Clone)]

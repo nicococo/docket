@@ -129,10 +129,6 @@ topic = "Venture"
 url = "https://venturebeat.com/category/ai/feed/"
 
 [[feeds.feeds]]
-topic = "News"
-url = "https://aiwire.net/feed/"
-
-[[feeds.feeds]]
 topic = "Weekly"
 url = "https://lastweekin.ai/feed/"
 
@@ -158,7 +154,7 @@ url = "https://towardsdatascience.com/feed"
 
 [[feeds.feeds]]
 topic = "arXiv"
-url = "https://rss.arxiv.org/rss/cs.AI"
+url = "https://export.arxiv.org/api/query?search_query=cat:cs.AI&sortBy=submittedDate&sortOrder=descending&max_results=16"
 
 # ── LLM ──────────────────────────────────────────────────────────────────────
 # Master switch. If false, every LLM-backed feature falls back to its

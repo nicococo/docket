@@ -109,13 +109,17 @@ impl LlmProvider for AnthropicProvider {
         }
         let body = build_request_body(&request, &self.default_model, self.default_max_tokens);
         let url = format!("{}{MESSAGES_PATH}", self.api_base.trim_end_matches('/'));
-        let resp = self
+        let mut req = self
             .client
             .post(&url)
             .header("x-api-key", self.key.as_str())
             .header("anthropic-version", API_VERSION)
             .header("content-type", "application/json")
-            .json(&body)
+            .json(&body);
+        if let Some(secs) = request.timeout_secs {
+            req = req.timeout(std::time::Duration::from_secs(secs));
+        }
+        let resp = req
             .send()
             .await
             .context("anthropic messages request failed")?;
@@ -240,6 +244,7 @@ mod tests {
             }],
             max_tokens: 100,
             cache_system: true,
+            timeout_secs: None,
         }
     }
 
@@ -268,6 +273,7 @@ mod tests {
             }],
             max_tokens: 0,
             cache_system: false,
+            timeout_secs: None,
         };
         let body = build_request_body(&r, "fallback-model", 512);
         assert_eq!(body.model, "fallback-model");

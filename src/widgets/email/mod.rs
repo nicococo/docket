@@ -1579,6 +1579,7 @@ impl EmailWidget {
                 }],
                 max_tokens: action.max_tokens(),
                 cache_system: true,
+                timeout_secs: None,
             };
             let outcome = match llm.complete(request).await {
                 Ok(resp) => {
