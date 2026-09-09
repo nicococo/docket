@@ -86,12 +86,27 @@ Respond with ONLY a single JSON object, no markdown code fence, no commentary, \
 in exactly this shape: \
 {\"todos\": [\"...\"], \"dates\": [{\"title\": \"...\", \"date\": \"YYYY-MM-DD\"}]}. \
 `todos` is every concrete action item as a short phrase, in the order \
-mentioned. `dates` is every date or deadline mentioned, each with a short \
-title and an absolute ISO 8601 date resolved against the received date — \
-never emit a relative phrase in `date`. Omit an item entirely if you can't \
-give it a real date. Use empty arrays (not omitted keys) when there's \
-nothing to extract for that field. Never invent todos or dates that aren't \
-actually in the message.";
+mentioned. `dates` is every date or deadline mentioned, each with an \
+absolute ISO 8601 date resolved against the received date — never emit a \
+relative phrase in `date` — and a title that names the specific event, \
+deadline, or meeting it refers to. The title lands on a calendar full of \
+many other events from many other emails with no link back to this \
+message, so it must be understandable entirely on its own, with zero \
+context from the email. HARD RULE: never use a bare category word or \
+phrase alone as the title — \"deadline\", \"start\", \"end\", \"begins\", \
+\"closes\", \"due\", \"check-in\", \"check-out\", \"RSVP\", and similar are \
+never acceptable by themselves, in English or any other language the \
+email is written in. Always pair that category with the specific proper \
+noun the email itself uses for the place, event, trip, product, order, \
+person, or organization involved. Bad: \"RSVP deadline\", \"Registration \
+closes\", \"Booking start\", \"Buchungsbeginn\". Good: \"RSVP deadline for \
+Sarah's birthday dinner\", \"AIDAQ Summit registration closes\", \"Check-in \
+for Gründhütte cabin booking\". If the email names a specific \
+place/organization/event/person anywhere, that name belongs in the title. \
+Still keep it to one short phrase, not a full sentence. Omit an item \
+entirely if you can't give it a real date. Use empty arrays (not omitted \
+keys) when there's nothing to extract for that field. Never invent todos \
+or dates that aren't actually in the message.";
 
 /// One of the AI-powered actions available on a message from the
 /// Enter popup (see `open_popup`/`handle_popup_key`). Each variant

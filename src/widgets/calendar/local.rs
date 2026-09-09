@@ -9,14 +9,18 @@ use serde::Deserialize;
 
 use super::provider::{CalendarProvider, Event};
 
-/// Schema for `~/.config/docket/calendar.toml`.
+/// In-memory shape of the `[calendar]` table's local-events source —
+/// built from the already-parsed `CalendarConfig.events` (themselves
+/// `[[calendar.events]]` in `config.toml`), not read from a standalone
+/// file. `Deserialize` is kept for the unit tests below, which
+/// exercise `RawEvent::parse` directly.
 #[derive(Debug, Clone, Deserialize, Default)]
 pub struct LocalCalendarFile {
     #[serde(default)]
     pub events: Vec<RawEvent>,
 }
 
-/// One row in `[[events]]`. Either timestamps must be RFC3339 (e.g.
+/// One row in `[[calendar.events]]`. Either timestamps must be RFC3339 (e.g.
 /// `2026-05-20T09:30:00-07:00`) for timed events, or plain `YYYY-MM-DD` dates
 /// for all-day events.
 #[derive(Debug, Clone, Deserialize)]
@@ -126,14 +130,16 @@ impl CalendarProvider for LocalCalendarProvider {
 // Lets the Email widget's "extract dates" AI popup action add/remove
 // a local all-day event (see `email::extract_actions`), without a
 // general cross-widget dependency — this file only needs to know
-// calendar.toml's path and the `[[events]]` shape above. Every write
-// is plain text, not a TOML parse/edit: `add_event` appends a new
-// `[[events]]` block (always valid regardless of what else is in the
-// file, no parser needed), and `remove_event` only ever deletes a
-// block this same code wrote, bounded by its own marker comment and
-// the next blank line — it never touches anything else in the file.
-// Docket's config file-watcher (`config::watcher`) picks up the
-// change and live-reloads Calendar automatically.
+// config.toml's path and the `[[calendar.events]]` shape above. Every
+// write is plain text, not a TOML parse/edit: `add_event` appends a
+// new `[[calendar.events]]` block at the end of the file — valid TOML
+// regardless of what else is already in the file (table-array entries
+// don't need to be contiguous with their table's other keys, or with
+// each other), no parser needed — and `remove_event` only ever
+// deletes a block this same code wrote, bounded by its own marker
+// comment and the next blank line — it never touches anything else in
+// the file. Docket's config file-watcher (`config::watcher`) picks up
+// the change and live-reloads Calendar automatically.
 //
 // Known limitation of the plain-text approach: if a *user* hand-edits
 // one of these blocks and adds a blank line in the middle of it,
@@ -142,8 +148,8 @@ impl CalendarProvider for LocalCalendarProvider {
 // won't clean up perfectly, which is an acceptable trade-off for not
 // needing a real TOML editor dependency to support removal.
 
-fn calendar_toml_path() -> Result<std::path::PathBuf> {
-    Ok(crate::config::config_dir()?.join("calendar.toml"))
+fn extract_config_path() -> Result<std::path::PathBuf> {
+    crate::config::config_path()
 }
 
 fn extract_marker_comment(id: &str) -> String {
@@ -151,10 +157,10 @@ fn extract_marker_comment(id: &str) -> String {
 }
 
 /// Whether an event previously added via `add_event(_, _, id)` is
-/// still present. `Ok(false)` (not an error) if calendar.toml doesn't
+/// still present. `Ok(false)` (not an error) if config.toml doesn't
 /// exist yet — nothing has ever been added.
 pub fn event_marker_present(id: &str) -> Result<bool> {
-    let path = calendar_toml_path()?;
+    let path = extract_config_path()?;
     if !path.exists() {
         return Ok(false);
     }
@@ -164,11 +170,11 @@ pub fn event_marker_present(id: &str) -> Result<bool> {
 }
 
 /// True if `text` has a *non-commented* `kind = "local"` line —
-/// i.e. an explicit `[[providers]]` entry activating the local
-/// `[[events]]` source. Deliberately simple (a per-line substring
-/// check, not a TOML parse) to match the rest of this module's
-/// plain-text approach; a commented-out example (`# kind = "local"`)
-/// correctly doesn't count.
+/// i.e. an explicit `[[calendar.providers]]` entry activating the
+/// local `[[calendar.events]]` source. Deliberately simple (a
+/// per-line substring check, not a TOML parse) to match the rest of
+/// this module's plain-text approach; a commented-out example
+/// (`# kind = "local"`) correctly doesn't count.
 fn has_local_provider(text: &str) -> bool {
     text.lines().any(|l| {
         let l = l.trim();
@@ -176,18 +182,20 @@ fn has_local_provider(text: &str) -> bool {
     })
 }
 
-/// Registers a `[[providers]] kind = "local"` entry if one isn't
-/// already present. **This is the load-bearing fix for `add_event`
-/// actually showing up anywhere**: when `[[providers]]` is non-empty
-/// (any external CalDAV/ICS source configured), docket's provider
-/// wiring (`wiring::build_provider`) only builds *those* configured
-/// providers — the `[[events]]` local source is silently dropped
-/// unless a `local` entry explicitly opts it back in. Without this,
-/// `add_event` would write a real event that never renders anywhere,
-/// for anyone who has any other calendar source configured (i.e.
-/// most users). No-op if a local provider is already registered
-/// (including the common case of `[[providers]]` being empty, which
-/// activates local events by itself — see `wiring::build_provider`).
+/// Registers a `[[calendar.providers]] kind = "local"` entry if one
+/// isn't already present. **This is the load-bearing fix for
+/// `add_event` actually showing up anywhere**: when
+/// `[[calendar.providers]]` is non-empty (any external CalDAV/ICS
+/// source configured), docket's provider wiring
+/// (`wiring::build_provider`) only builds *those* configured
+/// providers — the `[[calendar.events]]` local source is silently
+/// dropped unless a `local` entry explicitly opts it back in. Without
+/// this, `add_event` would write a real event that never renders
+/// anywhere, for anyone who has any other calendar source configured
+/// (i.e. most users). No-op if a local provider is already registered
+/// (including the common case of `[[calendar.providers]]` being
+/// empty, which activates local events by itself — see
+/// `wiring::build_provider`).
 fn ensure_local_provider_registered(path: &std::path::Path) -> Result<()> {
     let existing = std::fs::read_to_string(path).unwrap_or_default();
     if existing.is_empty() || has_local_provider(&existing) {
@@ -197,7 +205,7 @@ fn ensure_local_provider_registered(path: &std::path::Path) -> Result<()> {
     if !existing.ends_with('\n') {
         addition.push('\n');
     }
-    addition.push_str("\n[[providers]]\nkind = \"local\"\n");
+    addition.push_str("\n[[calendar.providers]]\nkind = \"local\"\n");
     use std::io::Write;
     let mut file = std::fs::OpenOptions::new()
         .append(true)
@@ -211,7 +219,7 @@ fn ensure_local_provider_registered(path: &std::path::Path) -> Result<()> {
 /// second call with the same `id` is a no-op, so callers don't need
 /// to check `event_marker_present` first.
 pub fn add_event(title: &str, date: &str, id: &str) -> Result<()> {
-    let path = calendar_toml_path()?;
+    let path = extract_config_path()?;
     if event_marker_present(id)? {
         return Ok(());
     }
@@ -232,7 +240,7 @@ pub fn add_event(title: &str, date: &str, id: &str) -> Result<()> {
     block.push('\n');
     block.push_str(&extract_marker_comment(id));
     block.push('\n');
-    block.push_str("[[events]]\n");
+    block.push_str("[[calendar.events]]\n");
     block.push_str(&format!("title = \"{escaped_title}\"\n"));
     block.push_str(&format!("start = \"{date}\"\n"));
     block.push_str(&format!("end = \"{date}\"\n"));
@@ -251,9 +259,9 @@ pub fn add_event(title: &str, date: &str, id: &str) -> Result<()> {
 }
 
 /// Remove the event block tagged with `id`. `Ok(())` (not an error)
-/// if it's already gone, or calendar.toml doesn't exist.
+/// if it's already gone, or config.toml doesn't exist.
 pub fn remove_event(id: &str) -> Result<()> {
-    let path = calendar_toml_path()?;
+    let path = extract_config_path()?;
     if !path.exists() {
         return Ok(());
     }
@@ -348,7 +356,7 @@ mod tests {
         add_event("Budget review", "2026-09-03", "id-1").unwrap();
         assert!(event_marker_present("id-1").unwrap());
 
-        let path = calendar_toml_path().unwrap();
+        let path = extract_config_path().unwrap();
         let text = std::fs::read_to_string(&path).unwrap();
         assert!(text.contains("title = \"Budget review\""));
         assert!(text.contains("start = \"2026-09-03\""));
@@ -363,7 +371,7 @@ mod tests {
         let _cfg = IsolatedConfigHome::new();
         add_event("Budget review", "2026-09-03", "id-2").unwrap();
         add_event("Budget review", "2026-09-03", "id-2").unwrap();
-        let path = calendar_toml_path().unwrap();
+        let path = extract_config_path().unwrap();
         let text = std::fs::read_to_string(&path).unwrap();
         assert_eq!(
             text.matches("title = \"Budget review\"").count(),
@@ -375,7 +383,7 @@ mod tests {
     #[test]
     fn add_preserves_existing_file_content() {
         let _cfg = IsolatedConfigHome::new();
-        let path = calendar_toml_path().unwrap();
+        let path = extract_config_path().unwrap();
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(&path, "# a hand-written comment\ndefault_view = \"month\"\n").unwrap();
 
@@ -390,15 +398,15 @@ mod tests {
     #[test]
     fn add_registers_a_local_provider_when_the_file_only_has_external_ones() {
         let _cfg = IsolatedConfigHome::new();
-        let path = calendar_toml_path().unwrap();
+        let path = extract_config_path().unwrap();
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         // Mirrors a real-world config: external providers only, no
         // local one — the exact shape that silently dropped
-        // `[[events]]` (including anything add_event writes) before
-        // this fix.
+        // `[[calendar.events]]` (including anything add_event writes)
+        // before this fix.
         std::fs::write(
             &path,
-            "[[providers]]\nkind = \"ics\"\naccount = \"work\"\n",
+            "[[calendar.providers]]\nkind = \"ics\"\naccount = \"work\"\n",
         )
         .unwrap();
         assert!(!has_local_provider(&std::fs::read_to_string(&path).unwrap()));
@@ -413,9 +421,9 @@ mod tests {
     #[test]
     fn add_does_not_duplicate_an_existing_local_provider() {
         let _cfg = IsolatedConfigHome::new();
-        let path = calendar_toml_path().unwrap();
+        let path = extract_config_path().unwrap();
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        std::fs::write(&path, "[[providers]]\nkind = \"local\"\n").unwrap();
+        std::fs::write(&path, "[[calendar.providers]]\nkind = \"local\"\n").unwrap();
 
         add_event("Budget review", "2026-09-03", "id-5").unwrap();
 
@@ -428,6 +436,44 @@ mod tests {
         assert!(!has_local_provider("# kind = \"local\"\n"));
         assert!(has_local_provider("kind = \"local\"\n"));
         assert!(has_local_provider("  kind = \"local\"  \n"));
+    }
+
+    /// Regression test for the bug this module was originally shipping
+    /// with: `add_event` wrote to a `calendar.toml` file that nothing
+    /// else in the app ever read (config lives in one `config.toml`
+    /// since the single-config-file refactor), so an extracted event
+    /// silently never appeared anywhere. This round-trips through the
+    /// *real* config loader — not just a raw-string assertion on the
+    /// file `add_event` itself wrote — so a future regression back to
+    /// the wrong file/table path would fail this test even if the
+    /// string-content tests above still passed.
+    #[test]
+    fn add_event_is_actually_visible_through_the_real_config_loader() {
+        let _cfg = IsolatedConfigHome::new();
+        let path = extract_config_path().unwrap();
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        // A realistic config.toml with unrelated tables before AND
+        // after `[calendar]`, to also confirm the append doesn't
+        // corrupt them.
+        std::fs::write(
+            &path,
+            "[global]\ntheme = \"default\"\n\n[calendar]\ndefault_view = \"day\"\n\n[llm]\nenabled = true\n",
+        )
+        .unwrap();
+
+        add_event("Budget review", "2026-09-03", "id-roundtrip").unwrap();
+
+        let cfg = crate::config::load(None).expect("config.toml must still parse");
+        assert_eq!(cfg.global.theme, "default", "unrelated table must survive");
+        assert!(cfg.llm.enabled, "unrelated table after [calendar] must survive");
+        assert!(
+            cfg.calendar
+                .events
+                .iter()
+                .any(|e| e.title == "Budget review" && e.start == "2026-09-03"),
+            "the extracted event must be visible through the same loader the \
+             Calendar widget actually uses, not just as raw text in the file"
+        );
     }
 
     #[test]
@@ -445,7 +491,7 @@ mod tests {
 
         remove_event("id-a").unwrap();
 
-        let path = calendar_toml_path().unwrap();
+        let path = extract_config_path().unwrap();
         let text = std::fs::read_to_string(&path).unwrap();
         assert!(!text.contains("First event"));
         assert!(text.contains("Second event"));
