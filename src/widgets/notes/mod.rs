@@ -1214,6 +1214,28 @@ impl Widget for NotesWidget {
         std::mem::replace(&mut st.dirty, false)
     }
 
+    /// Re-scan `self.root` and pick up whatever changed on disk —
+    /// currently only reachable via Email's extract-to-notes action,
+    /// which writes through `store::save` directly rather than this
+    /// widget's own editing path (see `Widget::take_notes_refresh_request`).
+    /// Safe to just take the fresh disk copy wholesale: every editing
+    /// path in this widget (`insert_char`, `create_note`, board edits,
+    /// …) calls `save_active`/`store::save` synchronously on every
+    /// mutation, so there is never an "unsaved in-memory draft" for a
+    /// reload to clobber — disk is authoritative at every point between
+    /// key events. `active` is re-resolved by note id rather than
+    /// index, since `load_all`'s newest-first sort can reorder the list.
+    fn reload_external_changes(&mut self) {
+        let fresh = store::load_all(&self.root, &self.instance);
+        let mut st = self.state.lock().expect("notes state poisoned");
+        let active_id = st.active.and_then(|i| st.notes.get(i)).map(|n| n.id.clone());
+        st.notes = fresh;
+        st.active = active_id
+            .and_then(|id| st.notes.iter().position(|n| n.id == id))
+            .or(if st.notes.is_empty() { None } else { Some(0) });
+        st.dirty = true;
+    }
+
     fn render(&self, frame: &mut Frame, area: Rect, focused: bool) {
         *self.last_outer_area.lock().unwrap() = area;
         let st = self.state.lock().expect("notes state poisoned");

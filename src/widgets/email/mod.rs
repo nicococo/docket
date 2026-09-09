@@ -373,6 +373,13 @@ struct EmailState {
     /// when it just closed and should hand zoom back. Drained by the app
     /// right after key dispatch.
     zoom_request: Option<bool>,
+    /// One-shot signal for [`EmailWidget::take_notes_refresh_request`]:
+    /// set after a successful `add_todo`/`remove_todo` in
+    /// `toggle_extract_selected` so the app tells the Notes widget to
+    /// pick up the change — that write goes straight through
+    /// `notes::store::save`, bypassing the Notes widget entirely, so
+    /// nothing else would ever refresh its in-memory list.
+    notes_refresh_pending: bool,
     /// Last-rendered row layout for the message list: `(msg_idx, row_start, row_end_exclusive)`
     /// in offsets relative to the list_area's top. Populated on every
     /// render so `handle_mouse` can map a click row back to a message
@@ -1225,8 +1232,13 @@ impl EmailWidget {
                     },
                 )
             };
-            if let Err(err) = result {
-                tracing::warn!(error = %err, "email extract: todo add/remove failed");
+            match result {
+                Ok(()) => {
+                    self.state.lock().expect("email state poisoned").notes_refresh_pending = true;
+                }
+                Err(err) => {
+                    tracing::warn!(error = %err, "email extract: todo add/remove failed");
+                }
             }
         } else if let Some(date) = items.dates.get(selected - items.todos.len()) {
             let id = extract_actions::date_item_id(message_id, &date.title, &date.date);
@@ -2410,6 +2422,11 @@ impl Widget for EmailWidget {
 
     fn take_zoom_request(&mut self) -> Option<bool> {
         self.state.lock().expect("email state poisoned").zoom_request.take()
+    }
+
+    fn take_notes_refresh_request(&mut self) -> bool {
+        let mut st = self.state.lock().expect("email state poisoned");
+        std::mem::replace(&mut st.notes_refresh_pending, false)
     }
 
     fn handle_mouse(&mut self, mouse: MouseEvent, area: Rect) -> EventResult {

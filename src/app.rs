@@ -325,6 +325,29 @@ impl App {
         false
     }
 
+    /// Drain every widget's `take_notes_refresh_request` and, if any
+    /// fired, tell the "notes" widget to re-scan its on-disk data.
+    /// Called right after key dispatch, same as `process_zoom_requests`
+    /// — the one existing case is Email's extract-to-notes action,
+    /// which writes straight to the notes store bypassing the Notes
+    /// widget entirely, so nothing else would ever pick up the change.
+    fn process_notes_refresh_requests(&mut self) {
+        let all_ids: Vec<String> = self.manager.ids().to_vec();
+        let mut needs_refresh = false;
+        for id in all_ids {
+            if let Some(w) = self.manager.get_mut(&id) {
+                if w.take_notes_refresh_request() {
+                    needs_refresh = true;
+                }
+            }
+        }
+        if needs_refresh {
+            if let Some(notes) = self.manager.get_mut("notes") {
+                notes.reload_external_changes();
+            }
+        }
+    }
+
     // ── Zoom methods ─────────────────────────────────────────────────────
 
     /// Enter zoom for the currently-focused widget. No-op when `focus_order`
@@ -1054,6 +1077,11 @@ pub async fn run(config_path_override: Option<PathBuf>) -> Result<()> {
                 // full-screen) — honor it immediately rather than waiting
                 // for the next tick, so the popup opens already-sized big.
                 app.process_zoom_requests();
+                // Likewise, a widget may have just written directly into
+                // another widget's on-disk store (Email's extract-to-notes
+                // action) — refresh the target immediately so the change
+                // is visible without an app restart.
+                app.process_notes_refresh_requests();
             }
             Event::Mouse(mut mouse) => {
                 let mut mouse_acted = false;

@@ -614,3 +614,102 @@ impl Drop for TempHome {
         let _ = std::fs::remove_dir_all(&self.0);
     }
 }
+
+// ── reload_external_changes ─────────────────────────────────────────
+
+/// A file written directly via `store::save` (mirroring exactly what
+/// Email's extract-to-notes action does — bypassing this widget's own
+/// editing path entirely) must show up after `reload_external_changes`,
+/// since nothing else ever re-scans the notes directory.
+#[test]
+fn reload_external_changes_picks_up_a_file_written_outside_the_widget() {
+    let mut w = make_widget();
+    assert!(w.state.lock().unwrap().notes.is_empty());
+
+    let mut external = store::Note {
+        id: store::new_id(),
+        body: "Email Todos\n\n## Todo\n- [ ] something extracted".to_string(),
+        modified: std::time::SystemTime::now(),
+    };
+    store::save(&w.root, &w.instance, &mut external).unwrap();
+
+    w.reload_external_changes();
+
+    let st = w.state.lock().unwrap();
+    assert_eq!(st.notes.len(), 1);
+    assert!(st.notes[0].body.contains("something extracted"));
+}
+
+/// An external write to the CURRENTLY-ACTIVE note itself (exactly
+/// today's real scenario: the "Email Todos" note is open in the Notes
+/// pane while the user toggles a todo from the Email popup) must be
+/// picked up too — this widget's own editing path (`insert_char`,
+/// `create_note`, board edits) calls `save_active`/`store::save`
+/// synchronously on every mutation, so there is never an unsaved
+/// in-memory draft to protect; taking the fresh disk copy for every
+/// note, including the active one, is always correct.
+#[test]
+fn reload_external_changes_updates_the_active_note_when_it_is_the_one_that_changed() {
+    let mut w = make_widget();
+    w.create_note();
+    let active_id = {
+        let st = w.state.lock().unwrap();
+        st.notes[st.active.unwrap()].id.clone()
+    };
+
+    // Simulate Email's extract-to-notes action writing a new line
+    // into the SAME note that's currently active in this widget — same
+    // title (line 1) as the freshly-created note so `store::save`
+    // doesn't treat this as a rename (which would legitimately change
+    // the id, since ids here are title-derived filename stems).
+    let mut same_note = store::Note {
+        id: active_id.clone(),
+        body: format!("{active_id}\n\n## Todo\n- [ ] extracted while this note was open"),
+        modified: std::time::SystemTime::now(),
+    };
+    store::save(&w.root, &w.instance, &mut same_note).unwrap();
+
+    w.reload_external_changes();
+
+    let st = w.state.lock().unwrap();
+    assert_eq!(
+        st.notes[st.active.unwrap()].id, active_id,
+        "active selection must still point at the same note"
+    );
+    assert!(st.notes[st.active.unwrap()]
+        .body
+        .contains("extracted while this note was open"));
+}
+
+/// `load_all` sorts newest-first, so a reload can reorder the list —
+/// `active` must be re-resolved by note id, not assumed to stay at
+/// the same index.
+#[test]
+fn reload_external_changes_tracks_the_active_note_across_a_reorder() {
+    let mut w = make_widget();
+    w.create_note(); // note A — active, index 0
+    let note_a_id = {
+        let st = w.state.lock().unwrap();
+        st.notes[0].id.clone()
+    };
+
+    // A newer external note lands on disk — after a reload, load_all's
+    // newest-first sort should put it ahead of note A.
+    std::thread::sleep(std::time::Duration::from_millis(10));
+    let mut note_b = store::Note {
+        id: store::new_id(),
+        body: "Note B — newer".to_string(),
+        modified: std::time::SystemTime::now(),
+    };
+    store::save(&w.root, &w.instance, &mut note_b).unwrap();
+
+    w.reload_external_changes();
+
+    let st = w.state.lock().unwrap();
+    assert_eq!(st.notes.len(), 2);
+    let active_idx = st.active.unwrap();
+    assert_eq!(
+        st.notes[active_idx].id, note_a_id,
+        "active must still track note A by id even if its position moved"
+    );
+}

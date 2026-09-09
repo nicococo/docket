@@ -241,6 +241,30 @@ pub trait Widget: Send + Sync {
     fn take_zoom_request(&mut self) -> Option<bool> {
         None
     }
+
+    /// One-shot: drain whether this widget just wrote data directly
+    /// into another widget's on-disk store, bypassing that widget's
+    /// own editing path — e.g. Email's extract-to-notes action calling
+    /// `notes::store::save` straight through, rather than going
+    /// through the Notes widget's own `create_note`/`save_active`. The
+    /// app polls this after key dispatch and, when `true`, calls
+    /// [`Widget::reload_external_changes`] on the "notes" widget so
+    /// its in-memory list picks up the change without a restart.
+    /// Default `false`; only Email overrides it today. Named for the
+    /// one real cross-widget writer that exists rather than a general
+    /// target list — extend if a second one shows up.
+    fn take_notes_refresh_request(&mut self) -> bool {
+        false
+    }
+
+    /// Re-scan this widget's on-disk data for changes made from
+    /// outside its own actions (see [`Widget::take_notes_refresh_request`]).
+    /// Default no-op; only the Notes widget overrides it today.
+    /// Implementations must preserve any in-memory state the reload
+    /// could otherwise clobber (e.g. an unsaved edit to the note
+    /// currently open) rather than blindly replacing everything with
+    /// the fresh disk read.
+    fn reload_external_changes(&mut self) {}
 }
 
 /// Widget-initiated attention grab. The app's tick loop polls every
