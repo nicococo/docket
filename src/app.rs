@@ -77,6 +77,17 @@ pub struct App {
     /// `update()` when `counter % background_poll_ratio == 0`. Reset to 0 at
     /// startup.
     zoom_backdrop_tick_counter: u64,
+    /// Raw `config.toml` sections as of the last successful load —
+    /// either startup or the last live-reload. `apply_config_change`
+    /// diffs each widget's section against this before deciding
+    /// whether to call `apply_config` on it: a widget whose own
+    /// section didn't change gets left alone. Without this, ANY
+    /// config.toml write (e.g. `calendar::local::add_event` saving an
+    /// extracted date, or just `:scheme` touching `[global]`) would
+    /// rebuild every widget unconditionally — including Email, whose
+    /// `apply_config` does `*self = Self::with_config(...)`, silently
+    /// discarding in-memory-only UI state like an open AI popup.
+    last_raw_sections: toml::Value,
 }
 
 impl App {
@@ -143,6 +154,7 @@ impl App {
             partial_draw: ui::PartialDrawCache::default(),
             zoom_target: None,
             zoom_backdrop_tick_counter: 0,
+            last_raw_sections: raw_sections,
         }
     }
 
@@ -745,13 +757,26 @@ fn apply_config_change(app: &mut App, path: &std::path::Path) {
             continue;
         };
         let json = config::widget_section_json(&raw_sections, kind);
-        if let Err(err) = widget.apply_config(json) {
-            tracing::warn!(widget = %widget_id, error = %err, "apply_config failed");
-        } else {
-            tracing::info!(widget = %widget_id, "live-reloaded config");
+        // Only rebuild the widget when its OWN section actually
+        // changed. Every widget's `apply_config` reconstructs the
+        // widget from scratch (`*self = Self::with_config(...)`),
+        // which discards any in-memory-only UI state — an open AI
+        // popup, scroll position, the active tab. A config.toml write
+        // to an unrelated section (e.g. Calendar's local-events
+        // extraction, or `:scheme` touching `[global]`) must not
+        // reset every other widget's live state just because the
+        // watcher fires on the whole file.
+        let old_json = config::widget_section_json(&app.last_raw_sections, kind);
+        if json != old_json {
+            if let Err(err) = widget.apply_config(json) {
+                tracing::warn!(widget = %widget_id, error = %err, "apply_config failed");
+            } else {
+                tracing::info!(widget = %widget_id, "live-reloaded config");
+            }
         }
         widget.set_app_theme(new_theme.clone());
     }
+    app.last_raw_sections = raw_sections;
 
     app.config = new_config;
 
