@@ -119,6 +119,11 @@ pub const DEFAULT_CALDAV_TEMPLATE: &str = include_str!("defaults/credentials/cal
 
 pub const DEFAULT_ICS_TEMPLATE: &str = include_str!("defaults/credentials/ics.toml");
 
+/// Starter `calendar.ics` seeding the local calendar provider's example
+/// events — real iCalendar text, not TOML, so it doubles as a working
+/// demo of the format `local_ics_path` points at.
+pub const DEFAULT_CALENDAR_ICS: &str = include_str!("defaults/calendar.ics");
+
 /// Create `~/.config/docket/` and seed `config.toml` + credential
 /// template files if they do not already exist. Idempotent — existing files
 /// are left untouched. Returns the path of the main `config.toml`.
@@ -127,6 +132,7 @@ pub fn init_default_config() -> Result<PathBuf> {
     std::fs::create_dir_all(&dir)
         .with_context(|| format!("failed to create docket root at {}", dir.display()))?;
     seed(&dir.join("config.toml"), DEFAULT_CONFIG_TOML)?;
+    seed(&dir.join("calendar.ics"), DEFAULT_CALENDAR_ICS)?;
 
     let creds = dir.join("credentials");
     std::fs::create_dir_all(&creds)
@@ -198,8 +204,8 @@ mod tests {
         let cfg: Config = toml::from_str(DEFAULT_CONFIG_TOML).expect("default config should parse");
         #[cfg(feature = "widget-calendar")]
         assert!(
-            !cfg.calendar.events.is_empty(),
-            "[calendar] seed should ship example events"
+            DEFAULT_CALENDAR_ICS.contains("BEGIN:VEVENT"),
+            "calendar.ics seed should ship example events"
         );
         #[cfg(feature = "widget-feeds")]
         assert!(

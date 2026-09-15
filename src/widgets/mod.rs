@@ -257,6 +257,16 @@ pub trait Widget: Send + Sync {
         false
     }
 
+    /// Same idea as [`Widget::take_notes_refresh_request`], for the
+    /// "calendar" widget: set after Email's extract-dates action
+    /// writes an event into the local `.ics` file. The Calendar
+    /// widget builds its provider once at construction and never
+    /// re-reads that file on its own, so without this signal an
+    /// extracted date would only appear after an app restart.
+    fn take_calendar_refresh_request(&mut self) -> bool {
+        false
+    }
+
     /// Re-scan this widget's on-disk data for changes made from
     /// outside its own actions (see [`Widget::take_notes_refresh_request`]).
     /// Default no-op; only the Notes widget overrides it today.

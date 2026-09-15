@@ -231,6 +231,7 @@ This wipes everything — config, tokens, cache. `docket --init` seeds fresh def
 ```
 ~/.config/docket/
 ├── config.toml                # [global] + [calendar] + [feeds] + [notes] + [email] + [llm]
+├── calendar.ics                # local calendar events, real iCalendar — see `local_ics_path`
 ├── credentials/                # account secrets (0700)
 │   ├── caldav.toml  ics.toml  imap.toml
 │   ├── anthropic_key.toml  openai_key.toml

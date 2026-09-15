@@ -380,6 +380,11 @@ struct EmailState {
     /// `notes::store::save`, bypassing the Notes widget entirely, so
     /// nothing else would ever refresh its in-memory list.
     notes_refresh_pending: bool,
+    /// Same idea as `notes_refresh_pending`, for `add_event`/
+    /// `remove_event` — those write straight into the local
+    /// `calendar.ics` file, which the Calendar widget only ever reads
+    /// once at construction.
+    calendar_refresh_pending: bool,
     /// Last-rendered row layout for the message list: `(msg_idx, row_start, row_end_exclusive)`
     /// in offsets relative to the list_area's top. Populated on every
     /// render so `handle_mouse` can map a click row back to a message
@@ -1247,8 +1252,14 @@ impl EmailWidget {
             } else {
                 extract_actions::add_event(&date.title, &date.date, &id)
             };
-            if let Err(err) = result {
-                tracing::warn!(error = %err, "email extract: date add/remove failed");
+            match result {
+                Ok(()) => {
+                    self.state.lock().expect("email state poisoned").calendar_refresh_pending =
+                        true;
+                }
+                Err(err) => {
+                    tracing::warn!(error = %err, "email extract: date add/remove failed");
+                }
             }
         }
     }
@@ -2427,6 +2438,11 @@ impl Widget for EmailWidget {
     fn take_notes_refresh_request(&mut self) -> bool {
         let mut st = self.state.lock().expect("email state poisoned");
         std::mem::replace(&mut st.notes_refresh_pending, false)
+    }
+
+    fn take_calendar_refresh_request(&mut self) -> bool {
+        let mut st = self.state.lock().expect("email state poisoned");
+        std::mem::replace(&mut st.calendar_refresh_pending, false)
     }
 
     fn handle_mouse(&mut self, mouse: MouseEvent, area: Rect) -> EventResult {

@@ -325,25 +325,36 @@ impl App {
         false
     }
 
-    /// Drain every widget's `take_notes_refresh_request` and, if any
-    /// fired, tell the "notes" widget to re-scan its on-disk data.
-    /// Called right after key dispatch, same as `process_zoom_requests`
-    /// — the one existing case is Email's extract-to-notes action,
-    /// which writes straight to the notes store bypassing the Notes
+    /// Drain every widget's `take_notes_refresh_request` /
+    /// `take_calendar_refresh_request` and, if either fired, tell the
+    /// "notes" / "calendar" widget to re-scan its on-disk data. Called
+    /// right after key dispatch, same as `process_zoom_requests` —
+    /// the existing cases are both Email's extract action: extracted
+    /// todos write straight to the notes store, extracted dates write
+    /// straight to the local `.ics` file, both bypassing the target
     /// widget entirely, so nothing else would ever pick up the change.
-    fn process_notes_refresh_requests(&mut self) {
+    fn process_cross_widget_refresh_requests(&mut self) {
         let all_ids: Vec<String> = self.manager.ids().to_vec();
-        let mut needs_refresh = false;
+        let mut needs_notes_refresh = false;
+        let mut needs_calendar_refresh = false;
         for id in all_ids {
             if let Some(w) = self.manager.get_mut(&id) {
                 if w.take_notes_refresh_request() {
-                    needs_refresh = true;
+                    needs_notes_refresh = true;
+                }
+                if w.take_calendar_refresh_request() {
+                    needs_calendar_refresh = true;
                 }
             }
         }
-        if needs_refresh {
+        if needs_notes_refresh {
             if let Some(notes) = self.manager.get_mut("notes") {
                 notes.reload_external_changes();
+            }
+        }
+        if needs_calendar_refresh {
+            if let Some(calendar) = self.manager.get_mut("calendar") {
+                calendar.reload_external_changes();
             }
         }
     }
@@ -1078,10 +1089,11 @@ pub async fn run(config_path_override: Option<PathBuf>) -> Result<()> {
                 // for the next tick, so the popup opens already-sized big.
                 app.process_zoom_requests();
                 // Likewise, a widget may have just written directly into
-                // another widget's on-disk store (Email's extract-to-notes
-                // action) — refresh the target immediately so the change
-                // is visible without an app restart.
-                app.process_notes_refresh_requests();
+                // another widget's on-disk store (Email's extract-to-notes/
+                // extract-to-calendar actions) — refresh the target
+                // immediately so the change is visible without an app
+                // restart.
+                app.process_cross_widget_refresh_requests();
             }
             Event::Mouse(mut mouse) => {
                 let mut mouse_acted = false;

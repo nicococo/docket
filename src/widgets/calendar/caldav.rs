@@ -438,16 +438,23 @@ fn ical_event_to_event(
     let mut dtstart_raw: Option<(String, bool)> = None;
     let mut dtend_raw: Option<(String, bool)> = None;
     let mut status: Option<String> = None;
+    let mut categories: Option<String> = None;
     for prop in &vevent.properties {
         let value = prop.value.clone().unwrap_or_default();
         match prop.name.as_str() {
-            "SUMMARY" => title = value,
+            "SUMMARY" => title = unescape_ics_text(&value),
             "LOCATION" if !value.is_empty() => {
-                location = Some(value);
+                location = Some(unescape_ics_text(&value));
             }
             "DTSTART" => dtstart_raw = Some((value, prop_is_date(&prop.params))),
             "DTEND" => dtend_raw = Some((value, prop_is_date(&prop.params))),
             "STATUS" => status = Some(value),
+            // Used by the local .ics provider to group events into
+            // named sub-calendars (e.g. "email" for extracted events)
+            // without needing a separate file per calendar — CalDAV
+            // servers don't set this today, so `calendar_label` still
+            // wins there.
+            "CATEGORIES" if !value.is_empty() => categories = Some(value),
             _ => {}
         }
     }
@@ -472,9 +479,32 @@ fn ical_event_to_event(
         end,
         all_day,
         source: "caldav".into(),
-        calendar: calendar_label.to_string(),
+        calendar: categories.unwrap_or_else(|| calendar_label.to_string()),
         location,
     })
+}
+
+/// Reverse the RFC 5545 §3.3.11 TEXT escaping (`\\`, `\;`, `\,`, `\n`/`\N`)
+/// in one pass. Applies to SUMMARY/LOCATION (and any other TEXT-valued
+/// property) coming from any ICS source — CalDAV servers, plain
+/// `.ics` HTTP feeds, and docket's own local `.ics` writer
+/// (`calendar::local::escape_ics_text`) all use the same escaping, so
+/// one shared unescaper covers every reader.
+fn unescape_ics_text(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut chars = s.chars();
+    while let Some(c) = chars.next() {
+        if c == '\\' {
+            match chars.next() {
+                Some('n') | Some('N') => out.push('\n'),
+                Some(other) => out.push(other),
+                None => out.push('\\'),
+            }
+        } else {
+            out.push(c);
+        }
+    }
+    out
 }
 
 fn prop_is_date(params: &Option<Vec<(String, Vec<String>)>>) -> bool {
@@ -531,6 +561,18 @@ mod tests {
             resolve_url("https://caldav.icloud.com/some/path/", "/abc"),
             "https://caldav.icloud.com/abc"
         );
+    }
+
+    #[test]
+    fn unescape_ics_text_reverses_all_escaped_forms() {
+        assert_eq!(
+            unescape_ics_text("Holzkirchen\\, Marktpl. 19\\, Germany"),
+            "Holzkirchen, Marktpl. 19, Germany"
+        );
+        assert_eq!(unescape_ics_text("A\\; B"), "A; B");
+        assert_eq!(unescape_ics_text("line one\\nline two"), "line one\nline two");
+        assert_eq!(unescape_ics_text("back\\\\slash"), "back\\slash");
+        assert_eq!(unescape_ics_text("plain text"), "plain text");
     }
 
     #[test]

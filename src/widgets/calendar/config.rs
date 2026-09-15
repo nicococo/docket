@@ -11,7 +11,6 @@ use std::collections::HashMap;
 use chrono::Weekday;
 use serde::{Deserialize, Serialize};
 
-use super::local;
 use crate::theme::ColorScheme;
 use crate::ui::big_digits;
 
@@ -51,7 +50,7 @@ pub struct CalendarConfig {
     #[serde(default = "default_poll_interval")]
     pub poll_interval_secs: u64,
 
-    /// Calendar sources. Empty = local-only (use `[[events]]` below).
+    /// Calendar sources. Empty = local-only (see `local_ics_path`).
     #[serde(default)]
     pub providers: Vec<ProviderEntry>,
 
@@ -59,9 +58,17 @@ pub struct CalendarConfig {
     #[serde(default)]
     pub caldav: CalDavConfig,
 
-    /// Events for the built-in local provider.
+    /// Path to the local `.ics` file the built-in local provider reads
+    /// (and the Email widget's "extract dates" action writes into).
+    /// `~` expands to `$HOME`. Empty/unset defaults to
+    /// `<config dir>/calendar.ics`. Point this at a file inside a
+    /// synced folder (Dropbox, iCloud Drive, a Google Drive desktop
+    /// mount, …) to make local events importable into — or, if the
+    /// sync target is reachable by URL, subscribable from — Google
+    /// Calendar or any other calendar app, since it's a real
+    /// iCalendar file rather than docket-proprietary TOML.
     #[serde(default)]
-    pub events: Vec<local::RawEvent>,
+    pub local_ics_path: Option<String>,
 
     /// ANSI palette cycled across calendars in `[[providers]]` order. Names
     /// like `red`, `light_blue`. Wraps when more calendars than colors.
@@ -187,7 +194,7 @@ impl Default for CalendarConfig {
             poll_interval_secs: default_poll_interval(),
             providers: Vec::new(),
             caldav: CalDavConfig::default(),
-            events: Vec::new(),
+            local_ics_path: None,
             color_palette: Vec::new(),
             calendar_colors: HashMap::new(),
             gradient: big_digits::Gradient::default(),

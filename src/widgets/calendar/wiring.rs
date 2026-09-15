@@ -22,8 +22,24 @@ use chrono::{DateTime, Local};
 use super::caldav::{CalDavCredentials, CalDavProvider};
 use super::config::{CalendarConfig, ProviderEntry, ProviderKind};
 use super::ics::{IcsCredentials, IcsProvider};
-use super::local::{LocalCalendarFile, LocalCalendarProvider};
+use super::local::{self, LocalCalendarProvider};
 use super::provider::{CalendarProvider, Event};
+
+/// Resolve and parse the local `.ics` provider from `config`, falling
+/// back to an empty one on any error (missing file is already handled
+/// inside `from_ics_file`; this only catches a genuine parse/path
+/// failure so the widget still renders everything else).
+fn build_local_provider(config: &CalendarConfig) -> Arc<dyn CalendarProvider> {
+    match local::resolve_ics_path(config.local_ics_path.as_deref())
+        .and_then(|p| LocalCalendarProvider::from_ics_file(&p))
+    {
+        Ok(p) => Arc::new(p),
+        Err(err) => {
+            tracing::warn!(error = %err, "failed to parse local calendar.ics, starting empty");
+            Arc::new(LocalCalendarProvider::empty())
+        }
+    }
+}
 
 /// Returns `(provider, source_label, auth_hint)`. The provider is either a
 /// single backend (Local / CalDAV / ICS) or a CompositeProvider fanning out
@@ -32,16 +48,7 @@ use super::provider::{CalendarProvider, Event};
 pub(super) fn build_provider(
     config: &CalendarConfig,
 ) -> (Arc<dyn CalendarProvider>, String, Option<String>) {
-    let local_file = LocalCalendarFile {
-        events: config.events.clone(),
-    };
-    let local: Arc<dyn CalendarProvider> = match LocalCalendarProvider::from_file(local_file) {
-        Ok(p) => Arc::new(p),
-        Err(err) => {
-            tracing::warn!(error = %err, "failed to parse calendar.toml events, starting empty");
-            Arc::new(LocalCalendarProvider::empty())
-        }
-    };
+    let local = build_local_provider(config);
 
     // Empty `[[providers]]` means "local only" — bail with the seeded
     // LocalCalendarProvider from above.
@@ -95,14 +102,7 @@ fn build_entry(
 ) -> Result<(Arc<dyn CalendarProvider>, String), String> {
     let source = entry.source_label();
     match entry.kind {
-        ProviderKind::Local => {
-            let file = LocalCalendarFile {
-                events: config.events.clone(),
-            };
-            let p =
-                LocalCalendarProvider::from_file(file).map_err(|e| format!("local events: {e}"))?;
-            Ok((Arc::new(p), source))
-        }
+        ProviderKind::Local => Ok((build_local_provider(config), source)),
         ProviderKind::Caldav => {
             let urls = if entry.calendar_ids.is_empty() {
                 config.caldav.calendars.clone()

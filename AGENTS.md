@@ -196,11 +196,12 @@ Everything lives in one file, `~/.config/docket/config.toml`:
 
 ```
 [global]              — theme, mouse_scroll, background_poll_ratio, zoom_margin, …
-[calendar]             — providers, calendar_ids, [[calendar.events]]
+[calendar]             — providers, calendar_ids, local_ics_path
 [feeds]                 — [[feeds.feeds]] (one tabbed multi-source RSS pane)
 [email]                 — provider, [[email.accounts]], summarize_with_llm
 [notes]                 — notes_dir
 [llm]                   — [llm.provider] name (anthropic / openai), model, [llm.limits]
+calendar.ics            — local calendar events, real iCalendar (not TOML) — see local_ics_path
 notes/<instance>/      — one .md per note; mtime sorts the list
 credentials/            — API keys, IMAP/CalDAV passwords (0600) — the one thing NOT in config.toml
 ```

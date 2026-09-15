@@ -2533,6 +2533,29 @@ impl Widget for CalendarWidget {
         self.app_theme = theme;
     }
 
+    /// Re-read config.toml and rebuild `self.provider` from it, then
+    /// force the next tick's poll to re-fetch — see
+    /// `Widget::take_calendar_refresh_request`. Deliberately narrower
+    /// than `apply_config`: only the provider/source_label/auth_hint
+    /// are replaced, so the user's current view/anchor date/scroll
+    /// position survive (a full `with_config` rebuild, like
+    /// `apply_config` does, would reset all of that just to pick up
+    /// one new event).
+    fn reload_external_changes(&mut self) {
+        let config = match crate::config::load(None) {
+            Ok(cfg) => cfg.calendar,
+            Err(err) => {
+                tracing::warn!(error = %err, "calendar: failed to reload config.toml for external refresh");
+                return;
+            }
+        };
+        let (provider, source_label, auth_hint) = build_provider(&config);
+        self.provider = provider;
+        self.source_label = source_label;
+        self.auth_hint = auth_hint;
+        self.state.lock().expect("calendar state poisoned").poll.mark_dirty();
+    }
+
     fn poll_snapshot(&self) -> Option<crate::polling::PollSnapshot> {
         Some(
             self.state

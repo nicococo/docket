@@ -10,7 +10,8 @@
 //! command bus, it calls straight into `notes::store`/`notes::board`
 //! — both are already pure, `Arc<Mutex<NotesState>>`-independent
 //! library functions — and a small new calendar helper module
-//! (`calendar::local`) that does the equivalent for `calendar.toml`.
+//! (`calendar::local`) that does the equivalent for the local
+//! `.ics` file.
 //! Both integrations are gated behind the same Cargo feature that
 //! gates the target widget itself, so a slim `--features widget-email`
 //! build compiles fine; the functions below just become no-ops and

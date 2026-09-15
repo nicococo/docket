@@ -2,91 +2,57 @@
 // Copyright (C) 2026 ntrospect0
 // Copyright (C) 2026 nicococo
 
+//! Local calendar provider — events read from a real `.ics` file
+//! (default `~/.config/docket/calendar.ics`, overridable via
+//! `[calendar] local_ics_path` in `config.toml`) rather than
+//! docket-proprietary TOML. Standard iCalendar means the same file
+//! can be imported into (or subscribed from, if synced somewhere
+//! reachable) Google Calendar or any other app — the whole point of
+//! this format choice over the TOML `[[calendar.events]]` this
+//! replaced.
+
 use anyhow::{Context, Result};
 use async_trait::async_trait;
-use chrono::{DateTime, Local, NaiveDate, TimeZone};
-use serde::Deserialize;
+use chrono::{DateTime, Local, NaiveDate};
+use std::path::{Path, PathBuf};
 
+use super::caldav::parse_ics_events;
 use super::provider::{CalendarProvider, Event};
 
-/// In-memory shape of the `[calendar]` table's local-events source —
-/// built from the already-parsed `CalendarConfig.events` (themselves
-/// `[[calendar.events]]` in `config.toml`), not read from a standalone
-/// file. `Deserialize` is kept for the unit tests below, which
-/// exercise `RawEvent::parse` directly.
-#[derive(Debug, Clone, Deserialize, Default)]
-pub struct LocalCalendarFile {
-    #[serde(default)]
-    pub events: Vec<RawEvent>,
-}
-
-/// One row in `[[calendar.events]]`. Either timestamps must be RFC3339 (e.g.
-/// `2026-05-20T09:30:00-07:00`) for timed events, or plain `YYYY-MM-DD` dates
-/// for all-day events.
-#[derive(Debug, Clone, Deserialize)]
-pub struct RawEvent {
-    pub title: String,
-    pub start: String,
-    pub end: String,
-    #[serde(default)]
-    pub all_day: bool,
-    #[serde(default = "default_calendar")]
-    pub calendar: String,
-    #[serde(default)]
-    pub location: Option<String>,
-}
-
-fn default_calendar() -> String {
-    "default".into()
-}
-
-impl RawEvent {
-    fn parse(self) -> Result<Event> {
-        let (start, end, all_day) = if self.all_day || is_bare_date(&self.start) {
-            let s = parse_local_date(&self.start)
-                .with_context(|| format!("invalid start date {:?}", self.start))?;
-            let e = parse_local_date(&self.end)
-                .with_context(|| format!("invalid end date {:?}", self.end))?;
-            // For an all-day event ending on date D, treat the end as the
-            // beginning of D+1 so single-day events still have non-zero length.
-            let e_exclusive = e
-                .checked_add_signed(chrono::Duration::days(1))
-                .context("date overflow extending all-day end")?;
-            (s, e_exclusive, true)
-        } else {
-            let s = DateTime::parse_from_rfc3339(&self.start)
-                .with_context(|| format!("invalid RFC3339 start {:?}", self.start))?
-                .with_timezone(&Local);
-            let e = DateTime::parse_from_rfc3339(&self.end)
-                .with_context(|| format!("invalid RFC3339 end {:?}", self.end))?
-                .with_timezone(&Local);
-            (s, e, false)
-        };
-        Ok(Event {
-            title: self.title,
-            start,
-            end,
-            all_day,
-            source: "local".into(),
-            calendar: self.calendar,
-            location: self.location,
-        })
+/// Expand a leading `~/` (or bare `~`) against `$HOME`. Anything else is
+/// returned unchanged — `~user/...` is intentionally not supported.
+fn expand_tilde(raw: &str) -> PathBuf {
+    if raw == "~" {
+        return dirs::home_dir().unwrap_or_else(|| PathBuf::from(raw));
     }
+    if let Some(rest) = raw.strip_prefix("~/") {
+        if let Some(home) = dirs::home_dir() {
+            return home.join(rest);
+        }
+    }
+    PathBuf::from(raw)
 }
 
-fn is_bare_date(s: &str) -> bool {
-    s.len() == 10 && NaiveDate::parse_from_str(s, "%Y-%m-%d").is_ok()
+/// Resolve the local `.ics` path: the configured override (tilde-
+/// expanded) if non-empty, else `<config_dir>/calendar.ics`.
+pub fn resolve_ics_path(configured: Option<&str>) -> Result<PathBuf> {
+    let configured = configured.map(str::trim).filter(|s| !s.is_empty());
+    if let Some(p) = configured {
+        return Ok(expand_tilde(p));
+    }
+    Ok(crate::config::config_dir()?.join("calendar.ics"))
 }
 
-fn parse_local_date(s: &str) -> Result<DateTime<Local>> {
-    let date = NaiveDate::parse_from_str(s, "%Y-%m-%d")?;
-    let midnight = date
-        .and_hms_opt(0, 0, 0)
-        .context("date had no midnight (clock change?)")?;
-    Local
-        .from_local_datetime(&midnight)
-        .single()
-        .context("ambiguous local time at midnight")
+/// Re-read `config.toml` for the currently-configured `local_ics_path`.
+/// Cheap and infrequent (only on an email extract add/remove), same
+/// pattern as `email::extract_actions`' own `notes_dir` lookup — avoids
+/// threading the already-loaded app `Config` through Email's key-
+/// handling path just for this.
+fn configured_ics_path() -> Result<PathBuf> {
+    let configured = crate::config::load(None)
+        .ok()
+        .and_then(|cfg| cfg.calendar.local_ics_path);
+    resolve_ics_path(configured.as_deref())
 }
 
 pub struct LocalCalendarProvider {
@@ -94,10 +60,24 @@ pub struct LocalCalendarProvider {
 }
 
 impl LocalCalendarProvider {
-    pub fn from_file(file: LocalCalendarFile) -> Result<Self> {
-        let mut events = Vec::with_capacity(file.events.len());
-        for raw in file.events {
-            events.push(raw.parse()?);
+    /// Parse events out of an on-disk `.ics` file. A missing file is
+    /// not an error — first run, or nothing's been added yet — it
+    /// just yields an empty provider.
+    pub fn from_ics_file(path: &Path) -> Result<Self> {
+        let text = match std::fs::read_to_string(path) {
+            Ok(t) => t,
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+                return Ok(Self::empty());
+            }
+            Err(err) => return Err(err).with_context(|| format!("read {}", path.display())),
+        };
+        let mut events = parse_ics_events(&text, "local");
+        for e in &mut events {
+            // `parse_ics_events` hardcodes "caldav" as the source
+            // (shared with the CalDAV/webcal providers) — override it
+            // here so color-assignment and the title-row label read
+            // "local", matching every other provider's own identity.
+            e.source = "local".into();
         }
         Ok(Self { events })
     }
@@ -129,52 +109,51 @@ impl CalendarProvider for LocalCalendarProvider {
 //
 // Lets the Email widget's "extract dates" AI popup action add/remove
 // a local all-day event (see `email::extract_actions`), without a
-// general cross-widget dependency — this file only needs to know
-// config.toml's path and the `[[calendar.events]]` shape above. Every
-// write is plain text, not a TOML parse/edit: `add_event` appends a
-// new `[[calendar.events]]` block at the end of the file — valid TOML
-// regardless of what else is already in the file (table-array entries
-// don't need to be contiguous with their table's other keys, or with
-// each other), no parser needed — and `remove_event` only ever
-// deletes a block this same code wrote, bounded by its own marker
-// comment and the next blank line — it never touches anything else in
-// the file. Docket's config file-watcher (`config::watcher`) picks up
-// the change and live-reloads Calendar automatically.
+// general cross-widget dependency. Two files are involved:
+// - `config.toml`'s `[[calendar.providers]]` (via
+//   `ensure_local_provider_registered`) — unrelated to event storage,
+//   just makes sure the local source stays active when the user has
+//   also configured an external CalDAV/ICS provider.
+// - the local `.ics` file itself (`configured_ics_path()`) — where
+//   the actual VEVENT blocks live.
 //
-// Known limitation of the plain-text approach: if a *user* hand-edits
-// one of these blocks and adds a blank line in the middle of it,
-// `remove_event` stops at that blank line and leaves the rest behind
-// rather than corrupting unrelated content — a hand-edited block just
-// won't clean up perfectly, which is an acceptable trade-off for not
-// needing a real TOML editor dependency to support removal.
+// Both are edited as plain text, not parsed/rewritten wholesale:
+// `add_event` inserts one new `BEGIN:VEVENT…END:VEVENT` block right
+// before the file's `END:VCALENDAR` line (valid regardless of how
+// many other events are already there), and `remove_event` only ever
+// deletes a block carrying its own `X-DOCKET-EXTRACT-ID:<id>` marker
+// property, bounded by that block's own `BEGIN:VEVENT`/`END:VEVENT` —
+// it never touches any other event.
+//
+// Known limitation of the plain-text approach: a *user* hand-editing
+// an extracted VEVENT to span multiple `BEGIN:VEVENT` blocks (not a
+// realistic edit) could confuse `remove_event`'s block boundaries —
+// an acceptable trade-off for not needing a full ICS writer/editor
+// library to support removal.
 
-fn extract_config_path() -> Result<std::path::PathBuf> {
-    crate::config::config_path()
-}
-
-fn extract_marker_comment(id: &str) -> String {
-    format!("# docket:extract:{id}")
+fn extract_marker_property(id: &str) -> String {
+    format!("X-DOCKET-EXTRACT-ID:{id}")
 }
 
 /// Whether an event previously added via `add_event(_, _, id)` is
-/// still present. `Ok(false)` (not an error) if config.toml doesn't
-/// exist yet — nothing has ever been added.
+/// still present. `Ok(false)` (not an error) if the `.ics` file
+/// doesn't exist yet — nothing has ever been added.
 pub fn event_marker_present(id: &str) -> Result<bool> {
-    let path = extract_config_path()?;
+    let path = configured_ics_path()?;
     if !path.exists() {
         return Ok(false);
     }
     let text = std::fs::read_to_string(&path)
         .with_context(|| format!("read {}", path.display()))?;
-    Ok(text.contains(&extract_marker_comment(id)))
+    Ok(text.contains(&extract_marker_property(id)))
 }
 
-/// True if `text` has a *non-commented* `kind = "local"` line —
-/// i.e. an explicit `[[calendar.providers]]` entry activating the
-/// local `[[calendar.events]]` source. Deliberately simple (a
-/// per-line substring check, not a TOML parse) to match the rest of
-/// this module's plain-text approach; a commented-out example
-/// (`# kind = "local"`) correctly doesn't count.
+/// True if `text` has a *non-commented* `kind = "local"` line — i.e.
+/// an explicit `[[calendar.providers]]` entry activating the local
+/// `.ics` source. Deliberately simple (a per-line substring check,
+/// not a TOML parse) to match the rest of this module's plain-text
+/// approach; a commented-out example (`# kind = "local"`) correctly
+/// doesn't count.
 fn has_local_provider(text: &str) -> bool {
     text.lines().any(|l| {
         let l = l.trim();
@@ -182,22 +161,20 @@ fn has_local_provider(text: &str) -> bool {
     })
 }
 
-/// Registers a `[[calendar.providers]] kind = "local"` entry if one
-/// isn't already present. **This is the load-bearing fix for
-/// `add_event` actually showing up anywhere**: when
+/// Registers a `[[calendar.providers]] kind = "local"` entry in
+/// `config.toml` if one isn't already present. **This is the load-
+/// bearing fix for `add_event` actually showing up anywhere**: when
 /// `[[calendar.providers]]` is non-empty (any external CalDAV/ICS
 /// source configured), docket's provider wiring
 /// (`wiring::build_provider`) only builds *those* configured
-/// providers — the `[[calendar.events]]` local source is silently
-/// dropped unless a `local` entry explicitly opts it back in. Without
-/// this, `add_event` would write a real event that never renders
-/// anywhere, for anyone who has any other calendar source configured
-/// (i.e. most users). No-op if a local provider is already registered
-/// (including the common case of `[[calendar.providers]]` being
-/// empty, which activates local events by itself — see
-/// `wiring::build_provider`).
-fn ensure_local_provider_registered(path: &std::path::Path) -> Result<()> {
-    let existing = std::fs::read_to_string(path).unwrap_or_default();
+/// providers — the local `.ics` source is silently dropped unless a
+/// `local` entry explicitly opts it back in. No-op if a local
+/// provider is already registered (including the common case of
+/// `[[calendar.providers]]` being empty, which activates local events
+/// by itself — see `wiring::build_provider`).
+fn ensure_local_provider_registered() -> Result<()> {
+    let path = crate::config::config_path()?;
+    let existing = std::fs::read_to_string(&path).unwrap_or_default();
     if existing.is_empty() || has_local_provider(&existing) {
         return Ok(());
     }
@@ -209,87 +186,107 @@ fn ensure_local_provider_registered(path: &std::path::Path) -> Result<()> {
     use std::io::Write;
     let mut file = std::fs::OpenOptions::new()
         .append(true)
-        .open(path)
+        .open(&path)
         .with_context(|| format!("open {}", path.display()))?;
     file.write_all(addition.as_bytes())
         .with_context(|| format!("append to {}", path.display()))
+}
+
+/// Escape a text value per RFC 5545 §3.3.11: backslash, semicolon,
+/// comma, and newline all need a leading backslash.
+fn escape_ics_text(s: &str) -> String {
+    s.replace('\\', "\\\\")
+        .replace(';', "\\;")
+        .replace(',', "\\,")
+        .replace('\n', "\\n")
+}
+
+/// Wrap `vevent_block` (a complete `BEGIN:VEVENT…END:VEVENT\n` chunk)
+/// in a `VCALENDAR` envelope if the file is new/empty, or insert it
+/// just before the existing `END:VCALENDAR` otherwise — keeping
+/// exactly one well-formed calendar in the file no matter how many
+/// events have been added over time.
+fn insert_vevent_block(path: &Path, vevent_block: &str) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("create {}", parent.display()))?;
+    }
+    let existing = std::fs::read_to_string(path).unwrap_or_default();
+    let body = if existing.trim().is_empty() {
+        format!(
+            "BEGIN:VCALENDAR\nVERSION:2.0\nPRODID:-//docket//local//EN\nCALSCALE:GREGORIAN\n{vevent_block}END:VCALENDAR\n"
+        )
+    } else if let Some(idx) = existing.rfind("END:VCALENDAR") {
+        let mut out = String::with_capacity(existing.len() + vevent_block.len());
+        out.push_str(&existing[..idx]);
+        out.push_str(vevent_block);
+        out.push_str(&existing[idx..]);
+        out
+    } else {
+        // Malformed/missing envelope — wrap what's there defensively
+        // rather than losing it.
+        format!(
+            "BEGIN:VCALENDAR\nVERSION:2.0\nPRODID:-//docket//local//EN\nCALSCALE:GREGORIAN\n{existing}{vevent_block}END:VCALENDAR\n"
+        )
+    };
+    std::fs::write(path, body).with_context(|| format!("write {}", path.display()))
 }
 
 /// Append an all-day local event tagged with `id`. Idempotent — a
 /// second call with the same `id` is a no-op, so callers don't need
 /// to check `event_marker_present` first.
 pub fn add_event(title: &str, date: &str, id: &str) -> Result<()> {
-    let path = extract_config_path()?;
     if event_marker_present(id)? {
         return Ok(());
     }
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
-            .with_context(|| format!("create {}", parent.display()))?;
-    }
-    ensure_local_provider_registered(&path)?;
-    let needs_leading_newline = match std::fs::read_to_string(&path) {
-        Ok(existing) => !existing.is_empty() && !existing.ends_with('\n'),
-        Err(_) => false, // file doesn't exist yet — nothing to separate from
-    };
-    let escaped_title = title.replace('\\', "\\\\").replace('"', "\\\"");
-    let mut block = String::new();
-    if needs_leading_newline {
-        block.push('\n');
-    }
-    block.push('\n');
-    block.push_str(&extract_marker_comment(id));
-    block.push('\n');
-    block.push_str("[[calendar.events]]\n");
-    block.push_str(&format!("title = \"{escaped_title}\"\n"));
-    block.push_str(&format!("start = \"{date}\"\n"));
-    block.push_str(&format!("end = \"{date}\"\n"));
-    block.push_str("all_day = true\n");
-    block.push_str("calendar = \"email\"\n");
+    ensure_local_provider_registered()?;
 
-    use std::io::Write;
-    let mut file = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&path)
-        .with_context(|| format!("open {}", path.display()))?;
-    file.write_all(block.as_bytes())
-        .with_context(|| format!("append to {}", path.display()))?;
-    Ok(())
+    let start = NaiveDate::parse_from_str(date, "%Y-%m-%d")
+        .with_context(|| format!("invalid date {date:?}"))?;
+    let end_exclusive = start
+        .succ_opt()
+        .context("date overflow computing exclusive end")?;
+    let stamp = chrono::Utc::now().format("%Y%m%dT%H%M%SZ");
+    let block = format!(
+        "BEGIN:VEVENT\nUID:docket-extract-{id}@docket\nDTSTAMP:{stamp}\nDTSTART;VALUE=DATE:{}\nDTEND;VALUE=DATE:{}\nSUMMARY:{}\nCATEGORIES:email\n{}\nEND:VEVENT\n",
+        start.format("%Y%m%d"),
+        end_exclusive.format("%Y%m%d"),
+        escape_ics_text(title),
+        extract_marker_property(id),
+    );
+    insert_vevent_block(&configured_ics_path()?, &block)
 }
 
 /// Remove the event block tagged with `id`. `Ok(())` (not an error)
-/// if it's already gone, or config.toml doesn't exist.
+/// if it's already gone, or the `.ics` file doesn't exist.
 pub fn remove_event(id: &str) -> Result<()> {
-    let path = extract_config_path()?;
+    let path = configured_ics_path()?;
     if !path.exists() {
         return Ok(());
     }
     let text =
         std::fs::read_to_string(&path).with_context(|| format!("read {}", path.display()))?;
-    let marker = extract_marker_comment(id);
-    let lines: Vec<&str> = text.split('\n').collect();
-    let Some(start) = lines.iter().position(|l| l.trim() == marker) else {
+    let marker = extract_marker_property(id);
+    let lines: Vec<&str> = text.lines().collect();
+    let Some(marker_idx) = lines.iter().position(|l| l.trim() == marker) else {
         return Ok(());
     };
-    let mut end = start + 1;
-    while end < lines.len() && !lines[end].trim().is_empty() {
-        end += 1;
+    let mut start = marker_idx;
+    while start > 0 && lines[start].trim() != "BEGIN:VEVENT" {
+        start -= 1;
     }
-    // Swallow the blank-line separator `add_event` wrote before the
-    // marker too, so repeated add/remove doesn't accumulate blank
-    // lines — but only the one right after our block, never anything
-    // before `start`.
-    if end < lines.len() {
+    let mut end = marker_idx;
+    while end < lines.len() && lines[end].trim() != "END:VEVENT" {
         end += 1;
     }
     let mut kept: Vec<&str> = Vec::with_capacity(lines.len());
     kept.extend_from_slice(&lines[..start]);
-    if end < lines.len() {
-        kept.extend_from_slice(&lines[end..]);
+    if end + 1 < lines.len() {
+        kept.extend_from_slice(&lines[end + 1..]);
     }
-    std::fs::write(&path, kept.join("\n"))
-        .with_context(|| format!("write {}", path.display()))?;
+    let mut joined = kept.join("\n");
+    joined.push('\n');
+    std::fs::write(&path, joined).with_context(|| format!("write {}", path.display()))?;
     Ok(())
 }
 
@@ -297,48 +294,58 @@ pub fn remove_event(id: &str) -> Result<()> {
 mod tests {
     use super::*;
 
-    fn raw(start: &str, end: &str, all_day: bool) -> RawEvent {
-        RawEvent {
-            title: "x".into(),
-            start: start.into(),
-            end: end.into(),
-            all_day,
-            calendar: "default".into(),
-            location: None,
-        }
+    #[test]
+    fn resolve_ics_path_defaults_under_config_dir_when_unset() {
+        let _cfg = crate::widgets::test_support::IsolatedConfigHome::new();
+        let path = resolve_ics_path(None).unwrap();
+        assert!(path.ends_with("calendar.ics"));
+        assert_eq!(path.parent(), crate::config::config_dir().ok().as_deref());
     }
 
     #[test]
-    fn rfc3339_timed_event_parses_into_local_time() {
-        let e = raw("2026-05-20T09:00:00Z", "2026-05-20T10:00:00Z", false)
-            .parse()
-            .unwrap();
-        assert!(!e.all_day);
-        assert!(e.end > e.start);
-    }
-
-    #[test]
-    fn bare_date_treated_as_all_day_with_exclusive_end() {
-        let e = raw("2026-05-20", "2026-05-20", false).parse().unwrap();
-        assert!(e.all_day);
-        assert_eq!(e.end - e.start, chrono::Duration::days(1));
+    fn resolve_ics_path_expands_tilde_when_set() {
+        let path = resolve_ics_path(Some("~/my-calendar.ics")).unwrap();
+        assert!(!path.to_string_lossy().contains('~'));
+        assert!(path.ends_with("my-calendar.ics"));
     }
 
     #[tokio::test]
     async fn fetch_range_filters_and_sorts() {
-        let file = LocalCalendarFile {
-            events: vec![
-                raw("2026-05-20T15:00:00Z", "2026-05-20T16:00:00Z", false),
-                raw("2026-05-20T09:00:00Z", "2026-05-20T10:00:00Z", false),
-                raw("2026-06-01T09:00:00Z", "2026-06-01T10:00:00Z", false),
-            ],
-        };
-        let p = LocalCalendarProvider::from_file(file).unwrap();
-        let start = Local.with_ymd_and_hms(2026, 5, 20, 0, 0, 0).unwrap();
-        let end = Local.with_ymd_and_hms(2026, 5, 21, 0, 0, 0).unwrap();
+        let ics = "BEGIN:VCALENDAR\nVERSION:2.0\n\
+                   BEGIN:VEVENT\nUID:a@docket\nDTSTART:20260520T150000Z\nDTEND:20260520T160000Z\nSUMMARY:Afternoon\nEND:VEVENT\n\
+                   BEGIN:VEVENT\nUID:b@docket\nDTSTART:20260520T090000Z\nDTEND:20260520T100000Z\nSUMMARY:Morning\nEND:VEVENT\n\
+                   BEGIN:VEVENT\nUID:c@docket\nDTSTART:20260601T090000Z\nDTEND:20260601T100000Z\nSUMMARY:Next month\nEND:VEVENT\n\
+                   END:VCALENDAR\n";
+        let dir = std::env::temp_dir().join(format!(
+            "docket-local-ics-test-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("calendar.ics");
+        std::fs::write(&path, ics).unwrap();
+
+        let p = LocalCalendarProvider::from_ics_file(&path).unwrap();
+        let start = chrono::TimeZone::with_ymd_and_hms(&Local, 2026, 5, 20, 0, 0, 0).unwrap();
+        let end = chrono::TimeZone::with_ymd_and_hms(&Local, 2026, 5, 21, 0, 0, 0).unwrap();
         let got = p.fetch_range(start, end).await.unwrap();
         assert_eq!(got.len(), 2);
         assert!(got[0].start < got[1].start);
+        assert!(got.iter().all(|e| e.source == "local"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn missing_ics_file_yields_empty_provider_not_an_error() {
+        let path = std::env::temp_dir().join(format!(
+            "docket-local-ics-missing-{}-{:?}.ics",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let _ = std::fs::remove_file(&path);
+        let p = LocalCalendarProvider::from_ics_file(&path).unwrap();
+        assert!(p.events.is_empty());
     }
 
     // ── Email-extract add/remove ────────────────────────────────────
@@ -356,11 +363,13 @@ mod tests {
         add_event("Budget review", "2026-09-03", "id-1").unwrap();
         assert!(event_marker_present("id-1").unwrap());
 
-        let path = extract_config_path().unwrap();
+        let path = configured_ics_path().unwrap();
         let text = std::fs::read_to_string(&path).unwrap();
-        assert!(text.contains("title = \"Budget review\""));
-        assert!(text.contains("start = \"2026-09-03\""));
-        assert!(text.contains("all_day = true"));
+        assert!(text.contains("SUMMARY:Budget review"));
+        assert!(text.contains("DTSTART;VALUE=DATE:20260903"));
+        assert!(text.contains("DTEND;VALUE=DATE:20260904"));
+        assert!(text.contains("BEGIN:VCALENDAR"));
+        assert!(text.contains("END:VCALENDAR"));
 
         remove_event("id-1").unwrap();
         assert!(!event_marker_present("id-1").unwrap());
@@ -371,49 +380,50 @@ mod tests {
         let _cfg = IsolatedConfigHome::new();
         add_event("Budget review", "2026-09-03", "id-2").unwrap();
         add_event("Budget review", "2026-09-03", "id-2").unwrap();
-        let path = extract_config_path().unwrap();
+        let path = configured_ics_path().unwrap();
         let text = std::fs::read_to_string(&path).unwrap();
         assert_eq!(
-            text.matches("title = \"Budget review\"").count(),
+            text.matches("SUMMARY:Budget review").count(),
             1,
             "second add_event call must be a no-op"
         );
     }
 
     #[test]
-    fn add_preserves_existing_file_content() {
+    fn add_preserves_existing_events_in_the_file() {
         let _cfg = IsolatedConfigHome::new();
-        let path = extract_config_path().unwrap();
-        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        std::fs::write(&path, "# a hand-written comment\ndefault_view = \"month\"\n").unwrap();
+        add_event("First event", "2026-09-01", "id-a").unwrap();
+        add_event("Second event", "2026-09-02", "id-b").unwrap();
 
-        add_event("Budget review", "2026-09-03", "id-3").unwrap();
-
+        let path = configured_ics_path().unwrap();
         let text = std::fs::read_to_string(&path).unwrap();
-        assert!(text.contains("# a hand-written comment"));
-        assert!(text.contains("default_view = \"month\""));
-        assert!(text.contains("title = \"Budget review\""));
+        assert!(text.contains("SUMMARY:First event"));
+        assert!(text.contains("SUMMARY:Second event"));
+        // Exactly one calendar envelope, not one per event.
+        assert_eq!(text.matches("BEGIN:VCALENDAR").count(), 1);
+        assert_eq!(text.matches("END:VCALENDAR").count(), 1);
     }
 
     #[test]
-    fn add_registers_a_local_provider_when_the_file_only_has_external_ones() {
+    fn add_registers_a_local_provider_when_config_only_has_external_ones() {
         let _cfg = IsolatedConfigHome::new();
-        let path = extract_config_path().unwrap();
-        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let config_path = crate::config::config_path().unwrap();
+        std::fs::create_dir_all(config_path.parent().unwrap()).unwrap();
         // Mirrors a real-world config: external providers only, no
-        // local one — the exact shape that silently dropped
-        // `[[calendar.events]]` (including anything add_event writes)
-        // before this fix.
+        // local one — the exact shape that would otherwise silently
+        // drop the local .ics source entirely.
         std::fs::write(
-            &path,
+            &config_path,
             "[[calendar.providers]]\nkind = \"ics\"\naccount = \"work\"\n",
         )
         .unwrap();
-        assert!(!has_local_provider(&std::fs::read_to_string(&path).unwrap()));
+        assert!(!has_local_provider(
+            &std::fs::read_to_string(&config_path).unwrap()
+        ));
 
         add_event("Budget review", "2026-09-03", "id-4").unwrap();
 
-        let text = std::fs::read_to_string(&path).unwrap();
+        let text = std::fs::read_to_string(&config_path).unwrap();
         assert!(has_local_provider(&text));
         assert!(text.contains("kind = \"ics\""), "existing provider must survive");
     }
@@ -421,13 +431,13 @@ mod tests {
     #[test]
     fn add_does_not_duplicate_an_existing_local_provider() {
         let _cfg = IsolatedConfigHome::new();
-        let path = extract_config_path().unwrap();
-        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        std::fs::write(&path, "[[calendar.providers]]\nkind = \"local\"\n").unwrap();
+        let config_path = crate::config::config_path().unwrap();
+        std::fs::create_dir_all(config_path.parent().unwrap()).unwrap();
+        std::fs::write(&config_path, "[[calendar.providers]]\nkind = \"local\"\n").unwrap();
 
         add_event("Budget review", "2026-09-03", "id-5").unwrap();
 
-        let text = std::fs::read_to_string(&path).unwrap();
+        let text = std::fs::read_to_string(&config_path).unwrap();
         assert_eq!(text.matches("kind = \"local\"").count(), 1);
     }
 
@@ -438,41 +448,25 @@ mod tests {
         assert!(has_local_provider("  kind = \"local\"  \n"));
     }
 
-    /// Regression test for the bug this module was originally shipping
-    /// with: `add_event` wrote to a `calendar.toml` file that nothing
-    /// else in the app ever read (config lives in one `config.toml`
-    /// since the single-config-file refactor), so an extracted event
-    /// silently never appeared anywhere. This round-trips through the
-    /// *real* config loader — not just a raw-string assertion on the
-    /// file `add_event` itself wrote — so a future regression back to
-    /// the wrong file/table path would fail this test even if the
-    /// string-content tests above still passed.
+    /// Regression-style test: round-trips through the REAL ICS parser
+    /// (`LocalCalendarProvider::from_ics_file`), not just a raw-string
+    /// assertion on the file `add_event` itself wrote — catches a
+    /// future malformed-VEVENT regression that string-contains checks
+    /// alone wouldn't.
     #[test]
-    fn add_event_is_actually_visible_through_the_real_config_loader() {
+    fn add_event_is_actually_parseable_by_the_real_local_provider() {
         let _cfg = IsolatedConfigHome::new();
-        let path = extract_config_path().unwrap();
-        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        // A realistic config.toml with unrelated tables before AND
-        // after `[calendar]`, to also confirm the append doesn't
-        // corrupt them.
-        std::fs::write(
-            &path,
-            "[global]\ntheme = \"default\"\n\n[calendar]\ndefault_view = \"day\"\n\n[llm]\nenabled = true\n",
-        )
-        .unwrap();
-
         add_event("Budget review", "2026-09-03", "id-roundtrip").unwrap();
 
-        let cfg = crate::config::load(None).expect("config.toml must still parse");
-        assert_eq!(cfg.global.theme, "default", "unrelated table must survive");
-        assert!(cfg.llm.enabled, "unrelated table after [calendar] must survive");
+        let path = configured_ics_path().unwrap();
+        let provider = LocalCalendarProvider::from_ics_file(&path).unwrap();
         assert!(
-            cfg.calendar
+            provider
                 .events
                 .iter()
-                .any(|e| e.title == "Budget review" && e.start == "2026-09-03"),
-            "the extracted event must be visible through the same loader the \
-             Calendar widget actually uses, not just as raw text in the file"
+                .any(|e| e.title == "Budget review" && e.all_day),
+            "the extracted event must be visible through the same ICS parser \
+             the Calendar widget actually uses, not just as raw text in the file"
         );
     }
 
@@ -491,16 +485,19 @@ mod tests {
 
         remove_event("id-a").unwrap();
 
-        let path = extract_config_path().unwrap();
+        let path = configured_ics_path().unwrap();
         let text = std::fs::read_to_string(&path).unwrap();
         assert!(!text.contains("First event"));
         assert!(text.contains("Second event"));
         assert!(!event_marker_present("id-a").unwrap());
         assert!(event_marker_present("id-b").unwrap());
+        // File must still be a well-formed single calendar.
+        assert_eq!(text.matches("BEGIN:VCALENDAR").count(), 1);
+        assert_eq!(text.matches("END:VCALENDAR").count(), 1);
     }
 
     #[test]
-    fn event_marker_present_is_false_when_calendar_toml_does_not_exist() {
+    fn event_marker_present_is_false_when_ics_file_does_not_exist() {
         let _cfg = IsolatedConfigHome::new();
         assert!(!event_marker_present("anything").unwrap());
     }
