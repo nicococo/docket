@@ -713,3 +713,78 @@ fn reload_external_changes_tracks_the_active_note_across_a_reorder() {
         "active must still track note A by id even if its position moved"
     );
 }
+
+// ── open-email board action ─────────────────────────────────────────
+
+#[test]
+fn parse_email_ref_line_round_trips() {
+    assert_eq!(
+        parse_email_ref_line("<!-- docket:email-ref:personal|imap-INBOX-42 -->"),
+        Some(("personal".to_string(), "imap-INBOX-42".to_string()))
+    );
+    assert_eq!(parse_email_ref_line("not a marker"), None);
+    assert_eq!(parse_email_ref_line("<!-- docket:extract:abc -->"), None);
+}
+
+#[test]
+fn open_board_link_preview_requests_email_open_for_an_extracted_card() {
+    let w = make_widget();
+    let body = format!(
+        "Email Todos\n{}\n\n## Todo\n<!-- docket:extract:abc123 -->\n\
+         <!-- docket:email-ref:personal|imap-INBOX-42 -->\n- [ ] Reply to invite\n",
+        board::MARKER
+    );
+    {
+        let mut st = w.state.lock().unwrap();
+        st.notes.push(store::Note {
+            id: store::new_id(),
+            body,
+            modified: std::time::SystemTime::now(),
+        });
+        st.active = Some(0);
+        st.board_col = 0;
+        st.board_row = 0;
+    }
+
+    w.open_board_link_preview();
+
+    let st = w.state.lock().unwrap();
+    assert_eq!(
+        st.open_email_request,
+        Some(("personal".to_string(), "imap-INBOX-42".to_string())),
+        "a card with an email-ref line must queue an open-email request"
+    );
+    assert!(
+        st.board_link_preview.is_none(),
+        "an email-ref card must not also open the wikilink preview"
+    );
+}
+
+#[test]
+fn open_board_link_preview_falls_back_to_wikilinks_without_an_email_ref() {
+    let w = make_widget();
+    let body = format!(
+        "Plans\n{}\n\n## Todo\n- [ ] See [[Other Note]]\n",
+        board::MARKER
+    );
+    {
+        let mut st = w.state.lock().unwrap();
+        st.notes.push(store::Note {
+            id: store::new_id(),
+            body,
+            modified: std::time::SystemTime::now(),
+        });
+        st.active = Some(0);
+        st.board_col = 0;
+        st.board_row = 0;
+    }
+
+    w.open_board_link_preview();
+
+    let st = w.state.lock().unwrap();
+    assert!(
+        st.open_email_request.is_none(),
+        "a card with no email-ref line must not queue an open-email request"
+    );
+    assert!(st.board_link_preview.is_some());
+}

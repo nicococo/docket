@@ -267,6 +267,26 @@ pub trait Widget: Send + Sync {
         false
     }
 
+    /// One-shot: drain a "please open this source item" request the
+    /// widget queued internally — e.g. Notes' board-card action for a
+    /// checklist item carrying an email reference. `(account, id)` is
+    /// opaque to the app; only the target widget (named by convention,
+    /// today only "email") knows how to resolve it. Default `None`;
+    /// only Notes overrides it today.
+    fn take_open_email_request(&mut self) -> Option<(String, String)> {
+        None
+    }
+
+    /// Attempt to select/expand a specific item this widget owns,
+    /// addressed by an `(account, id)` pair opaque to the caller (see
+    /// [`Widget::take_open_email_request`]). Returns `true` if found
+    /// and selected. Default: not supported. Only the Email widget
+    /// implements this today (resolving a stored `(account,
+    /// message id)` pair back to a loaded message).
+    fn jump_to_reference(&mut self, _account: &str, _id: &str) -> bool {
+        false
+    }
+
     /// Re-scan this widget's on-disk data for changes made from
     /// outside its own actions (see [`Widget::take_notes_refresh_request`]).
     /// Default no-op; only the Notes widget overrides it today.

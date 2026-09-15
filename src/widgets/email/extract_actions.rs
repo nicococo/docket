@@ -40,11 +40,16 @@ pub fn todo_item_id(message_id: &str, item_text: &str) -> String {
 /// entry is self-describing without having to reopen the email — sender,
 /// subject and received date, formatted by the caller (email/mod.rs) from
 /// its own `EmailMessage`/`format_sender` so this module stays free of
-/// provider-specific formatting rules.
+/// provider-specific formatting rules. `account`/`message_ref` are the
+/// widget-internal identity (not shown in the note) that lets a later
+/// "open this email" action find the message again — see
+/// `EmailWidget::jump_to_reference`.
 pub struct EmailContext<'a> {
     pub sender: &'a str,
     pub subject: &'a str,
     pub received: &'a str,
+    pub account: &'a str,
+    pub message_ref: &'a str,
 }
 
 pub fn date_item_id(message_id: &str, title: &str, date: &str) -> String {
@@ -53,6 +58,18 @@ pub fn date_item_id(message_id: &str, title: &str, date: &str) -> String {
 
 fn marker_line(id: &str) -> String {
     format!("<!-- docket:extract:{id} -->")
+}
+
+/// Hidden reference line, written right after the marker, letting a
+/// later "open this email" action re-find the exact source message —
+/// `account` plus the widget's own message id (already unique within
+/// that account: `imap-<folder>-<uid>`). Not shown to the user. Parsed
+/// back out by `notes::parse_email_ref_line` — deliberately a
+/// duplicated parser rather than a shared one, so Notes doesn't need
+/// `widget-email` compiled in just to recognize the syntax; keep the
+/// two in sync if this format ever changes.
+fn email_ref_line(account: &str, message_ref: &str) -> String {
+    format!("<!-- docket:email-ref:{account}|{message_ref} -->")
 }
 
 // ── Notes (todos) ───────────────────────────────────────────────────
@@ -66,7 +83,7 @@ pub fn notes_integration_available() -> bool {
 
 #[cfg(feature = "widget-notes")]
 mod notes_impl {
-    use super::{marker_line, EmailContext, TODO_COLUMN, TODO_NOTE_TITLE};
+    use super::{email_ref_line, marker_line, EmailContext, TODO_COLUMN, TODO_NOTE_TITLE};
     use crate::widgets::notes::{board, store};
     use anyhow::Result;
 
@@ -161,14 +178,16 @@ mod notes_impl {
         let insert_at =
             board::column_insert_line(&model, col, line_count(&note.body)).unwrap_or(0);
         // Keep the source email's sender/subject/date on the same
-        // checklist line (rather than a trailing line) — `remove()` only
-        // ever drops the marker plus exactly one following line, so a
-        // second content line would be orphaned on removal.
+        // checklist line (rather than a trailing line) — `remove()`
+        // walks forward from the marker consuming any HTML-comment
+        // lines (this ref line included) plus exactly one following
+        // checklist line, so this stays safe to remove as a block.
+        let email_ref = email_ref_line(ctx.account, ctx.message_ref);
         let line = format!(
             "- [ ] {item_text} — {}, \"{}\" ({})",
             ctx.sender, ctx.subject, ctx.received
         );
-        note.body = insert_lines_at(&note.body, insert_at, &[&marker, &line]);
+        note.body = insert_lines_at(&note.body, insert_at, &[&marker, &email_ref, &line]);
         store::save(&root, &instance, &mut note)
     }
 
@@ -182,16 +201,20 @@ mod notes_impl {
         let Some(idx) = lines.iter().position(|l| l.trim() == marker) else {
             return Ok(()); // already gone — idempotent
         };
-        let remove_count = if lines
-            .get(idx + 1)
-            .is_some_and(|l| l.trim_start().starts_with("- ["))
-        {
-            2
-        } else {
-            1
-        };
+        // Consume the marker, any HTML-comment lines right after it
+        // (e.g. the email-ref line), and exactly one following
+        // checklist line — a superset of the old "marker + one line"
+        // window that stays backward-compatible with notes written
+        // before the ref line existed.
+        let mut end = idx + 1;
+        while lines.get(end).is_some_and(|l| l.trim_start().starts_with("<!--")) {
+            end += 1;
+        }
+        if lines.get(end).is_some_and(|l| l.trim_start().starts_with("- [")) {
+            end += 1;
+        }
         let mut owned: Vec<String> = lines.into_iter().map(str::to_string).collect();
-        owned.drain(idx..(idx + remove_count).min(owned.len()));
+        owned.drain(idx..end.min(owned.len()));
         note.body = owned.join("\n");
         store::save(&root, &instance, &mut note)
     }
@@ -267,6 +290,8 @@ mod tests {
             sender: "Jane Doe <jane@example.com>",
             subject: "Q3 planning",
             received: "2026-09-01",
+            account: "personal",
+            message_ref: "imap-INBOX-42",
         }
     }
 
@@ -298,6 +323,36 @@ mod tests {
         assert!(
             notes[0].body.contains("Jane Doe <jane@example.com>"),
             "extracted todo should carry the source email's sender"
+        );
+    }
+
+    #[test]
+    fn add_writes_the_expected_email_ref_line() {
+        let _cfg = IsolatedConfigHome::new();
+        let id = todo_item_id("msg-ref", "Reply to invite");
+        add_todo("Reply to invite", &id, &ctx()).unwrap();
+
+        let (root, _) = crate::widgets::notes::store::resolve_root(None).unwrap();
+        let notes = crate::widgets::notes::store::load_all(&root, "main");
+        // Exact format Notes' own (independently duplicated) parser
+        // expects — see notes::parse_email_ref_line.
+        assert!(notes[0]
+            .body
+            .contains("<!-- docket:email-ref:personal|imap-INBOX-42 -->"));
+    }
+
+    #[test]
+    fn remove_also_deletes_the_email_ref_line() {
+        let _cfg = IsolatedConfigHome::new();
+        let id = todo_item_id("msg-ref-2", "Reply to invite");
+        add_todo("Reply to invite", &id, &ctx()).unwrap();
+        remove_todo(&id).unwrap();
+
+        let (root, _) = crate::widgets::notes::store::resolve_root(None).unwrap();
+        let notes = crate::widgets::notes::store::load_all(&root, "main");
+        assert!(
+            !notes[0].body.contains("docket:email-ref"),
+            "removing the todo must also clean up its email-ref line"
         );
     }
 

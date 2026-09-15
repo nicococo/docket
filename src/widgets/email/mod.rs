@@ -906,6 +906,44 @@ impl EmailWidget {
         st.selected = idx.min(filtered.len() - 1);
     }
 
+    /// Find the message identified by `(account, message_ref)` among
+    /// currently-loaded messages and, if present, switch to its tab
+    /// and select + expand it. Returns `false` when the message isn't
+    /// in the currently-fetched window (aged out of `latest_days`,
+    /// deleted, or IMAP just hasn't fetched it yet) — the caller
+    /// (Notes' "open source email" action) surfaces that as a status
+    /// hint rather than silently doing nothing.
+    fn select_message(&mut self, account: &str, message_ref: &str) -> bool {
+        let target = {
+            let st = self.state.lock().expect("email state poisoned");
+            st.messages
+                .iter()
+                .find(|m| m.id == message_ref && m.account == account)
+                .cloned()
+        };
+        let Some(msg) = target else { return false };
+        let tabs = self.tab_labels();
+        let Some(tab_idx) = tabs
+            .iter()
+            .position(|t| t != ALL_ACCOUNTS_TAB && self.message_matches_tab(&msg, t))
+            .or_else(|| tabs.iter().position(|t| t == ALL_ACCOUNTS_TAB))
+        else {
+            return false;
+        };
+        {
+            let mut st = self.state.lock().expect("email state poisoned");
+            st.active_folder_idx = tab_idx;
+        }
+        let Some(pos) = self.filtered_messages().iter().position(|m| m.id == msg.id) else {
+            return false;
+        };
+        let mut st = self.state.lock().expect("email state poisoned");
+        st.selected = pos;
+        st.expanded = true;
+        st.dirty = true;
+        true
+    }
+
     /// Press-`space` entry point: flip the selected message between read and
     /// unread. Updates the local seen-store immediately (so the UI reacts
     /// with no network latency), then fires an async IMAP `STORE` to push
@@ -1220,7 +1258,17 @@ impl EmailWidget {
                     .into_iter()
                     .find(|m| m.id == message_id);
                 let Some(msg) = msg else { return };
-                let sender = format_sender(&msg.from_name, &msg.from_address);
+                // Just the display name (falling back to the bare
+                // address) rather than `format_sender`'s "Name <addr>"
+                // — a note line is read at a glance, not addressed,
+                // so the full address is noise here.
+                let sender = msg
+                    .from_name
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|n| !n.is_empty())
+                    .unwrap_or(&msg.from_address)
+                    .to_string();
                 let subject = if msg.subject.trim().is_empty() {
                     "(no subject)".to_string()
                 } else {
@@ -1234,6 +1282,8 @@ impl EmailWidget {
                         sender: &sender,
                         subject: &subject,
                         received: &received,
+                        account: &msg.account,
+                        message_ref: &msg.id,
                     },
                 )
             };
@@ -2443,6 +2493,10 @@ impl Widget for EmailWidget {
     fn take_calendar_refresh_request(&mut self) -> bool {
         let mut st = self.state.lock().expect("email state poisoned");
         std::mem::replace(&mut st.calendar_refresh_pending, false)
+    }
+
+    fn jump_to_reference(&mut self, account: &str, id: &str) -> bool {
+        self.select_message(account, id)
     }
 
     fn handle_mouse(&mut self, mouse: MouseEvent, area: Rect) -> EventResult {

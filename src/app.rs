@@ -326,17 +326,23 @@ impl App {
     }
 
     /// Drain every widget's `take_notes_refresh_request` /
-    /// `take_calendar_refresh_request` and, if either fired, tell the
-    /// "notes" / "calendar" widget to re-scan its on-disk data. Called
-    /// right after key dispatch, same as `process_zoom_requests` —
-    /// the existing cases are both Email's extract action: extracted
-    /// todos write straight to the notes store, extracted dates write
-    /// straight to the local `.ics` file, both bypassing the target
-    /// widget entirely, so nothing else would ever pick up the change.
+    /// `take_calendar_refresh_request` / `take_open_email_request` and
+    /// act on whichever fired. Called right after key dispatch, same
+    /// as `process_zoom_requests`:
+    /// - Notes/Calendar refresh: Email's extract action writes
+    ///   straight to the notes store / the local `.ics` file,
+    ///   bypassing the target widget entirely, so nothing else would
+    ///   ever pick up the change.
+    /// - Open-email: Notes' board-card action for a card carrying an
+    ///   email reference — resolves `(account, id)` against Email's
+    ///   currently-loaded messages and, on success, focuses Email too
+    ///   (a no-op reference — message no longer in the fetched window
+    ///   — leaves focus where it was).
     fn process_cross_widget_refresh_requests(&mut self) {
         let all_ids: Vec<String> = self.manager.ids().to_vec();
         let mut needs_notes_refresh = false;
         let mut needs_calendar_refresh = false;
+        let mut open_email: Option<(String, String)> = None;
         for id in all_ids {
             if let Some(w) = self.manager.get_mut(&id) {
                 if w.take_notes_refresh_request() {
@@ -344,6 +350,9 @@ impl App {
                 }
                 if w.take_calendar_refresh_request() {
                     needs_calendar_refresh = true;
+                }
+                if let Some(req) = w.take_open_email_request() {
+                    open_email = Some(req);
                 }
             }
         }
@@ -355,6 +364,21 @@ impl App {
         if needs_calendar_refresh {
             if let Some(calendar) = self.manager.get_mut("calendar") {
                 calendar.reload_external_changes();
+            }
+        }
+        if let Some((account, id)) = open_email {
+            let found = self
+                .manager
+                .get_mut("email")
+                .is_some_and(|email| email.jump_to_reference(&account, &id));
+            if found {
+                self.promote_to_widget("email");
+            } else {
+                self.set_feedback(
+                    "Source email isn't in the currently-loaded view (aged out or deleted)"
+                        .to_string(),
+                    ui::FeedbackSeverity::Warning,
+                );
             }
         }
     }

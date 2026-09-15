@@ -286,6 +286,11 @@ struct NotesState {
     /// board card is open (see `open_board_link_preview`). Gates key
     /// dispatch the same way `confirm_delete` does.
     board_link_preview: Option<LinkPreview>,
+    /// One-shot signal for `take_open_email_request`: `Some((account,
+    /// message_ref))` when the user pressed `e`/Enter on a board card
+    /// whose preceding `<!-- docket:email-ref:... -->` line names a
+    /// source email — see `open_board_link_preview`.
+    open_email_request: Option<(String, String)>,
     /// Transient status line in the title bar — used for feedback like
     /// "Copied to clipboard" or "Save failed: …". Carries its own
     /// timestamp so the render path can expire it after `STATUS_TTL`
@@ -353,6 +358,7 @@ impl Default for NotesState {
             pending: PendingChord::None,
             confirm_delete: None,
             board_link_preview: None,
+            open_email_request: None,
             status: None,
             history: HashMap::new(),
             dirty: true,
@@ -1236,6 +1242,14 @@ impl Widget for NotesWidget {
         st.dirty = true;
     }
 
+    fn take_open_email_request(&mut self) -> Option<(String, String)> {
+        self.state
+            .lock()
+            .expect("notes state poisoned")
+            .open_email_request
+            .take()
+    }
+
     fn render(&self, frame: &mut Frame, area: Rect, focused: bool) {
         *self.last_outer_area.lock().unwrap() = area;
         let st = self.state.lock().expect("notes state poisoned");
@@ -1558,7 +1572,10 @@ impl Widget for NotesWidget {
             ("space / x (board)", "toggle card checkbox"),
             ("H / L (board)", "move card to prev / next column"),
             ("o (board)", "add a new card, switch to EDIT mode"),
-            ("e / Enter (board)", "preview card's [[linked]] notes"),
+            (
+                "e / Enter (board)",
+                "open source email (extracted cards) or preview [[linked]] notes",
+            ),
         ]
     }
 
@@ -2424,10 +2441,14 @@ impl NotesWidget {
         EventResult::Handled
     }
 
-    /// Open the `[[wikilink]]` preview modal for the selected board
-    /// card. No-op (with a status hint) if the card has no links.
-    /// Links are resolved against every loaded note's title — a
-    /// match is exact (trimmed), same as Obsidian's default behavior.
+    /// `e`/Enter on a board card: if the card carries a hidden email
+    /// reference (written by Email's extract-to-notes action just
+    /// above the checklist line), request opening that email instead
+    /// — see `take_open_email_request`. Otherwise falls back to the
+    /// `[[wikilink]]` preview modal below. No-op (with a status hint)
+    /// if neither applies. Links are resolved against every loaded
+    /// note's title — a match is exact (trimmed), same as Obsidian's
+    /// default behavior.
     fn open_board_link_preview(&self) {
         let mut st = self.state.lock().expect("notes state poisoned");
         let Some(active) = st.active else { return };
@@ -2442,6 +2463,21 @@ impl NotesWidget {
         else {
             return;
         };
+        // An extracted card's email reference sits one or two lines
+        // above the checklist line itself (marker comment, then the
+        // ref comment) — check both rather than assuming a fixed
+        // offset, so hand-edited notes stay tolerant.
+        let lines: Vec<&str> = note.body.split('\n').collect();
+        let email_ref = [1usize, 2usize].into_iter().find_map(|back| {
+            card.line
+                .checked_sub(back)
+                .and_then(|i| lines.get(i))
+                .and_then(|l| parse_email_ref_line(l))
+        });
+        if let Some((account, message_ref)) = email_ref {
+            st.open_email_request = Some((account, message_ref));
+            return;
+        }
         let links = board::extract_links(&card.text);
         if links.is_empty() {
             st.set_status("No [[links]] in this card");
@@ -3149,6 +3185,22 @@ fn resolve_root_or_emergency(
             )
         }
     }
+}
+
+/// Parse a `<!-- docket:email-ref:<account>|<id> -->` comment line —
+/// written by Email's extract-to-notes action (see
+/// `email::extract_actions::email_ref_line`) — into `(account, id)`.
+/// Deliberately duplicated rather than imported from the email module
+/// so Notes recognizes the marker syntax without needing
+/// `widget-email` compiled in.
+fn parse_email_ref_line(line: &str) -> Option<(String, String)> {
+    let rest = line
+        .trim()
+        .strip_prefix("<!-- docket:email-ref:")?
+        .strip_suffix("-->")?
+        .trim();
+    let (account, id) = rest.split_once('|')?;
+    Some((account.to_string(), id.to_string()))
 }
 
 pub fn build(ctx: &WidgetCtx) -> Box<dyn Widget> {
