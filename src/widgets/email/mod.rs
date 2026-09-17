@@ -79,6 +79,12 @@ the recipient. Avoid jargon, don't quote the raw text back verbatim, do not use 
 markdown. If the input is too sparse to explain faithfully, respond with the \
 single sentence: \"Insufficient content to explain.\"";
 
+/// Timeout for any of the three AI popup actions (Summarize/Explain/
+/// ExtractTodo) — longer than the shared HTTP client's 30s default
+/// since a 16k-token budget on a reasoning model can genuinely take
+/// that long. Same value as the Feeds digest's own override.
+const EMAIL_LLM_TIMEOUT_SECS: u64 = 180;
+
 const EXTRACT_SYSTEM_PROMPT: &str = "You extract action items and dates from \
 emails as JSON. You are given the message's received date so you can resolve \
 relative dates (\"next Tuesday\", \"in two weeks\") to real calendar dates. \
@@ -172,13 +178,12 @@ impl AiAction {
     /// invisible reasoning tokens before the visible answer, so it
     /// needs real headroom, not just "how long is the expected
     /// output" — too little silently returns empty text rather than
-    /// erroring. `ExtractTodo`'s prompt is structurally more complex
-    /// (JSON formatting + relative-date resolution) than a plain-text
-    /// summary/explanation, so it gets more room.
+    /// erroring (confirmed in practice: a technical email was enough
+    /// to burn a 1000-token Summarize budget on reasoning alone).
+    /// Matches the budget the Feeds digest needed for the same reason.
     fn max_tokens(self) -> u32 {
         match self {
-            AiAction::Summarize | AiAction::Explain => 1000,
-            AiAction::ExtractTodo => 2000,
+            AiAction::Summarize | AiAction::Explain | AiAction::ExtractTodo => 16_000,
         }
     }
 }
@@ -1667,7 +1672,10 @@ impl EmailWidget {
                 }],
                 max_tokens: action.max_tokens(),
                 cache_system: true,
-                timeout_secs: None,
+                // A 16k-token budget on a reasoning model can genuinely
+                // take longer than the shared HTTP client's 30s default
+                // — same reasoning as the Feeds digest's override.
+                timeout_secs: Some(EMAIL_LLM_TIMEOUT_SECS),
             };
             let outcome = match llm.complete(request).await {
                 Ok(resp) => {
