@@ -103,7 +103,19 @@ clap = { version = "4", features = ["derive"] }
 # config (off by default in iTerm2/Alacritty, unsupported in Terminal.app)
 # and a "yank" that never actually reaches the system clipboard makes
 # Cmd+V silently paste stale content.
-arboard = "3"
+#
+# `wayland-data-control` is NOT in arboard's default features — without
+# it, Linux clipboard access goes through x11rb only, which depends on
+# XWayland bridging the clipboard on a pure-Wayland compositor (Hyprland,
+# Sway, …) and can silently fail there. That failure is invisible to the
+# user: `crate::clipboard::copy` falls back to OSC 52, which "succeeds"
+# by writing escape bytes to stdout regardless of whether the terminal
+# actually forwards them — so the footer says "Copied to clipboard" even
+# though nothing landed on the real clipboard. This feature adds a
+# second Linux backend (wl-clipboard-rs, talking directly to the
+# compositor's wlr-data-control protocol) that arboard tries first on
+# Wayland, sidestepping the XWayland dependency entirely.
+arboard = { version = "3", features = ["wayland-data-control"] }
 
 # Inline image rendering (powers the Feeds widget's article images). Detects the host
 # terminal's image protocol — iTerm2, Kitty, Sixel — and falls back to
