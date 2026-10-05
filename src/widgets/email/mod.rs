@@ -47,6 +47,7 @@ use serde::Deserialize;
 use crate::cache::ScopedCache;
 use crate::llm::{LlmMessage, LlmProvider, LlmRequest, Role};
 use crate::theme::{ColorScheme, Theme};
+use crate::ui::status::{live_value, TimedFeedback};
 use crate::ui::{apply_title_row, MetadataEmphasis};
 
 use super::{AppContext, EventResult, ViewTier, Widget};
@@ -56,6 +57,9 @@ use seen_store::SeenStore;
 
 const MAX_SUMMARY_LINES: usize = 5;
 const MAX_PER_FOLDER: usize = 100;
+/// How long "Copied to clipboard" / "Copy failed: …" stays in the
+/// footer before reverting to the normal keybinding hint.
+const STATUS_TTL: Duration = Duration::from_millis(2500);
 /// Implicit first tab in multi-account IMAP mode — merges every configured
 /// account, mirroring News's "All" topic tab.
 const ALL_ACCOUNTS_TAB: &str = "All";
@@ -390,6 +394,10 @@ struct EmailState {
     /// `calendar.ics` file, which the Calendar widget only ever reads
     /// once at construction.
     calendar_refresh_pending: bool,
+    /// Transient footer feedback (e.g. "Copied to clipboard"). Set by
+    /// `copy_body`; drained after [`STATUS_TTL`] in `update()`, same
+    /// pattern as the Feeds/Notes widgets' own status line.
+    status: Option<TimedFeedback<String>>,
     /// Last-rendered row layout for the message list: `(msg_idx, row_start, row_end_exclusive)`
     /// in offsets relative to the list_area's top. Populated on every
     /// render so `handle_mouse` can map a click row back to a message
@@ -947,6 +955,34 @@ impl EmailWidget {
         st.expanded = true;
         st.dirty = true;
         true
+    }
+
+    fn set_status(&self, msg: impl Into<String>) {
+        let mut st = self.state.lock().expect("email state poisoned");
+        st.status = Some(TimedFeedback::new(msg.into(), STATUS_TTL));
+        st.dirty = true;
+    }
+
+    fn live_status(&self) -> Option<String> {
+        let mut st = self.state.lock().expect("email state poisoned");
+        live_value(&mut st.status).cloned()
+    }
+
+    /// Press-`c` entry point: copy the selected message's plain-text
+    /// body to the system clipboard. Body only (not sender/subject) —
+    /// mirrors what the read pane / expanded view actually show as
+    /// "the content of the email".
+    fn copy_body(&self) {
+        let filtered = self.filtered_messages();
+        let selected = {
+            let st = self.state.lock().expect("email state poisoned");
+            filtered.get(st.selected).cloned()
+        };
+        let Some(msg) = selected else { return };
+        match crate::clipboard::copy(&msg.plain_body) {
+            Ok(()) => self.set_status("Copied to clipboard"),
+            Err(err) => self.set_status(format!("Copy failed: {err}")),
+        }
     }
 
     /// Press-`space` entry point: flip the selected message between read and
@@ -1889,6 +1925,10 @@ impl Widget for EmailWidget {
         if self.is_due() {
             self.spawn_refresh();
         }
+        let mut st = self.state.lock().expect("email state poisoned");
+        if crate::ui::status::drain_if_expired(&mut st.status) {
+            st.dirty = true;
+        }
         Ok(())
     }
 
@@ -2334,18 +2374,22 @@ impl Widget for EmailWidget {
         let summarize_usable = self.summarize_with_llm && self.llm.is_some();
         // When the read pane is active the `e`/Enter key is a no-op, so drop
         // that hint to avoid implying a binding that does nothing in this mode.
-        let footer_text = if read_area.is_some() {
+        let footer_hint = if read_area.is_some() {
             if summarize_usable {
-                "↑/↓ select · ←/→ folder · ⏎ open popup · s summarize · space read/unread · d delete · r refresh"
+                "↑/↓ select · ←/→ folder · ⏎ open popup · s summarize · c copy · space read/unread · d delete · r refresh"
             } else {
-                "↑/↓ select · ←/→ folder · ⏎ open popup · space read/unread · d delete · r refresh"
+                "↑/↓ select · ←/→ folder · ⏎ open popup · c copy · space read/unread · d delete · r refresh"
             }
         } else if summarize_usable {
-            "↑/↓ select · ←/→ folder · e/click expand · ⏎ open popup · s summarize · space read/unread · d delete · r refresh"
+            "↑/↓ select · ←/→ folder · e/click expand · ⏎ open popup · s summarize · c copy · space read/unread · d delete · r refresh"
         } else {
-            "↑/↓ select · ←/→ folder · e/click expand · ⏎ open popup · space read/unread · d delete · r refresh"
+            "↑/↓ select · ←/→ folder · e/click expand · ⏎ open popup · c copy · space read/unread · d delete · r refresh"
         };
-        let footer = Paragraph::new(Line::from(Span::styled(footer_text, self.theme.text_dim)))
+        let (footer_text, footer_style) = match self.live_status() {
+            Some(msg) => (msg, self.theme.text_selected),
+            None => (footer_hint.to_string(), self.theme.text_dim),
+        };
+        let footer = Paragraph::new(Line::from(Span::styled(footer_text, footer_style)))
             .alignment(Alignment::Right);
         frame.render_widget(footer, footer_area);
 
@@ -2475,6 +2519,10 @@ impl Widget for EmailWidget {
             }
             KeyCode::Char('d') => {
                 self.arm_delete_confirm();
+                EventResult::Handled
+            }
+            KeyCode::Char('c') => {
+                self.copy_body();
                 EventResult::Handled
             }
             KeyCode::Char('[') | KeyCode::Left | KeyCode::Char('h') => {
@@ -2616,6 +2664,7 @@ impl Widget for EmailWidget {
             ("j/k (extract list)", "select a todo/date"),
             ("space (extract list)", "add/remove: todo → Notes, date → Calendar"),
             ("s", "request inline LLM summary (when enabled)"),
+            ("c", "copy message body to clipboard"),
             ("space", "toggle read/unread (IMAP: syncs to server)"),
             ("d", "delete to Trash — recoverable ~30d (IMAP only, y to confirm)"),
             ("r", "force refresh"),

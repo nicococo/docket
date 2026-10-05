@@ -883,3 +883,31 @@ fn extract_list_space_toggles_date_add_remove_as_a_calendar_event() {
     widget.handle_key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE));
     assert!(extract_actions::event_marker_present(&id));
 }
+
+// ── Copy-to-clipboard (`c`) ───────────────────────────────────────────
+
+/// Pressing `c` on the selected message sets a transient status —
+/// mirrors the Notes widget's own yank-status test; doesn't assert on
+/// the real OS clipboard (unavailable/flaky in CI), just that the
+/// action ran and surfaced feedback.
+#[test]
+fn copy_key_sets_a_status_message() {
+    let mut widget = make_widget_with_messages(vec![make_message(3)]);
+    assert!(widget.state.lock().unwrap().status.is_none());
+
+    widget.handle_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::NONE));
+
+    assert!(
+        widget.state.lock().unwrap().status.is_some(),
+        "pressing c should set a transient status (Copied/Copy failed)"
+    );
+}
+
+/// `c` is a no-op (no panic, no status) when there's no selected
+/// message — mirrors every other action's "nothing selected" guard.
+#[test]
+fn copy_key_is_a_noop_with_no_messages() {
+    let mut widget = make_widget_with_messages(vec![]);
+    widget.handle_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::NONE));
+    assert!(widget.state.lock().unwrap().status.is_none());
+}
