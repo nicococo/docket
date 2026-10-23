@@ -59,7 +59,12 @@ impl PaneAreas {
             let y = row_slices[row_start].y;
             let width = col_slices[col_end].x + col_slices[col_end].width - x;
             let height = row_slices[row_end].y + row_slices[row_end].height - y;
-            Rect { x, y, width, height }
+            Rect {
+                x,
+                y,
+                width,
+                height,
+            }
         };
 
         Self {

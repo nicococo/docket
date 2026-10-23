@@ -210,7 +210,10 @@ mod tests {
         assert_eq!(parsed.version, RUNTIME_STATE_VERSION);
         assert_eq!(parsed.notes.len(), 1);
         assert_eq!(
-            parsed.notes.get("notes").and_then(|e| e.active_note_id.as_deref()),
+            parsed
+                .notes
+                .get("notes")
+                .and_then(|e| e.active_note_id.as_deref()),
             Some("note-1")
         );
     }

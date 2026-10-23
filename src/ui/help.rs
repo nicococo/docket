@@ -100,4 +100,3 @@ pub fn render(
         inner,
     );
 }
-

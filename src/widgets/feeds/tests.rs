@@ -251,12 +251,7 @@ fn build_widget_for_expand_tests() -> FeedsWidget {
             hero_image_url: None,
             authors: vec![],
         });
-        widget
-            .state
-            .lock()
-            .unwrap()
-            .articles
-            .push(article);
+        widget.state.lock().unwrap().articles.push(article);
     }
     widget
 }

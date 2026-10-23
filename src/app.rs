@@ -88,6 +88,9 @@ pub struct App {
     /// `apply_config` does `*self = Self::with_config(...)`, silently
     /// discarding in-memory-only UI state like an open AI popup.
     last_raw_sections: toml::Value,
+    /// Whether the terminal is currently in mouse-capture mode. Starts from
+    /// `[global] mouse_capture`; `Ctrl+T` / `:mouse` flip it at runtime.
+    mouse_capture: bool,
 }
 
 impl App {
@@ -138,6 +141,7 @@ impl App {
 
         let focus_order = focus_order_from_manager(&manager);
         let shortcuts = assign_shortcuts(&mut manager);
+        let mouse_capture = config.global.mouse_capture;
         Self {
             config,
             theme,
@@ -152,6 +156,7 @@ impl App {
             command_buffer: None,
             command_feedback: None,
             partial_draw: ui::PartialDrawCache::default(),
+            mouse_capture,
             zoom_target: None,
             zoom_backdrop_tick_counter: 0,
             last_raw_sections: raw_sections,
@@ -240,7 +245,34 @@ impl App {
             show_status_bar: self.config.global.show_status_bar,
             zoom_target: self.zoom_target.as_ref(),
             zoom_margin: self.config.global.zoom_margin,
+            mouse_capture: self.mouse_capture,
         }
+    }
+
+    /// Hand the mouse to the terminal (or take it back). With capture off,
+    /// the terminal / multiplexer gets drag events and can do native text
+    /// selection; docket loses click-to-focus and wheel scrolling until it's
+    /// re-enabled.
+    fn set_mouse_capture(&mut self, on: bool) {
+        let result = if on {
+            execute!(io::stdout(), EnableMouseCapture)
+        } else {
+            execute!(io::stdout(), DisableMouseCapture)
+        };
+        if let Err(err) = result {
+            self.set_feedback(
+                format!("mouse capture toggle failed: {err}"),
+                ui::FeedbackSeverity::Error,
+            );
+            return;
+        }
+        self.mouse_capture = on;
+        let msg = if on {
+            "mouse captured — click to focus, wheel to scroll"
+        } else {
+            "mouse released — drag to select text, Ctrl+T to re-capture"
+        };
+        self.set_feedback(msg, ui::FeedbackSeverity::Confirmation);
     }
 
     fn cycle_focus(&mut self, forward: bool) {
@@ -300,7 +332,10 @@ impl App {
     fn process_zoom_requests(&mut self) -> bool {
         let all_ids: Vec<String> = self.manager.ids().to_vec();
         for id in all_ids {
-            let req = self.manager.get_mut(&id).and_then(|w| w.take_zoom_request());
+            let req = self
+                .manager
+                .get_mut(&id)
+                .and_then(|w| w.take_zoom_request());
             match req {
                 Some(true) => {
                     if self.zoom_target.as_ref().map(|z| z.widget_id.as_str()) != Some(id.as_str())
@@ -391,7 +426,9 @@ impl App {
         let Some(focused_id) = self.focused_widget().map(str::to_string) else {
             return;
         };
-        self.zoom_target = Some(ZoomTarget { widget_id: focused_id });
+        self.zoom_target = Some(ZoomTarget {
+            widget_id: focused_id,
+        });
     }
 
     /// Exit zoom, clearing `zoom_target` and landing focus on the widget
@@ -495,6 +532,9 @@ impl App {
             (KeyModifiers::SHIFT | KeyModifiers::NONE, KeyCode::BackTab) if !suppressed => {
                 self.retarget_zoom_cycle(false);
             }
+            (KeyModifiers::CONTROL, KeyCode::Char('t')) => {
+                self.set_mouse_capture(!self.mouse_capture)
+            }
             // Quit still works while zoomed.
             (KeyModifiers::NONE, KeyCode::Char('q')) => self.should_quit = true,
             (KeyModifiers::CONTROL, KeyCode::Char('c')) => self.should_quit = true,
@@ -541,6 +581,9 @@ impl App {
         match (key.modifiers, key.code) {
             (KeyModifiers::NONE, KeyCode::Char('q')) => self.should_quit = true,
             (KeyModifiers::CONTROL, KeyCode::Char('c')) => self.should_quit = true,
+            (KeyModifiers::CONTROL, KeyCode::Char('t')) => {
+                self.set_mouse_capture(!self.mouse_capture)
+            }
             (KeyModifiers::NONE, KeyCode::Tab) => self.cycle_focus(true),
             (KeyModifiers::SHIFT, KeyCode::BackTab) | (KeyModifiers::NONE, KeyCode::BackTab) => {
                 self.cycle_focus(false)
@@ -728,6 +771,18 @@ impl App {
                 self.execute_scheme_command(&args);
                 return;
             }
+            "mouse" => {
+                match args.first().copied() {
+                    None | Some("toggle") => self.set_mouse_capture(!self.mouse_capture),
+                    Some("on") => self.set_mouse_capture(true),
+                    Some("off") => self.set_mouse_capture(false),
+                    Some(other) => self.set_feedback(
+                        format!("usage: :mouse [on|off] (got {other:?})"),
+                        ui::FeedbackSeverity::Error,
+                    ),
+                }
+                return;
+            }
             _ => {}
         }
 
@@ -836,6 +891,9 @@ fn apply_config_change(app: &mut App, path: &std::path::Path) {
     }
     app.last_raw_sections = raw_sections;
 
+    if new_config.global.mouse_capture != app.config.global.mouse_capture {
+        app.set_mouse_capture(new_config.global.mouse_capture);
+    }
     app.config = new_config;
 
     // Live-reload guard: if a config change removed the currently-zoomed widget
@@ -1027,7 +1085,8 @@ fn register_default_widgets(
 pub async fn run(config_path_override: Option<PathBuf>) -> Result<()> {
     let config = config::load(config_path_override.as_deref())?;
 
-    let mut terminal = enter_tui().context("failed to initialize terminal")?;
+    let mut terminal =
+        enter_tui(config.global.mouse_capture).context("failed to initialize terminal")?;
     let _guard = TerminalGuard;
 
     let mut app = App::new(config);
@@ -1217,8 +1276,7 @@ pub async fn run(config_path_override: Option<PathBuf>) -> Result<()> {
                         match mouse.kind {
                             MouseEventKind::Down(MouseButton::Left) => {
                                 if let Some((id, cell_area)) = target {
-                                    if let Some(pos) =
-                                        app.focus_order.iter().position(|w| w == &id)
+                                    if let Some(pos) = app.focus_order.iter().position(|w| w == &id)
                                     {
                                         // Focus moved → the highlight changes, so a
                                         // repaint is warranted regardless of what the
@@ -1288,8 +1346,7 @@ pub async fn run(config_path_override: Option<PathBuf>) -> Result<()> {
                 // `background_poll_ratio` cadence. The zoom target always
                 // updates at full rate so its data stays live inside the
                 // frame (Req 4).
-                app.zoom_backdrop_tick_counter =
-                    app.zoom_backdrop_tick_counter.wrapping_add(1);
+                app.zoom_backdrop_tick_counter = app.zoom_backdrop_tick_counter.wrapping_add(1);
                 let ratio = app.config.global.background_poll_ratio.max(1) as u64;
                 let allow_backdrop_tick = app.zoom_target.is_none()
                     || ratio == 1
@@ -1383,7 +1440,7 @@ pub async fn run(config_path_override: Option<PathBuf>) -> Result<()> {
 
 type Tui = Terminal<CrosstermBackend<io::Stdout>>;
 
-fn enter_tui() -> Result<Tui> {
+fn enter_tui(mouse_capture: bool) -> Result<Tui> {
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     // EnableBracketedPaste makes the terminal wrap pastes in
@@ -1395,12 +1452,10 @@ fn enter_tui() -> Result<Tui> {
     // before the rest of the buffer arrives. The Paste handler is
     // already wired up in the event loop (Event::Paste branch above);
     // this just turns on the terminal-side framing.
-    execute!(
-        stdout,
-        EnterAlternateScreen,
-        EnableMouseCapture,
-        EnableBracketedPaste
-    )?;
+    execute!(stdout, EnterAlternateScreen, EnableBracketedPaste)?;
+    if mouse_capture {
+        execute!(stdout, EnableMouseCapture)?;
+    }
     let backend = CrosstermBackend::new(stdout);
     Ok(Terminal::new(backend)?)
 }
@@ -1583,7 +1638,10 @@ mod tests {
             app.retarget_zoom_cycle(true);
         }
         let final_id = app.zoom_target.as_ref().unwrap().widget_id.clone();
-        assert_eq!(start_id, final_id, "cycling forward n times should wrap back to start");
+        assert_eq!(
+            start_id, final_id,
+            "cycling forward n times should wrap back to start"
+        );
     }
 
     /// `assign_shortcuts` never assigns 'z' — it is reserved for zoom.

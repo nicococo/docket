@@ -5,8 +5,8 @@
 //! Unit tests for the email widget. Split out of `mod.rs` per the repo standard.
 
 use super::*;
-use std::sync::Arc;
 use crate::widgets::test_support::buffer_text;
+use std::sync::Arc;
 
 #[test]
 fn default_config_has_imap_and_inbox() {
@@ -167,7 +167,6 @@ fn placeholder_renders_when_provider_unconfigured() {
 }
 
 // ── Render tests (split-pane at Expanded/Full) ───────────────────────────────
-
 
 /// Construct a widget with the provider bypassed and a set of test messages
 /// pre-loaded into the in-memory state. `provider_ready` is forced true so
@@ -616,7 +615,11 @@ fn message_matches_tab_multi_account_filters_by_account_or_all() {
 fn ai_action_key_and_cache_prefix_are_distinct_per_action() {
     use std::collections::HashSet;
     let keys: HashSet<char> = AiAction::ALL.iter().map(|a| a.key()).collect();
-    assert_eq!(keys.len(), AiAction::ALL.len(), "every action needs a unique key");
+    assert_eq!(
+        keys.len(),
+        AiAction::ALL.len(),
+        "every action needs a unique key"
+    );
     let prefixes: HashSet<&str> = AiAction::ALL.iter().map(|a| a.cache_prefix()).collect();
     assert_eq!(
         prefixes.len(),
@@ -662,11 +665,17 @@ fn popup_j_k_scroll_without_a_configured_llm_is_a_noop_past_zero() {
     // No render has happened yet, so last_popup_max_scroll is still 0 —
     // j must clamp to 0 rather than let scroll run away.
     widget.handle_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE));
-    assert_eq!(widget.state.lock().unwrap().popup.as_ref().unwrap().scroll, 0);
+    assert_eq!(
+        widget.state.lock().unwrap().popup.as_ref().unwrap().scroll,
+        0
+    );
 
     // k on an already-zero scroll must saturate, not underflow/panic.
     widget.handle_key(KeyEvent::new(KeyCode::Char('k'), KeyModifiers::NONE));
-    assert_eq!(widget.state.lock().unwrap().popup.as_ref().unwrap().scroll, 0);
+    assert_eq!(
+        widget.state.lock().unwrap().popup.as_ref().unwrap().scroll,
+        0
+    );
 }
 
 #[test]
@@ -685,7 +694,14 @@ fn popup_action_key_is_a_noop_when_ai_is_not_configured() {
     ));
 
     assert_eq!(
-        widget.state.lock().unwrap().popup.as_ref().unwrap().active_action,
+        widget
+            .state
+            .lock()
+            .unwrap()
+            .popup
+            .as_ref()
+            .unwrap()
+            .active_action,
         None
     );
 }
@@ -729,7 +745,14 @@ async fn popup_action_key_toggles_active_action_on_and_back_off() {
         KeyModifiers::NONE,
     ));
     assert_eq!(
-        widget.state.lock().unwrap().popup.as_ref().unwrap().active_action,
+        widget
+            .state
+            .lock()
+            .unwrap()
+            .popup
+            .as_ref()
+            .unwrap()
+            .active_action,
         Some(AiAction::Explain)
     );
 
@@ -739,7 +762,14 @@ async fn popup_action_key_toggles_active_action_on_and_back_off() {
         KeyModifiers::NONE,
     ));
     assert_eq!(
-        widget.state.lock().unwrap().popup.as_ref().unwrap().active_action,
+        widget
+            .state
+            .lock()
+            .unwrap()
+            .popup
+            .as_ref()
+            .unwrap()
+            .active_action,
         None
     );
 }
@@ -822,14 +852,28 @@ fn extract_list_j_navigates_and_space_toggles_todo_add_remove() {
         KeyModifiers::NONE,
     ));
     assert_eq!(
-        widget.state.lock().unwrap().popup.as_ref().unwrap().extract_selected,
+        widget
+            .state
+            .lock()
+            .unwrap()
+            .popup
+            .as_ref()
+            .unwrap()
+            .extract_selected,
         0
     );
 
     // j moves selection to the second todo, not scroll.
     widget.handle_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE));
     assert_eq!(
-        widget.state.lock().unwrap().popup.as_ref().unwrap().extract_selected,
+        widget
+            .state
+            .lock()
+            .unwrap()
+            .popup
+            .as_ref()
+            .unwrap()
+            .extract_selected,
         1
     );
 

@@ -66,10 +66,7 @@ pub struct TemplateFeed {
 /// only fails the lookup that needed it, not the whole binary.
 const BUILTIN_TEMPLATES: &[(&str, &str)] = &[
     ("wsj", include_str!("templates/wsj.toml")),
-    (
-        "marketwatch",
-        include_str!("templates/marketwatch.toml"),
-    ),
+    ("marketwatch", include_str!("templates/marketwatch.toml")),
     ("ai", include_str!("templates/ai.toml")),
 ];
 

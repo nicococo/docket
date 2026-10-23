@@ -9,11 +9,11 @@ pub use view_tier::ViewTier;
 pub mod calendar;
 #[cfg(feature = "widget-email")]
 pub mod email;
+#[cfg(feature = "widget-feeds")]
+pub mod feeds;
 #[cfg(feature = "widget-notes")]
 pub mod notes;
 pub mod registry;
-#[cfg(feature = "widget-feeds")]
-pub mod feeds;
 
 use std::{collections::HashMap, sync::Arc};
 
@@ -443,5 +443,4 @@ mod tests {
             ("clock".into(), "main".into())
         );
     }
-
 }

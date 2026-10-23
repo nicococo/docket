@@ -18,6 +18,12 @@ log_level = "info"
 #                widget honors the choice without per-widget config.
 mouse_scroll = "natural"
 
+# Mouse capture. true (default) lets docket handle clicks and the wheel;
+# false leaves the mouse to the terminal / multiplexer (tmux, herdr, …) so
+# drag-to-select and copy work natively. Toggle at runtime with Ctrl+T or
+# `:mouse [on|off]`.
+mouse_capture = true
+
 # Bottom-of-screen status bar (docket version, ticking clock, scheme name,
 # quick hints). Set false to reclaim that row for the widget grid; `?`
 # still surfaces the full help overlay either way.

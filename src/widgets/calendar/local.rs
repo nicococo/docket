@@ -143,8 +143,8 @@ pub fn event_marker_present(id: &str) -> Result<bool> {
     if !path.exists() {
         return Ok(false);
     }
-    let text = std::fs::read_to_string(&path)
-        .with_context(|| format!("read {}", path.display()))?;
+    let text =
+        std::fs::read_to_string(&path).with_context(|| format!("read {}", path.display()))?;
     Ok(text.contains(&extract_marker_property(id)))
 }
 
@@ -208,8 +208,7 @@ fn escape_ics_text(s: &str) -> String {
 /// events have been added over time.
 fn insert_vevent_block(path: &Path, vevent_block: &str) -> Result<()> {
     if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
-            .with_context(|| format!("create {}", parent.display()))?;
+        std::fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
     }
     let existing = std::fs::read_to_string(path).unwrap_or_default();
     let body = if existing.trim().is_empty() {
@@ -425,7 +424,10 @@ mod tests {
 
         let text = std::fs::read_to_string(&config_path).unwrap();
         assert!(has_local_provider(&text));
-        assert!(text.contains("kind = \"ics\""), "existing provider must survive");
+        assert!(
+            text.contains("kind = \"ics\""),
+            "existing provider must survive"
+        );
     }
 
     #[test]

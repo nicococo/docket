@@ -119,7 +119,9 @@ fn build_caldav_entry(urls: Vec<String>) -> Result<Arc<dyn CalendarProvider>, St
     let creds = match CalDavCredentials::load() {
         Ok(Some(c)) => c,
         Ok(None) => {
-            return Err("Fill in ~/.config/docket/credentials/caldav.toml to connect CalDAV".into());
+            return Err(
+                "Fill in ~/.config/docket/credentials/caldav.toml to connect CalDAV".into(),
+            );
         }
         Err(err) => return Err(format!("CalDAV credentials unreadable: {err}")),
     };
@@ -149,7 +151,10 @@ fn build_ics_entry(entry: &ProviderEntry) -> Result<Arc<dyn CalendarProvider>, S
                  `account = \"{label}\"` there, or to this [[providers]] entry, to match)"
             )
         })?;
-    Ok(Arc::new(IcsProvider::new(feed.url.clone(), feed.label.clone())) as Arc<dyn CalendarProvider>)
+    Ok(
+        Arc::new(IcsProvider::new(feed.url.clone(), feed.label.clone()))
+            as Arc<dyn CalendarProvider>,
+    )
 }
 
 /// Meta-provider that fans `fetch_range` calls out to every wrapped provider

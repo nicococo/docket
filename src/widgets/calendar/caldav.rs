@@ -570,7 +570,10 @@ mod tests {
             "Holzkirchen, Marktpl. 19, Germany"
         );
         assert_eq!(unescape_ics_text("A\\; B"), "A; B");
-        assert_eq!(unescape_ics_text("line one\\nline two"), "line one\nline two");
+        assert_eq!(
+            unescape_ics_text("line one\\nline two"),
+            "line one\nline two"
+        );
         assert_eq!(unescape_ics_text("back\\\\slash"), "back\\slash");
         assert_eq!(unescape_ics_text("plain text"), "plain text");
     }

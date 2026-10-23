@@ -7,10 +7,7 @@
 //! state through `snapshot_events`; key handlers and the polling
 //! tick mutate it through the helpers here.
 
-use std::sync::{
-    atomic::Ordering,
-    Arc,
-};
+use std::sync::{atomic::Ordering, Arc};
 use std::time::{Duration, Instant};
 
 use chrono::{DateTime, Datelike, Duration as ChronoDuration, Local, NaiveDate};
@@ -149,9 +146,7 @@ impl CalendarWidget {
             // At Full tier the bottom 3-month block needs event data for
             // the full adjacent months. 60 days covers any anchor position's
             // ±1 month window without over-fetching at other tiers.
-            CalendarView::Day | CalendarView::Week
-                if self.last_full.load(Ordering::Relaxed) =>
-            {
+            CalendarView::Day | CalendarView::Week if self.last_full.load(Ordering::Relaxed) => {
                 ChronoDuration::days(60)
             }
             // ±2 weeks lets the user step through a month of days
@@ -374,7 +369,12 @@ impl CalendarWidget {
     pub(super) fn maybe_auto_roll(&mut self) {
         let today = Local::now().date_naive();
         let focused = self.is_focused.load(Ordering::Relaxed);
-        if !auto_roll_due(today, self.rollover_date, focused, self.last_activity.elapsed()) {
+        if !auto_roll_due(
+            today,
+            self.rollover_date,
+            focused,
+            self.last_activity.elapsed(),
+        ) {
             // Resync the baseline downward if the clock moved backward (a
             // timezone shift / NTP correction) so we don't snap on the
             // rebound; otherwise leave everything untouched.
@@ -398,5 +398,4 @@ impl CalendarWidget {
         let st = self.state.lock().expect("calendar state poisoned");
         st.events.clone()
     }
-
 }

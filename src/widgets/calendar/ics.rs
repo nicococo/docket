@@ -129,7 +129,10 @@ mod tests {
         let mut feeds = vec![
             feed("default", "REPLACE_WITH_YOUR_SECRET_ICS_URL"),
             feed("empty", ""),
-            feed("work", "https://calendar.google.com/calendar/ical/x/basic.ics"),
+            feed(
+                "work",
+                "https://calendar.google.com/calendar/ical/x/basic.ics",
+            ),
         ];
         drop_placeholder_feeds(&mut feeds);
         assert_eq!(feeds.len(), 1);

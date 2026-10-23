@@ -673,7 +673,8 @@ fn reload_external_changes_updates_the_active_note_when_it_is_the_one_that_chang
 
     let st = w.state.lock().unwrap();
     assert_eq!(
-        st.notes[st.active.unwrap()].id, active_id,
+        st.notes[st.active.unwrap()].id,
+        active_id,
         "active selection must still point at the same note"
     );
     assert!(st.notes[st.active.unwrap()]

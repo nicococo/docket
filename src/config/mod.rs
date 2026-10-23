@@ -111,7 +111,8 @@ pub fn widget_section_json(raw: &toml::Value, key: &str) -> serde_json::Value {
 /// `Default` impl) — same as before consolidation.
 pub const DEFAULT_CONFIG_TOML: &str = include_str!("defaults/config.toml");
 
-pub const DEFAULT_ANTHROPIC_KEY_TEMPLATE: &str = include_str!("defaults/credentials/anthropic.toml");
+pub const DEFAULT_ANTHROPIC_KEY_TEMPLATE: &str =
+    include_str!("defaults/credentials/anthropic.toml");
 
 pub const DEFAULT_OPENAI_KEY_TEMPLATE: &str = include_str!("defaults/credentials/openai.toml");
 
@@ -227,7 +228,10 @@ mod tests {
     fn load_raw_missing_file_returns_empty_table() {
         let raw = load_raw(Some(Path::new("/nonexistent/docket/config.toml")))
             .expect("missing file should not error");
-        assert_eq!(widget_section_json(&raw, "calendar"), serde_json::Value::Null);
+        assert_eq!(
+            widget_section_json(&raw, "calendar"),
+            serde_json::Value::Null
+        );
     }
 
     #[test]

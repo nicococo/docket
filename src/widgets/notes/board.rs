@@ -179,7 +179,13 @@ pub fn column_insert_line(model: &BoardModel, col: usize, total_lines: usize) ->
 /// as that column's last card. Returns the new column index on
 /// success; `None` (body untouched) if there's no such source card or
 /// no column in that direction.
-pub fn move_card(body: &mut String, model: &BoardModel, col: usize, row: usize, dir: i32) -> Option<usize> {
+pub fn move_card(
+    body: &mut String,
+    model: &BoardModel,
+    col: usize,
+    row: usize,
+    dir: i32,
+) -> Option<usize> {
     let target_col = col as i32 + dir;
     if target_col < 0 {
         return None;
@@ -337,7 +343,10 @@ mod tests {
         let mut body = SAMPLE.to_string();
         let model = parse(&body);
         assert_eq!(move_card(&mut body, &model, 0, 0, -1), None);
-        assert_eq!(body, SAMPLE, "no columns to the left of the first: body unchanged");
+        assert_eq!(
+            body, SAMPLE,
+            "no columns to the left of the first: body unchanged"
+        );
 
         let mut body2 = SAMPLE.to_string();
         let model2 = parse(&body2);
@@ -382,9 +391,6 @@ mod tests {
     fn extract_links_ignores_empty_and_unterminated_brackets() {
         assert!(extract_links("[[]]").is_empty());
         assert!(extract_links("dangling [[unterminated").is_empty());
-        assert_eq!(
-            extract_links("ok [[First]] then dangling [[").len(),
-            1
-        );
+        assert_eq!(extract_links("ok [[First]] then dangling [[").len(), 1);
     }
 }

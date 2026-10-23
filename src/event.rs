@@ -80,9 +80,7 @@ impl EventReader {
 fn map_ct_event(evt: CtEvent) -> Option<Event> {
     match evt {
         CtEvent::Key(k) => Some(Event::Key(k)),
-        CtEvent::Mouse(m)
-            if matches!(m.kind, MouseEventKind::Moved | MouseEventKind::Drag(_)) =>
-        {
+        CtEvent::Mouse(m) if matches!(m.kind, MouseEventKind::Moved | MouseEventKind::Drag(_)) => {
             None
         }
         CtEvent::Mouse(m) => Some(Event::Mouse(m)),

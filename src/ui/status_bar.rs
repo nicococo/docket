@@ -20,6 +20,7 @@ pub fn render(
     area: Rect,
     focused_widget: Option<&str>,
     scheme_name: &str,
+    mouse_capture: bool,
     theme: &Theme,
 ) {
     let now = Local::now();
@@ -43,9 +44,18 @@ pub fn render(
         Span::styled(" Scheme: ", dim),
         Span::styled(scheme_name.to_string(), theme.text_selected),
         Span::styled(" ", dim),
-        sep,
+        sep.clone(),
         Span::styled(" Tab: switch · ? help · q quit ", dim),
     ]);
+    if !mouse_capture {
+        spans.extend([
+            sep,
+            Span::styled(
+                " Mouse released: drag to select · Ctrl+T ",
+                theme.text_selected,
+            ),
+        ]);
+    }
 
     let line = Line::from(spans).alignment(Alignment::Left);
     frame.render_widget(Paragraph::new(line), area);

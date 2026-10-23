@@ -264,5 +264,4 @@ mod tests {
         assert_eq!(inner_cols(r(1, 30)), 0);
         assert_eq!(inner_cols(r(0, 30)), 0);
     }
-
 }

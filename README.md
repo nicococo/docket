@@ -136,6 +136,7 @@ border.focused = { fg = "#e07b00", modifiers = ["bold"] }
 | `Shift+<letter>` | jump to a widget by its shortcut letter |
 | `z` / `Esc` | zoom the focused widget in / out |
 | `:` | command bar (`:scheme <name>`, `:reload`, `:ai <terms>`) |
+| `Ctrl+T` | release / re-grab the mouse (drag-to-select in tmux, herdr, …) |
 | `?` | full keybinding overlay (per-widget keys included) |
 | `q` / `Ctrl+C` | quit |
 

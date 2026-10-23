@@ -12,12 +12,12 @@ pub mod provider;
 mod state;
 mod wiring;
 
+use colors::CalendarColors;
+use config::VIEW_TABS;
 #[allow(unused_imports)]
 pub use config::{
     CalDavConfig, CalendarConfig, CalendarView, FirstDayOfWeek, ProviderEntry, ProviderKind, KIND,
 };
-use colors::CalendarColors;
-use config::VIEW_TABS;
 use nav::{
     advance_month, bottom_action_at, content_rect_for, month_long, rotated_weekday_labels,
     start_of_week, weekday_short, BottomAction,
@@ -31,6 +31,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+use super::{view_tier::ViewTier, AppContext, EventResult, Widget};
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use chrono::{Datelike, Duration as ChronoDuration, Local, NaiveDate, Timelike, Weekday};
@@ -42,7 +43,6 @@ use ratatui::{
     widgets::{Block, BorderType, Borders, Paragraph},
     Frame,
 };
-use super::{view_tier::ViewTier, AppContext, EventResult, Widget};
 
 use provider::{CalendarProvider, Event};
 
@@ -56,7 +56,6 @@ use crate::ui::{apply_title_row, big_digits, MetadataEmphasis};
 /// navigating it as midnight passes. An unfocused calendar rolls
 /// immediately — see `maybe_auto_roll`.
 pub(super) const AUTO_ROLL_FOCUSED_IDLE: Duration = Duration::from_secs(5 * 60);
-
 
 pub struct CalendarWidget {
     id: String,
@@ -132,7 +131,6 @@ pub struct CalendarWidget {
     last_full: AtomicBool,
 }
 
-
 impl CalendarWidget {
     pub fn with_config(
         instance: String,
@@ -199,7 +197,6 @@ impl CalendarWidget {
             last_full: AtomicBool::new(false),
         }
     }
-
 
     // The `o` "open in browser" feature was removed along with the
     // Google/Outlook OAuth calendar backends — it only ever produced a
@@ -730,7 +727,6 @@ fn day_dot_specs(
     }
 }
 
-
 impl CalendarWidget {
     /// The base title — just "Calendar" or "Calendar (instance)" —
     /// without any view-specific metadata. The metadata side of the
@@ -942,7 +938,9 @@ impl CalendarWidget {
             // the agenda text off the separator to their right.
             let body_left = if i == 0 { 0 } else { 1 };
             let body_right = if i + 1 < n_cols { 1 } else { 0 };
-            self.render_day_column(frame, col_area, date, is_anchor, body_left, body_right, events);
+            self.render_day_column(
+                frame, col_area, date, is_anchor, body_left, body_right, events,
+            );
 
             // Draw ` │ ` separator between columns.
             if i + 1 < n_cols {
@@ -969,7 +967,13 @@ impl CalendarWidget {
         let Some(bottom) = bottom_opt else {
             return;
         };
-        self.render_three_month_block(frame, bottom, self.anchor, MonthHighlight::Day(self.anchor), events);
+        self.render_three_month_block(
+            frame,
+            bottom,
+            self.anchor,
+            MonthHighlight::Day(self.anchor),
+            events,
+        );
     }
 
     /// Renders the shared 3-month calendar block used by Full-tier Day and Week
@@ -1052,12 +1056,24 @@ impl CalendarWidget {
     /// Full-tier Week view: the existing 7-column week grid fills the top, and
     /// the shared 3-month block (with the in-view week highlighted) fills the
     /// bottom. Gated on `ViewTier::Full` by the caller.
-    fn render_week_full(&self, frame: &mut Frame, area: Rect, events: &[Arc<Event>], focused: bool) {
+    fn render_week_full(
+        &self,
+        frame: &mut Frame,
+        area: Rect,
+        events: &[Arc<Event>],
+        focused: bool,
+    ) {
         let (top, bottom_opt) = Self::day_full_areas(area);
 
         // --- top: standard 7-column week grid, inset one column each side so
         // the grid doesn't run flush into the zoom frame borders ---
-        self.render_week_grid(frame, Self::week_full_side_margin(top), events, focused, false);
+        self.render_week_grid(
+            frame,
+            Self::week_full_side_margin(top),
+            events,
+            focused,
+            false,
+        );
 
         // --- bottom: 3-month block with the in-view week highlighted, inset to
         // the same margin so it lines up with the grid above ---
@@ -1257,16 +1273,18 @@ impl CalendarWidget {
                             break;
                         }
                         if line_i > 0 {
-                            while idx < title_chars.len()
-                                && title_chars[idx].is_whitespace()
-                            {
+                            while idx < title_chars.len() && title_chars[idx].is_whitespace() {
                                 idx += 1;
                             }
                             if idx >= title_chars.len() {
                                 break;
                             }
                         }
-                        let budget = if line_i == 0 { line1_budget } else { cont_budget };
+                        let budget = if line_i == 0 {
+                            line1_budget
+                        } else {
+                            cont_budget
+                        };
                         let end = (idx + budget).min(title_chars.len());
                         wrapped.push(title_chars[idx..end].iter().collect());
                         idx = end;
@@ -1830,7 +1848,9 @@ impl CalendarWidget {
             .unwrap_or(6);
 
         // A one-row top margin keeps the grid off the widget's top border.
-        let usable = area.height.saturating_sub(FOOTER_RESERVED + MONTH_FULL_TOP_MARGIN);
+        let usable = area
+            .height
+            .saturating_sub(FOOTER_RESERVED + MONTH_FULL_TOP_MARGIN);
         // Richest decoration that still leaves room for the agenda; failing
         // that, the richest grid that fits on its own (no agenda).
         let with_agenda = |style: MonthGridStyle| {
@@ -1986,7 +2006,9 @@ impl CalendarWidget {
         if show_agenda {
             // The grid band starts below the one-row top margin.
             let grid_top = area.y + MONTH_FULL_TOP_MARGIN;
-            let usable = area.height.saturating_sub(FOOTER_RESERVED + MONTH_FULL_TOP_MARGIN);
+            let usable = area
+                .height
+                .saturating_sub(FOOTER_RESERVED + MONTH_FULL_TOP_MARGIN);
             // Blank · horizontal rule · blank between the grid band and the
             // agenda; the grid Paragraphs leave the flanking rows empty.
             let rule_y = grid_top + grid_h + 1;
@@ -2163,14 +2185,14 @@ impl CalendarWidget {
                 } else {
                     ("├", "┼", "┤")
                 };
-                lines.push(Line::from(Span::styled(month_grid_border(cwu, l, m, r), border)));
+                lines.push(Line::from(Span::styled(
+                    month_grid_border(cwu, l, m, r),
+                    border,
+                )));
             }
         }
 
-        frame.render_widget(
-            Paragraph::new(lines).alignment(Alignment::Center),
-            col_area,
-        );
+        frame.render_widget(Paragraph::new(lines).alignment(Alignment::Center), col_area);
     }
 }
 
@@ -2354,7 +2376,6 @@ impl Widget for CalendarWidget {
             spans.push(Span::styled("  ←/→ nav", self.theme.text_dim));
             frame.render_widget(Paragraph::new(Line::from(spans)), hint_area);
         }
-
     }
 
     fn handle_key(&mut self, key: KeyEvent) -> EventResult {
@@ -2553,7 +2574,11 @@ impl Widget for CalendarWidget {
         self.provider = provider;
         self.source_label = source_label;
         self.auth_hint = auth_hint;
-        self.state.lock().expect("calendar state poisoned").poll.mark_dirty();
+        self.state
+            .lock()
+            .expect("calendar state poisoned")
+            .poll
+            .mark_dirty();
     }
 
     fn poll_snapshot(&self) -> Option<crate::polling::PollSnapshot> {
@@ -2696,7 +2721,8 @@ impl CalendarWidget {
                     // Same spacing the block was rendered with (from the block
                     // rect), so the hit-test lands on the right day.
                     let opts = mini_month_spacing(bottom.width, bottom.height);
-                    if let Some(date) = self.month_day_at(mouse.column, mouse.row, grid_rect, opts) {
+                    if let Some(date) = self.month_day_at(mouse.column, mouse.row, grid_rect, opts)
+                    {
                         if self.view == CalendarView::Day {
                             // Day view: jump anchor to the clicked date.
                             self.anchor = date;
@@ -2757,7 +2783,6 @@ impl CalendarWidget {
         EventResult::Ignored
     }
 }
-
 
 pub fn build(ctx: &super::WidgetCtx) -> Box<dyn super::Widget> {
     let cfg: CalendarConfig = serde_json::from_value(ctx.config.clone()).unwrap_or_default();

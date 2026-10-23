@@ -92,9 +92,7 @@ fn main() -> Result<()> {
         // First-run UX: seed default config files before opening the TUI.
         // `--config <path>` opts out — the user explicitly named a file.
         if cli.config.is_none() && !looks_initialized() {
-            eprintln!(
-                "No config detected at ~/.config/docket/config.toml — writing defaults."
-            );
+            eprintln!("No config detected at ~/.config/docket/config.toml — writing defaults.");
             eprintln!(
                 "Edit that file (or the per-widget TOMLs alongside it) to customize your dashboard."
             );

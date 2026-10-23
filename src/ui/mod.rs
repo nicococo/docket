@@ -77,6 +77,9 @@ pub struct RenderState<'a> {
     /// Per-side margin used to size the zoom overlay, in percent of screen
     /// width/height per side. Sourced from `[global] zoom_margin` in config.
     pub zoom_margin: ZoomMargin,
+    /// `false` while the mouse is released to the terminal for native
+    /// text selection; the status bar shows a reminder.
+    pub mouse_capture: bool,
 }
 
 /// Minimum char gap between the title and the right-aligned metadata on
@@ -696,6 +699,7 @@ mod tests {
             show_status_bar: false,
             zoom_target: Some(&zoom),
             zoom_margin: ZoomMargin::default(),
+            mouse_capture: true,
         };
 
         terminal
@@ -781,6 +785,7 @@ mod tests {
             show_status_bar: false,
             zoom_target: Some(&zoom),
             zoom_margin: ZoomMargin::default(),
+            mouse_capture: true,
         };
 
         terminal
@@ -814,7 +819,12 @@ mod tests {
         // 100×40 area, uniform 10% margin.
         // left=right=10, top=bottom=4
         let area = Rect::new(0, 0, 100, 40);
-        let m = ZoomMargin { top: 10, right: 10, bottom: 10, left: 10 };
+        let m = ZoomMargin {
+            top: 10,
+            right: 10,
+            bottom: 10,
+            left: 10,
+        };
         let r = zoom_rect_with_margins(area, m);
         assert_eq!(r.x, 10, "left margin");
         assert_eq!(r.y, 4, "top margin");
@@ -828,7 +838,12 @@ mod tests {
         use crate::config::ZoomMargin;
         // 200×100 area: top=5%, right=10%, bottom=15%, left=20%
         let area = Rect::new(0, 0, 200, 100);
-        let m = ZoomMargin { top: 5, right: 10, bottom: 15, left: 20 };
+        let m = ZoomMargin {
+            top: 5,
+            right: 10,
+            bottom: 15,
+            left: 20,
+        };
         let r = zoom_rect_with_margins(area, m);
         // left  = 200 * 20 / 100 = 40  →  x = 40
         // right = 200 * 10 / 100 = 20  →  width = 200 - 40 - 20 = 140
@@ -846,7 +861,12 @@ mod tests {
         use crate::config::ZoomMargin;
         // Tiny terminal; even with large margins the rect must be at least 1×1.
         let area = Rect::new(0, 0, 4, 3);
-        let m = ZoomMargin { top: 45, right: 45, bottom: 45, left: 45 };
+        let m = ZoomMargin {
+            top: 45,
+            right: 45,
+            bottom: 45,
+            left: 45,
+        };
         let r = zoom_rect_with_margins(area, m);
         assert!(r.width >= 1, "width must be at least 1");
         assert!(r.height >= 1, "height must be at least 1");
@@ -903,10 +923,7 @@ mod tests {
             fn kind(&self) -> &str {
                 "stub"
             }
-            async fn update(
-                &mut self,
-                _ctx: &crate::widgets::AppContext,
-            ) -> anyhow::Result<()> {
+            async fn update(&mut self, _ctx: &crate::widgets::AppContext) -> anyhow::Result<()> {
                 Ok(())
             }
             fn render(&self, frame: &mut Frame, area: Rect, _focused: bool) {
@@ -925,11 +942,7 @@ mod tests {
             ) -> crate::widgets::EventResult {
                 crate::widgets::EventResult::Ignored
             }
-            fn handle_command(
-                &mut self,
-                _cmd: &str,
-                _args: &[&str],
-            ) -> anyhow::Result<bool> {
+            fn handle_command(&mut self, _cmd: &str, _args: &[&str]) -> anyhow::Result<bool> {
                 Ok(false)
             }
             fn config(&self) -> serde_json::Value {
@@ -944,10 +957,18 @@ mod tests {
         // tall) is the zoom target — the two fixed panes on the same row.
         let theme = Arc::new(crate::theme::Theme::builtin_defaults());
         let mut manager = crate::widgets::WidgetManager::new();
-        manager.register_boxed(Box::new(FillWidget { id: "calendar".into(), ch: 'B' }));
-        manager.register_boxed(Box::new(FillWidget { id: "feeds@ai".into(), ch: 'T' }));
+        manager.register_boxed(Box::new(FillWidget {
+            id: "calendar".into(),
+            ch: 'B',
+        }));
+        manager.register_boxed(Box::new(FillWidget {
+            id: "feeds@ai".into(),
+            ch: 'T',
+        }));
 
-        let zoom = ZoomTarget { widget_id: "feeds@ai".into() };
+        let zoom = ZoomTarget {
+            widget_id: "feeds@ai".into(),
+        };
         let help_scroll_max = StdCell::new(0u16);
         let state = RenderState {
             manager: &manager,
@@ -962,6 +983,7 @@ mod tests {
             show_status_bar: false,
             zoom_target: Some(&zoom),
             zoom_margin: ZoomMargin::default(),
+            mouse_capture: true,
         };
 
         // Build a cache primed with 'P' everywhere, area matching the terminal.
@@ -1070,10 +1092,7 @@ mod tests {
             fn kind(&self) -> &str {
                 "stub"
             }
-            async fn update(
-                &mut self,
-                _ctx: &crate::widgets::AppContext,
-            ) -> anyhow::Result<()> {
+            async fn update(&mut self, _ctx: &crate::widgets::AppContext) -> anyhow::Result<()> {
                 Ok(())
             }
             fn render(&self, _frame: &mut Frame, _area: Rect, _focused: bool) {}
@@ -1083,11 +1102,7 @@ mod tests {
             ) -> crate::widgets::EventResult {
                 crate::widgets::EventResult::Ignored
             }
-            fn handle_command(
-                &mut self,
-                _cmd: &str,
-                _args: &[&str],
-            ) -> anyhow::Result<bool> {
+            fn handle_command(&mut self, _cmd: &str, _args: &[&str]) -> anyhow::Result<bool> {
                 Ok(false)
             }
             fn config(&self) -> serde_json::Value {
@@ -1100,9 +1115,13 @@ mod tests {
 
         let theme = Arc::new(crate::theme::Theme::builtin_defaults());
         let mut manager = crate::widgets::WidgetManager::new();
-        manager.register_boxed(Box::new(NoopWidget { id: "calendar".into() }));
+        manager.register_boxed(Box::new(NoopWidget {
+            id: "calendar".into(),
+        }));
 
-        let zoom = ZoomTarget { widget_id: "calendar".into() };
+        let zoom = ZoomTarget {
+            widget_id: "calendar".into(),
+        };
         let help_scroll_max = StdCell::new(0u16);
         let state = RenderState {
             manager: &manager,
@@ -1117,6 +1136,7 @@ mod tests {
             show_status_bar: false,
             zoom_target: Some(&zoom),
             zoom_margin: ZoomMargin::default(),
+            mouse_capture: true,
         };
 
         let area = Rect::new(0, 0, 80, 24);
@@ -1151,7 +1171,10 @@ mod tests {
 
         // Cache must now reflect the current zoom target (updated at end of partial path).
         assert_eq!(
-            cache.last_zoom_target.as_ref().map(|z| z.widget_id.as_str()),
+            cache
+                .last_zoom_target
+                .as_ref()
+                .map(|z| z.widget_id.as_str()),
             Some("calendar"),
             "cache.last_zoom_target must be updated on the partial path"
         );
@@ -1220,7 +1243,11 @@ pub(crate) fn zoom_rect_with_margins(area: Rect, m: ZoomMargin) -> Rect {
     let x = area.x.saturating_add(left);
     let y = area.y.saturating_add(top);
     let width = area.width.saturating_sub(left).saturating_sub(right).max(1);
-    let height = area.height.saturating_sub(top).saturating_sub(bottom).max(1);
+    let height = area
+        .height
+        .saturating_sub(top)
+        .saturating_sub(bottom)
+        .max(1);
 
     Rect::new(x, y, width, height)
 }
@@ -1275,6 +1302,7 @@ pub fn render(frame: &mut Frame, state: &RenderState) {
                 chrome_area,
                 state.focused,
                 state.theme_name,
+                state.mouse_capture,
                 state.theme,
             );
         }
@@ -1341,10 +1369,7 @@ pub fn render_partial(
     // the cached pixels, so render everything and rebuild the cache
     // from this draw.
     let help_toggled = state.show_help != cache.last_show_help;
-    let area_changed = cache
-        .last_drawn
-        .as_ref()
-        .map_or(true, |b| b.area != area);
+    let area_changed = cache.last_drawn.as_ref().map_or(true, |b| b.area != area);
     // Zoom: force a full repaint on zoom edges only (entry, exit, retarget).
     // Steady-state while zoomed uses the partial path — the cached buffer
     // already carries the composited dim + placeholder + frame from the edge
@@ -1498,6 +1523,7 @@ pub fn render_partial(
                 chrome_area,
                 state.focused,
                 state.theme_name,
+                state.mouse_capture,
                 state.theme,
             );
         }
@@ -1617,6 +1643,10 @@ fn build_help_sections(manager: &WidgetManager, active_scheme: &str) -> Vec<help
                 ":scheme <name>".into(),
                 "switch color scheme (see list below)".into(),
             ),
+            (
+                "Ctrl+T · :mouse".into(),
+                "release / re-grab the mouse (native text selection)".into(),
+            ),
             ("?".into(), "toggle this help overlay".into()),
             ("q · Ctrl+C".into(), "quit".into()),
         ],
@@ -1697,12 +1727,7 @@ fn build_help_sections(manager: &WidgetManager, active_scheme: &str) -> Vec<help
 ///    `manager.get(widget_id).render(inner_rect, focused=true)`. If the
 ///    lookup returns `None` (live-reload race), return early;
 ///    `apply_config_change`'s guard clears `zoom_target` on the next tick.
-fn render_zoom_overlay(
-    frame: &mut Frame,
-    state: &RenderState,
-    main_area: Rect,
-    zoom: &ZoomTarget,
-) {
+fn render_zoom_overlay(frame: &mut Frame, state: &RenderState, main_area: Rect, zoom: &ZoomTarget) {
     // [2] Dim every cell in main_area.
     {
         let buf = frame.buffer_mut();
@@ -1742,10 +1767,7 @@ fn render_zoom_overlay(
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .border_style(state.theme.border_focused)
-        .title(Span::styled(
-            " z · Esc to exit zoom ",
-            state.theme.text_dim,
-        ));
+        .title(Span::styled(" z · Esc to exit zoom ", state.theme.text_dim));
     let inner_rect = block.inner(zoom_rect);
     frame.render_widget(block, zoom_rect);
 

@@ -1097,7 +1097,8 @@ impl NotesWidget {
     fn persist_runtime_state(&self) {
         let active_note_id = {
             let st = self.state.lock().expect("notes state poisoned");
-            st.active.and_then(|i| st.notes.get(i).map(|n| n.id.clone()))
+            st.active
+                .and_then(|i| st.notes.get(i).map(|n| n.id.clone()))
         };
         let mut payload = crate::runtime_state::load();
         let entry = payload.notes.entry(self.id.clone()).or_default();
@@ -1234,7 +1235,10 @@ impl Widget for NotesWidget {
     fn reload_external_changes(&mut self) {
         let fresh = store::load_all(&self.root, &self.instance);
         let mut st = self.state.lock().expect("notes state poisoned");
-        let active_id = st.active.and_then(|i| st.notes.get(i)).map(|n| n.id.clone());
+        let active_id = st
+            .active
+            .and_then(|i| st.notes.get(i))
+            .map(|n| n.id.clone());
         st.notes = fresh;
         st.active = active_id
             .and_then(|id| st.notes.iter().position(|n| n.id == id))
@@ -1593,11 +1597,7 @@ impl Widget for NotesWidget {
     }
 
     fn is_capturing_text(&self) -> bool {
-        self.state
-            .lock()
-            .expect("notes state poisoned")
-            .mode
-            == Mode::Insert
+        self.state.lock().expect("notes state poisoned").mode == Mode::Insert
     }
 }
 
@@ -1897,10 +1897,7 @@ impl NotesWidget {
             let dim = self.theme.text_dim;
             let hint = vec![
                 Line::from(""),
-                Line::from(Span::styled(
-                    "  Board note, no columns yet.",
-                    dim,
-                )),
+                Line::from(Span::styled("  Board note, no columns yet.", dim)),
                 Line::from(Span::styled(
                     "  Press i and add \"## Column Name\" headings to get started.",
                     dim,
@@ -1947,7 +1944,10 @@ impl NotesWidget {
                 if is_selected_col {
                     border = border.add_modifier(Modifier::BOLD);
                 }
-                (border, Style::default().fg(accent).add_modifier(Modifier::BOLD))
+                (
+                    border,
+                    Style::default().fg(accent).add_modifier(Modifier::BOLD),
+                )
             } else {
                 (self.theme.text_dim, self.theme.text_dim)
             };
@@ -1988,7 +1988,11 @@ impl NotesWidget {
                 if card.checked {
                     style = style.add_modifier(Modifier::CROSSED_OUT);
                 }
-                let mark = if card.checked { "\u{2713} " } else { "\u{2610} " };
+                let mark = if card.checked {
+                    "\u{2713} "
+                } else {
+                    "\u{2610} "
+                };
                 let full_text = format!("{mark}{}", card.text);
                 let wrapped = word_wrap(&full_text, text_w, cont_w);
                 for (wi, w) in wrapped.into_iter().enumerate() {
@@ -2014,7 +2018,10 @@ impl NotesWidget {
             for _ in 0..footer_rows.saturating_sub(1) {
                 flines.push(Line::from(""));
             }
-            flines.push(Line::from(Span::styled(hint.to_string(), self.theme.text_dim)));
+            flines.push(Line::from(Span::styled(
+                hint.to_string(),
+                self.theme.text_dim,
+            )));
             frame.render_widget(Paragraph::new(flines), footer_rect);
         }
     }

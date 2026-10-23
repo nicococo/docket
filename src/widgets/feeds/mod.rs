@@ -1361,7 +1361,10 @@ impl FeedsWidget {
             // still scroll headlines. Mouse-collapse via `e` puts
             // them back in flat-list mode anyway.
             self.render_list(frame, area);
-            self.state.lock().expect("feeds state poisoned").expanded_rect = None;
+            self.state
+                .lock()
+                .expect("feeds state poisoned")
+                .expanded_rect = None;
             return;
         }
 
@@ -1391,7 +1394,10 @@ impl FeedsWidget {
         self.render_list(frame, rows[0]);
         self.render_horizontal_separator(frame, rows[1]);
         self.render_expanded(frame, rows[2], allow_image);
-        self.state.lock().expect("feeds state poisoned").expanded_rect = Some(rows[2]);
+        self.state
+            .lock()
+            .expect("feeds state poisoned")
+            .expanded_rect = Some(rows[2]);
     }
 
     /// Three-row separator: blank · `─` line · blank. The line uses
@@ -1556,10 +1562,7 @@ impl FeedsWidget {
         match summary_state {
             None => {
                 if let Some(s) = article.summary.as_ref() {
-                    lines.push(Line::from(Span::styled(
-                        s.clone(),
-                        self.theme.text_plain,
-                    )));
+                    lines.push(Line::from(Span::styled(s.clone(), self.theme.text_plain)));
                 }
                 // The s / Ctrl+S / e instructions live in the
                 // widget footer already, no need to repeat them in
@@ -1646,15 +1649,26 @@ impl FeedsWidget {
         let (header_area, body_area) = {
             let rows = Layout::default()
                 .direction(Direction::Vertical)
-                .constraints([Constraint::Length(1), Constraint::Length(1), Constraint::Min(1)])
+                .constraints([
+                    Constraint::Length(1),
+                    Constraint::Length(1),
+                    Constraint::Min(1),
+                ])
                 .split(area);
             (rows[0], rows[2])
         };
-        let digest = self.state.lock().expect("feeds state poisoned").digest.clone();
+        let digest = self
+            .state
+            .lock()
+            .expect("feeds state poisoned")
+            .digest
+            .clone();
         let header = match &digest {
             None => "No digest yet — press `r` or run :feeds-digest".to_string(),
             Some(DigestState::Requested) => "Generating digest…".to_string(),
-            Some(DigestState::Failed(reason)) => format!("Digest failed: {reason} — press `r` to retry"),
+            Some(DigestState::Failed(reason)) => {
+                format!("Digest failed: {reason} — press `r` to retry")
+            }
             Some(DigestState::Ready(t)) => format!(
                 "Digest as of {} · {} articles · {} topics — press `r` to regenerate",
                 t.generated_at.format("%H:%M UTC"),
@@ -1676,11 +1690,19 @@ impl FeedsWidget {
             st.digest_rect = Some(body_area);
         }
         let Some(DigestState::Ready(taxonomy)) = digest.as_ref() else {
-            self.state.lock().expect("feeds state poisoned").digest_rows.clear();
+            self.state
+                .lock()
+                .expect("feeds state poisoned")
+                .digest_rows
+                .clear();
             return;
         };
 
-        let selected = self.state.lock().expect("feeds state poisoned").digest_selected;
+        let selected = self
+            .state
+            .lock()
+            .expect("feeds state poisoned")
+            .digest_selected;
         let mut lines: Vec<Line> = Vec::new();
         // (leaf_idx, line_offset) — `line_offset` is relative to the top
         // of `lines`, before scroll is applied; converted to an
@@ -1711,7 +1733,8 @@ impl FeedsWidget {
                         self.theme.text_plain
                     };
                     let prefix_w = 4 + marker.chars().count() + item.source.chars().count() + 3;
-                    let title = crate::text::truncate(&item.title, width.saturating_sub(prefix_w).max(1));
+                    let title =
+                        crate::text::truncate(&item.title, width.saturating_sub(prefix_w).max(1));
                     leaf_line_offsets.push((leaf_idx, lines.len() as u16));
                     lines.push(Line::from(vec![
                         Span::raw("    "),
@@ -1723,8 +1746,10 @@ impl FeedsWidget {
                 }
             }
         }
-        self.state.lock().expect("feeds state poisoned").digest_selected =
-            selected.min(leaf_idx.saturating_sub(1));
+        self.state
+            .lock()
+            .expect("feeds state poisoned")
+            .digest_selected = selected.min(leaf_idx.saturating_sub(1));
 
         // Keep the selected leaf's line visible — same clamp-then-nudge
         // approach as `render_list`'s scroll math, simplified since
@@ -1751,7 +1776,9 @@ impl FeedsWidget {
         self.state.lock().expect("feeds state poisoned").digest_rows = rows;
 
         frame.render_widget(
-            Paragraph::new(lines).wrap(Wrap { trim: false }).scroll((scroll, 0)),
+            Paragraph::new(lines)
+                .wrap(Wrap { trim: false })
+                .scroll((scroll, 0)),
             body_area,
         );
     }
@@ -1988,10 +2015,7 @@ impl Widget for FeedsWidget {
         // "loading…" placeholder would keep blitting forever after
         // an image actually landed. Cheap atomic swap per tick.
         if self.images.take_pending_change() {
-            self.state
-                .lock()
-                .expect("feeds state poisoned")
-                .dirty = true;
+            self.state.lock().expect("feeds state poisoned").dirty = true;
         }
         // Atomic-gated status drain — skips the state lock on idle
         // ticks. See the same pattern on stocks / forex / calendar.
@@ -2061,11 +2085,14 @@ impl Widget for FeedsWidget {
         self.render_tabs(frame, body_rows[0]);
         // body_rows[1] is intentionally left blank.
 
-        let on_digest_tab = self.state.lock().expect("feeds state poisoned").active_tab
-            == DIGEST_TAB_LABEL;
+        let on_digest_tab =
+            self.state.lock().expect("feeds state poisoned").active_tab == DIGEST_TAB_LABEL;
         if on_digest_tab {
             self.render_digest(frame, body_rows[2]);
-            self.state.lock().expect("feeds state poisoned").expanded_rect = None;
+            self.state
+                .lock()
+                .expect("feeds state poisoned")
+                .expanded_rect = None;
             if footer_h > 0 {
                 let footer = Rect {
                     x: inner.x,
@@ -2136,7 +2163,10 @@ impl Widget for FeedsWidget {
                 // cols[1] is the gap — intentionally left blank.
                 self.render_expanded(frame, cols[2], true);
                 // Cache the expanded-pane rect for mouse hit-tests.
-                self.state.lock().expect("feeds state poisoned").expanded_rect = Some(cols[2]);
+                self.state
+                    .lock()
+                    .expect("feeds state poisoned")
+                    .expanded_rect = Some(cols[2]);
             }
         } else {
             // Not expanded: carve off a small right-aligned column
@@ -2170,7 +2200,10 @@ impl Widget for FeedsWidget {
                 // legible.
                 self.render_list(frame, body_rows[2]);
             }
-            self.state.lock().expect("feeds state poisoned").expanded_rect = None;
+            self.state
+                .lock()
+                .expect("feeds state poisoned")
+                .expanded_rect = None;
         }
 
         // Footer
@@ -2225,8 +2258,8 @@ impl Widget for FeedsWidget {
             }
         }
 
-        let on_digest_tab = self.state.lock().expect("feeds state poisoned").active_tab
-            == DIGEST_TAB_LABEL;
+        let on_digest_tab =
+            self.state.lock().expect("feeds state poisoned").active_tab == DIGEST_TAB_LABEL;
 
         match key.code {
             KeyCode::Up | KeyCode::Char('k') => {
@@ -2409,8 +2442,10 @@ impl Widget for FeedsWidget {
                 }
                 if over_digest {
                     if let Some(&(leaf_idx, _)) = digest_rows.iter().find(|(_, y)| *y == row) {
-                        self.state.lock().expect("feeds state poisoned").digest_selected =
-                            leaf_idx;
+                        self.state
+                            .lock()
+                            .expect("feeds state poisoned")
+                            .digest_selected = leaf_idx;
                         self.open_digest_selected();
                         return EventResult::Handled;
                     }

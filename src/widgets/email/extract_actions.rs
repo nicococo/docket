@@ -145,10 +145,7 @@ mod notes_impl {
             None => {
                 let mut n = store::Note {
                     id: store::new_id(),
-                    body: format!(
-                        "{TODO_NOTE_TITLE}\n{}\n\n## {TODO_COLUMN}\n",
-                        board::MARKER
-                    ),
+                    body: format!("{TODO_NOTE_TITLE}\n{}\n\n## {TODO_COLUMN}\n", board::MARKER),
                     modified: std::time::SystemTime::now(),
                 };
                 store::save(&root, &instance, &mut n)?;
@@ -175,8 +172,7 @@ mod notes_impl {
             .iter()
             .position(|c| c.title == TODO_COLUMN)
             .expect("just ensured the Todo column exists");
-        let insert_at =
-            board::column_insert_line(&model, col, line_count(&note.body)).unwrap_or(0);
+        let insert_at = board::column_insert_line(&model, col, line_count(&note.body)).unwrap_or(0);
         // Keep the source email's sender/subject/date on the same
         // checklist line (rather than a trailing line) — `remove()`
         // walks forward from the marker consuming any HTML-comment
@@ -207,10 +203,16 @@ mod notes_impl {
         // window that stays backward-compatible with notes written
         // before the ref line existed.
         let mut end = idx + 1;
-        while lines.get(end).is_some_and(|l| l.trim_start().starts_with("<!--")) {
+        while lines
+            .get(end)
+            .is_some_and(|l| l.trim_start().starts_with("<!--"))
+        {
             end += 1;
         }
-        if lines.get(end).is_some_and(|l| l.trim_start().starts_with("- [")) {
+        if lines
+            .get(end)
+            .is_some_and(|l| l.trim_start().starts_with("- ["))
+        {
             end += 1;
         }
         let mut owned: Vec<String> = lines.into_iter().map(str::to_string).collect();

@@ -131,7 +131,11 @@ enum AiAction {
 }
 
 impl AiAction {
-    const ALL: [AiAction; 3] = [AiAction::Summarize, AiAction::Explain, AiAction::ExtractTodo];
+    const ALL: [AiAction; 3] = [
+        AiAction::Summarize,
+        AiAction::Explain,
+        AiAction::ExtractTodo,
+    ];
 
     fn key(self) -> char {
         match self {
@@ -551,7 +555,8 @@ impl EmailWidget {
         } else {
             config.folders.clone()
         };
-        let multi_imap = config.provider.eq_ignore_ascii_case("imap") && !config.accounts.is_empty();
+        let multi_imap =
+            config.provider.eq_ignore_ascii_case("imap") && !config.accounts.is_empty();
         let (provider, provider_label, provider_ready, auth_hint, imap_accounts) = if multi_imap {
             let (handles, ready, hint) = build_imap_accounts(&config.accounts);
             // Multi-account mode never reads `provider` (every code path
@@ -1330,7 +1335,10 @@ impl EmailWidget {
             };
             match result {
                 Ok(()) => {
-                    self.state.lock().expect("email state poisoned").notes_refresh_pending = true;
+                    self.state
+                        .lock()
+                        .expect("email state poisoned")
+                        .notes_refresh_pending = true;
                 }
                 Err(err) => {
                     tracing::warn!(error = %err, "email extract: todo add/remove failed");
@@ -1345,8 +1353,10 @@ impl EmailWidget {
             };
             match result {
                 Ok(()) => {
-                    self.state.lock().expect("email state poisoned").calendar_refresh_pending =
-                        true;
+                    self.state
+                        .lock()
+                        .expect("email state poisoned")
+                        .calendar_refresh_pending = true;
                 }
                 Err(err) => {
                     tracing::warn!(error = %err, "email extract: date add/remove failed");
@@ -1516,7 +1526,8 @@ impl EmailWidget {
                         lines.push(Line::from(Span::styled("Dates", self.theme.text_brilliant)));
                         for (i, date) in items.dates.iter().enumerate() {
                             let flat_idx = items.todos.len() + i;
-                            let id = extract_actions::date_item_id(&msg.id, &date.title, &date.date);
+                            let id =
+                                extract_actions::date_item_id(&msg.id, &date.title, &date.date);
                             let label = format!("{} — {}", date.date, date.title);
                             lines.extend(extract_row_lines(
                                 &self.theme,
@@ -1599,9 +1610,6 @@ impl EmailWidget {
         );
     }
 
-
-
-
     /// Press-`s` entry point. Drives the per-message Body ⇄ Summary
     /// toggle with a side-effect of expanding when the user hits it from
     /// collapsed mode. Never changes read state — only `space`
@@ -1680,7 +1688,8 @@ impl EmailWidget {
         let cache = self.cache.clone();
         {
             let mut st = self.state.lock().expect("email state poisoned");
-            st.ai_results.insert(result_key.clone(), SummaryState::Requested);
+            st.ai_results
+                .insert(result_key.clone(), SummaryState::Requested);
             st.dirty = true;
         }
         let id = msg.id.clone();
@@ -1874,7 +1883,9 @@ fn build_imap(filename: &str) -> Result<imap::ImapProvider, String> {
 /// accounts that fail to load are dropped with a hint appended to the
 /// returned diagnostic string; the widget still renders whichever accounts
 /// did connect. Returns `ready = true` as soon as at least one succeeds.
-fn build_imap_accounts(entries: &[EmailAccountEntry]) -> (Vec<ImapAccountHandle>, bool, Option<String>) {
+fn build_imap_accounts(
+    entries: &[EmailAccountEntry],
+) -> (Vec<ImapAccountHandle>, bool, Option<String>) {
     let mut handles = Vec::new();
     let mut hints = Vec::new();
     for entry in entries {
@@ -1986,7 +1997,11 @@ impl Widget for EmailWidget {
             let names: Vec<String> = self
                 .imap_accounts
                 .iter()
-                .map(|a| a.provider.cached_account().unwrap_or_else(|| a.label.clone()))
+                .map(|a| {
+                    a.provider
+                        .cached_account()
+                        .unwrap_or_else(|| a.label.clone())
+                })
                 .collect();
             format!("[imap] {}", names.join(", "))
         };
@@ -2016,21 +2031,20 @@ impl Widget for EmailWidget {
         // The gutter renders a centered `│` with one blank column on each side.
         // Below READ_PANE_MIN_WIDTH the list column is too narrow, so
         // Compact/Standard (and cramped Expanded) leave the read pane off (None).
-        let (list_area, gutter_area, read_area) = if tier >= ViewTier::Expanded
-            && list_area.width >= READ_PANE_MIN_WIDTH
-        {
-            let chunks = Layout::default()
-                .direction(Direction::Horizontal)
-                .constraints([
-                    Constraint::Percentage(50),
-                    Constraint::Length(3),
-                    Constraint::Min(0),
-                ])
-                .split(list_area);
-            (chunks[0], Some(chunks[1]), Some(chunks[2]))
-        } else {
-            (list_area, None, None)
-        };
+        let (list_area, gutter_area, read_area) =
+            if tier >= ViewTier::Expanded && list_area.width >= READ_PANE_MIN_WIDTH {
+                let chunks = Layout::default()
+                    .direction(Direction::Horizontal)
+                    .constraints([
+                        Constraint::Percentage(50),
+                        Constraint::Length(3),
+                        Constraint::Min(0),
+                    ])
+                    .split(list_area);
+                (chunks[0], Some(chunks[1]), Some(chunks[2]))
+            } else {
+                (list_area, None, None)
+            };
 
         // Placeholder when no provider is configured (no token, etc.).
         if !self.provider_ready {
@@ -2293,8 +2307,9 @@ impl Widget for EmailWidget {
                 Some(msg) => {
                     // Header row 1: sender (left-aligned) + date (right-aligned).
                     let date_str = format_received(now_local, msg.received);
-                    let sender_budget =
-                        (rp.width as usize).saturating_sub(date_str.len() + 2).max(1);
+                    let sender_budget = (rp.width as usize)
+                        .saturating_sub(date_str.len() + 2)
+                        .max(1);
                     let sender_display =
                         normalize_sender(&msg.from_name, &msg.from_address, sender_budget);
                     let sender_padded = pad_or_truncate(&sender_display, sender_budget);
@@ -2463,7 +2478,13 @@ impl Widget for EmailWidget {
         // Captures every key while open (mirrors the confirm-modal
         // gate above) so the list underneath can't be navigated by
         // accident while it's up.
-        if self.state.lock().expect("email state poisoned").popup.is_some() {
+        if self
+            .state
+            .lock()
+            .expect("email state poisoned")
+            .popup
+            .is_some()
+        {
             return self.handle_popup_key(key);
         }
         match key.code {
@@ -2538,7 +2559,11 @@ impl Widget for EmailWidget {
     }
 
     fn take_zoom_request(&mut self) -> Option<bool> {
-        self.state.lock().expect("email state poisoned").zoom_request.take()
+        self.state
+            .lock()
+            .expect("email state poisoned")
+            .zoom_request
+            .take()
     }
 
     fn take_notes_refresh_request(&mut self) -> bool {
@@ -2660,13 +2685,22 @@ impl Widget for EmailWidget {
             ("Enter", "open full message in a full-screen popup"),
             ("s (popup)", "AI summarize (when enabled)"),
             ("x (popup)", "AI explain (when enabled)"),
-            ("t (popup)", "AI extract todos/dates → selectable list (when enabled)"),
+            (
+                "t (popup)",
+                "AI extract todos/dates → selectable list (when enabled)",
+            ),
             ("j/k (extract list)", "select a todo/date"),
-            ("space (extract list)", "add/remove: todo → Notes, date → Calendar"),
+            (
+                "space (extract list)",
+                "add/remove: todo → Notes, date → Calendar",
+            ),
             ("s", "request inline LLM summary (when enabled)"),
             ("c", "copy message body to clipboard"),
             ("space", "toggle read/unread (IMAP: syncs to server)"),
-            ("d", "delete to Trash — recoverable ~30d (IMAP only, y to confirm)"),
+            (
+                "d",
+                "delete to Trash — recoverable ~30d (IMAP only, y to confirm)",
+            ),
             ("r", "force refresh"),
         ]
     }
@@ -2854,7 +2888,13 @@ fn wrap_text(text: &str, max_width: usize, max_lines: usize) -> Vec<String> {
 /// wrapped item text with a hanging indent on continuation lines.
 /// Free function (not a method) so it stays testable/reusable without
 /// needing `&EmailWidget` — it only needs the active theme.
-fn extract_row_lines(theme: &Theme, selected: bool, added: bool, text: &str, width: usize) -> Vec<Line<'static>> {
+fn extract_row_lines(
+    theme: &Theme,
+    selected: bool,
+    added: bool,
+    text: &str,
+    width: usize,
+) -> Vec<Line<'static>> {
     let caret = if selected { "▸ " } else { "  " };
     let mark = if added { "[+] " } else { "[ ] " };
     let style = if selected {
@@ -2875,10 +2915,7 @@ fn extract_row_lines(theme: &Theme, selected: bool, added: bool, text: &str, wid
             } else {
                 " ".repeat(prefix_w)
             };
-            Line::from(vec![
-                Span::styled(prefix, style),
-                Span::styled(row, style),
-            ])
+            Line::from(vec![Span::styled(prefix, style), Span::styled(row, style)])
         })
         .collect()
 }

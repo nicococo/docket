@@ -102,7 +102,10 @@ mod tests {
         let html = "start<!--[if gte mso 9]><table><tr><td>OUTLOOKJUNK</td></tr></table>\
                     <style>.x{color:red}</style><![endif]-->end";
         let plain = html_to_text(html);
-        assert!(!plain.contains("OUTLOOKJUNK"), "MSO comment leaked: {plain:?}");
+        assert!(
+            !plain.contains("OUTLOOKJUNK"),
+            "MSO comment leaked: {plain:?}"
+        );
         assert!(!plain.contains("color:red"));
         assert!(plain.contains("start") && plain.contains("end"));
     }
@@ -111,7 +114,10 @@ mod tests {
     fn br_and_block_tags_break_lines() {
         let plain = html_to_text("line one<br>line two<br/>line three</p><p>line four");
         let lines: Vec<&str> = plain.lines().filter(|l| !l.trim().is_empty()).collect();
-        assert_eq!(lines, vec!["line one", "line two", "line three", "line four"]);
+        assert_eq!(
+            lines,
+            vec!["line one", "line two", "line three", "line four"]
+        );
     }
 
     #[test]

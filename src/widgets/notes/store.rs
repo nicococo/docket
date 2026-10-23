@@ -688,7 +688,10 @@ mod tests {
         assert_eq!(expand_tilde("~/foo/bar"), home.join("foo/bar"));
         // Non-tilde paths pass through unchanged.
         assert_eq!(expand_tilde("/abs/path"), PathBuf::from("/abs/path"));
-        assert_eq!(expand_tilde("relative/path"), PathBuf::from("relative/path"));
+        assert_eq!(
+            expand_tilde("relative/path"),
+            PathBuf::from("relative/path")
+        );
         // Bare ~name (no slash) is not expanded.
         assert_eq!(expand_tilde("~alice/foo"), PathBuf::from("~alice/foo"));
     }
