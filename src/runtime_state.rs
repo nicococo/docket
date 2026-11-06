@@ -74,6 +74,10 @@ pub struct NotesEntry {
     /// falls back to the most-recently-edited note (index 0).
     #[serde(default)]
     pub active_note_id: Option<String>,
+    /// Tree-view groups (`Work`, `Work>Projects`) left expanded in the
+    /// notes list.
+    #[serde(default)]
+    pub expanded_groups: Vec<String>,
 }
 
 fn default_version() -> u32 {
@@ -159,6 +163,7 @@ mod tests {
             "notes".into(),
             NotesEntry {
                 active_note_id: Some("note-1719847200000".into()),
+                ..NotesEntry::default()
             },
         );
         let text = toml::to_string_pretty(&state).unwrap();
@@ -203,6 +208,7 @@ mod tests {
             "notes".into(),
             NotesEntry {
                 active_note_id: Some("note-1".into()),
+                ..NotesEntry::default()
             },
         );
         let text = toml::to_string_pretty(&state).unwrap();

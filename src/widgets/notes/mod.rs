@@ -67,8 +67,9 @@
 
 pub mod board;
 pub mod store;
+pub mod tree;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -88,6 +89,7 @@ use crate::theme::Theme;
 use crate::ui::{apply_title_row, MetadataEmphasis};
 
 use self::store::Note;
+use self::tree::TreeRow;
 
 use super::{AppContext, EventResult, Widget, WidgetCtx};
 
@@ -142,6 +144,11 @@ const LIST_PLAIN_PREFIX: &str = "  ";
 const LIST_CONT_INDENT: &str = "   ";
 const LIST_PREFIX_W: usize = 2;
 const LIST_CONT_W: usize = 3;
+
+/// Expand/collapse markers on tree group rows (see `tree.rs`). Leaf
+/// rows get no marker, so a group's children line up under its label.
+const TREE_EXPANDED: &str = "▾ ";
+const TREE_COLLAPSED: &str = "▸ ";
 
 /// Cycled per-column accent color in board rendering — same "light,
 /// distinct hues" formula as the calendar widget's per-calendar
@@ -267,8 +274,17 @@ struct NotesState {
     cursor_col: usize,
     /// Scroll offset of the content viewport, in rows.
     content_scroll: u16,
-    /// Scroll offset of the list viewport, in rows.
+    /// Scroll offset of the list viewport, in visible tree rows.
     list_scroll: u16,
+    /// Tree group paths (see `tree.rs`) currently expanded in the list.
+    expanded: HashSet<String>,
+    /// `Some(path)` while the list cursor sits on a group row that has
+    /// no note of its own; `None` means the cursor is on `active`.
+    list_group_sel: Option<String>,
+    /// Set by keyboard list navigation so the next `render_list`
+    /// scrolls the cursor into view. One-shot, so wheel scrolling
+    /// isn't snapped back to the cursor every frame.
+    list_follow: bool,
     /// Selected column/card when the active note is a board (see
     /// `board.rs`). Only meaningful in `Mode::Normal` with
     /// `SubFocus::Content`; clamped against the freshly-parsed
@@ -351,6 +367,9 @@ impl Default for NotesState {
             cursor_col: 0,
             content_scroll: 0,
             list_scroll: 0,
+            expanded: HashSet::new(),
+            list_group_sel: None,
+            list_follow: false,
             board_col: 0,
             board_row: 0,
             mode: Mode::Normal,
@@ -367,6 +386,62 @@ impl Default for NotesState {
 }
 
 impl NotesState {
+    fn visible_rows(&self) -> Vec<TreeRow> {
+        tree::visible_rows(&self.notes, &self.expanded)
+    }
+
+    /// Visible row index the list cursor is on, if that row is visible.
+    fn selected_row(&self, rows: &[TreeRow]) -> Option<usize> {
+        match &self.list_group_sel {
+            Some(path) => rows
+                .iter()
+                .position(|r| r.note.is_none() && &r.path == path),
+            None => self
+                .active
+                .and_then(|a| rows.iter().position(|r| r.note == Some(a))),
+        }
+    }
+
+    /// Expand every group enclosing the active note and park the list
+    /// cursor on it. Returns whether the expanded set grew, so callers
+    /// know to persist it.
+    fn reveal_active(&mut self) -> bool {
+        self.list_group_sel = None;
+        self.list_follow = true;
+        let Some(title) = self
+            .active
+            .and_then(|i| self.notes.get(i))
+            .map(|n| n.display_name().to_string())
+        else {
+            return false;
+        };
+        let mut grew = false;
+        for path in tree::ancestor_paths(&title) {
+            grew |= self.expanded.insert(path);
+        }
+        grew
+    }
+
+    /// Expanded paths that still name a group, sorted for a stable
+    /// on-disk diff. Drops paths left behind by renamed or deleted
+    /// notes (and by half-typed titles) so the persisted set stays
+    /// bounded by the notes that exist.
+    fn live_expanded(&self) -> Vec<String> {
+        let groups: HashSet<String> = self
+            .notes
+            .iter()
+            .flat_map(|n| tree::ancestor_paths(n.display_name()))
+            .collect();
+        let mut out: Vec<String> = self
+            .expanded
+            .iter()
+            .filter(|p| groups.contains(*p))
+            .cloned()
+            .collect();
+        out.sort();
+        out
+    }
+
     /// Snapshot the active note's editable state into its undo stack
     /// and clear its redo stack. Called *before* every body-changing
     /// edit (insert, backspace, delete-line) so undo restores the
@@ -470,10 +545,13 @@ impl NotesWidget {
         // to the most-recently-edited note (index 0) when the
         // persisted id no longer exists — either deleted via `dd`
         // or vanished from the on-disk store between sessions.
-        let persisted_id = crate::runtime_state::load()
+        let persisted = crate::runtime_state::load()
             .notes
             .get(&id)
-            .and_then(|e| e.active_note_id.clone());
+            .cloned()
+            .unwrap_or_default();
+        let persisted_id = persisted.active_note_id;
+        state.expanded = persisted.expanded_groups.into_iter().collect();
         state.active = if state.notes.is_empty() {
             None
         } else {
@@ -482,6 +560,7 @@ impl NotesWidget {
                 .and_then(|pid| state.notes.iter().position(|n| n.id == pid))
                 .or(Some(0))
         };
+        state.reveal_active();
         Self {
             id,
             instance,
@@ -527,6 +606,7 @@ impl NotesWidget {
             st.mode = Mode::Insert;
             st.focus = SubFocus::Content;
             st.status = None;
+            st.reveal_active();
         }
         self.persist_runtime_state();
     }
@@ -559,6 +639,7 @@ impl NotesWidget {
             st.pending = PendingChord::None;
             st.confirm_delete = None;
             st.status = None;
+            st.reveal_active();
         }
         self.persist_runtime_state();
     }
@@ -590,6 +671,13 @@ impl NotesWidget {
         let active_id = st.notes[active].id.clone();
         st.notes.sort_by(|a, b| b.modified.cmp(&a.modified));
         st.active = st.notes.iter().position(|n| n.id == active_id);
+        // Typing a `Group>…` title moves the note into a group — open
+        // it so the note being edited doesn't vanish from the list.
+        let grew = st.reveal_active();
+        drop(st);
+        if grew {
+            self.persist_runtime_state();
+        }
     }
 
     fn yank_active(&self) {
@@ -1059,50 +1147,138 @@ impl NotesWidget {
             st.board_col = 0;
             st.board_row = 0;
             st.pending = PendingChord::None;
-            prev != Some(idx)
+            let grew = st.reveal_active();
+            prev != Some(idx) || grew
         };
         if changed {
             self.persist_runtime_state();
         }
     }
 
-    fn cycle_active(&self, delta: i32) {
-        let changed = {
-            let mut st = self.state.lock().expect("notes state poisoned");
-            if st.notes.is_empty() {
+    /// Put the list cursor on `row`: a note row opens that note, a
+    /// pure group row only parks the cursor there.
+    fn select_row(&self, row: &TreeRow) {
+        match row.note {
+            Some(idx) => self.select_note(idx),
+            None => {
+                let mut st = self.state.lock().expect("notes state poisoned");
+                st.list_group_sel = Some(row.path.clone());
+                st.list_follow = true;
+            }
+        }
+    }
+
+    /// `j`/`k` in the list: step through visible tree rows, wrapping.
+    fn move_list_cursor(&self, delta: i32) {
+        let row = {
+            let st = self.state.lock().expect("notes state poisoned");
+            let rows = st.visible_rows();
+            if rows.is_empty() {
                 return;
             }
-            let n = st.notes.len() as i32;
-            let cur = st.active.unwrap_or(0) as i32;
-            let next = ((cur + delta).rem_euclid(n)) as usize;
-            let prev = st.active;
-            st.active = Some(next);
-            st.cursor_row = 0;
-            st.cursor_col = 0;
-            st.content_scroll = 0;
-            st.board_col = 0;
-            st.board_row = 0;
-            st.pending = PendingChord::None;
-            prev != Some(next)
+            let n = rows.len() as i32;
+            let cur = st
+                .selected_row(&rows)
+                .map_or(if delta > 0 { -1 } else { 0 }, |i| i as i32);
+            rows[(cur + delta).rem_euclid(n) as usize].clone()
         };
-        if changed {
-            self.persist_runtime_state();
+        self.select_row(&row);
+    }
+
+    fn set_expanded(&self, path: &str, expanded: bool) {
+        {
+            let mut st = self.state.lock().expect("notes state poisoned");
+            if expanded {
+                st.expanded.insert(path.to_string());
+            } else {
+                st.expanded.remove(path);
+            }
+            st.list_follow = true;
+        }
+        self.persist_runtime_state();
+    }
+
+    /// The tree row under the list cursor plus its visible neighbours.
+    fn cursor_row(&self) -> Option<(Vec<TreeRow>, usize)> {
+        let st = self.state.lock().expect("notes state poisoned");
+        let rows = st.visible_rows();
+        let i = st.selected_row(&rows)?;
+        Some((rows, i))
+    }
+
+    /// `l`/→ in the list: expand a collapsed group, step into an
+    /// expanded one, or hand focus to the content pane on a leaf.
+    fn list_right(&self) {
+        let Some((rows, i)) = self.cursor_row() else {
+            self.state.lock().expect("notes state poisoned").focus = SubFocus::Content;
+            return;
+        };
+        let row = &rows[i];
+        if row.has_children && !row.expanded {
+            self.set_expanded(&row.path, true);
+        } else if row.has_children {
+            self.select_row(&rows[i + 1]);
+        } else {
+            self.state.lock().expect("notes state poisoned").focus = SubFocus::Content;
+        }
+    }
+
+    /// `h`/← in the list: collapse an expanded group, otherwise jump
+    /// to the enclosing group's row.
+    fn list_left(&self) {
+        let Some((rows, i)) = self.cursor_row() else {
+            return;
+        };
+        let row = &rows[i];
+        if row.expanded {
+            self.set_expanded(&row.path, false);
+        } else if let Some(p) = tree::parent_row(&rows, i) {
+            self.select_row(&rows[p]);
+        }
+    }
+
+    /// Enter in the list: toggle a pure group, open a note in the
+    /// content pane.
+    fn list_enter(&self) {
+        match self.cursor_row() {
+            Some((rows, i)) if rows[i].note.is_none() => {
+                self.set_expanded(&rows[i].path, !rows[i].expanded);
+            }
+            _ => self.state.lock().expect("notes state poisoned").focus = SubFocus::Content,
+        }
+    }
+
+    /// Mouse click on visible row `i`: select it, and toggle it too
+    /// when it's a pure group (there's no note to open).
+    fn click_row(&self, i: usize) {
+        let row = {
+            let st = self.state.lock().expect("notes state poisoned");
+            st.visible_rows().get(i).cloned()
+        };
+        let Some(row) = row else { return };
+        self.select_row(&row);
+        if row.note.is_none() {
+            self.set_expanded(&row.path, !row.expanded);
         }
     }
 
     /// Snapshot which note the user has open into the runtime-state
     /// file so a relaunch lands the same one. Called from
-    /// `select_note`, `cycle_active`, `create_note`, `delete_active`.
+    /// `select_note`, `create_note`, `delete_active`, and whenever a
+    /// tree group opens or closes.
     /// Best-effort: failures log and the dashboard keeps running.
     fn persist_runtime_state(&self) {
-        let active_note_id = {
+        let (active_note_id, expanded_groups) = {
             let st = self.state.lock().expect("notes state poisoned");
-            st.active
-                .and_then(|i| st.notes.get(i).map(|n| n.id.clone()))
+            let id = st
+                .active
+                .and_then(|i| st.notes.get(i).map(|n| n.id.clone()));
+            (id, st.live_expanded())
         };
         let mut payload = crate::runtime_state::load();
         let entry = payload.notes.entry(self.id.clone()).or_default();
         entry.active_note_id = active_note_id;
+        entry.expanded_groups = expanded_groups;
         if let Err(err) = crate::runtime_state::save(&payload) {
             tracing::warn!(error = %err, "failed to persist notes runtime state");
         }
@@ -1462,8 +1638,8 @@ impl Widget for NotesWidget {
                 let hit = entry_rows
                     .iter()
                     .find(|(_, top, h)| mouse.row >= *top && mouse.row < top.saturating_add(*h));
-                if let Some(&(real_idx, _, _)) = hit {
-                    self.select_note(real_idx);
+                if let Some(&(row_idx, _, _)) = hit {
+                    self.click_row(row_idx);
                 }
                 let mut st = self.state.lock().expect("notes state poisoned");
                 st.focus = SubFocus::List;
@@ -1561,7 +1737,14 @@ impl Widget for NotesWidget {
             ("i", "switch to EDIT mode"),
             ("ESC", "exit EDIT → VIEW"),
             ("h / l", "focus list / focus content (VIEW mode)"),
-            ("j / k", "scroll content (or switch notes in list focus)"),
+            (
+                "j / k",
+                "scroll content (or move through the note tree in list focus)",
+            ),
+            (
+                "h / l / Enter (list)",
+                "collapse / expand a `Group>Note` group",
+            ),
             ("gg / G", "scroll to top / bottom"),
             ("y", "yank entire note to clipboard"),
             ("Ctrl-A / Ctrl-E", "line start / end (EDIT mode)"),
@@ -1635,7 +1818,7 @@ impl NotesWidget {
     }
 
     fn render_list(&self, frame: &mut Frame, area: Rect, widget_focused: bool) {
-        let st = self.state.lock().expect("notes state poisoned");
+        let mut st = self.state.lock().expect("notes state poisoned");
         let list_focused = widget_focused && st.focus == SubFocus::List;
         let content_focused = widget_focused && st.focus == SubFocus::Content;
 
@@ -1664,24 +1847,25 @@ impl NotesWidget {
         let footer_rows = LIST_FOOTER_ROWS.min(area.height);
         let entries_height = area.height.saturating_sub(footer_rows);
         let divider_w: u16 = 1;
+        let rows = st.visible_rows();
+        let selected = st.selected_row(&rows);
+        let wrap_rows = |inner: usize| -> Vec<Vec<String>> {
+            rows.iter()
+                .map(|r| {
+                    let lead = tree_row_lead_w(r);
+                    wrap_title_lines(
+                        &tree_row_text(r),
+                        inner.saturating_sub(LIST_PREFIX_W + lead).max(1),
+                        inner.saturating_sub(LIST_CONT_W + lead).max(1),
+                        LIST_WRAP_MAX_LINES,
+                    )
+                })
+                .collect()
+        };
         let needs_scrollbar = {
             let narrow_reserve: u16 = divider_w + SCROLLBAR_GUTTER + CONTENT_SCROLLBAR_WIDTH;
             let narrow_inner = area.width.saturating_sub(narrow_reserve).max(1) as usize;
-            let narrow_first = narrow_inner.saturating_sub(LIST_PREFIX_W).max(1);
-            let narrow_cont = narrow_inner.saturating_sub(LIST_CONT_W).max(1);
-            let total: usize = st
-                .notes
-                .iter()
-                .map(|n| {
-                    wrap_title_lines(
-                        n.display_name(),
-                        narrow_first,
-                        narrow_cont,
-                        LIST_WRAP_MAX_LINES,
-                    )
-                    .len()
-                })
-                .sum();
+            let total: usize = wrap_rows(narrow_inner).iter().map(Vec::len).sum();
             total > entries_height as usize
         };
         let reserved_w: u16 = if needs_scrollbar {
@@ -1690,47 +1874,64 @@ impl NotesWidget {
             divider_w
         };
         let inner_w = area.width.saturating_sub(reserved_w).max(1) as usize;
-        // First-line text width = inner_w - first-line prefix (2 cells).
-        // Continuation rows have a 3-cell hanging indent so they
-        // visually offset from the next entry's first line — gets
-        // one fewer cell for text.
-        let text_w_first = inner_w.saturating_sub(LIST_PREFIX_W).max(1);
-        let text_w_cont = inner_w.saturating_sub(LIST_CONT_W).max(1);
+        let wrapped_rows = wrap_rows(inner_w);
 
-        let scroll = st.list_scroll as usize;
-        let active = st.active.unwrap_or(usize::MAX);
+        let mut scroll = (st.list_scroll as usize).min(rows.len().saturating_sub(1));
+        if std::mem::take(&mut st.list_follow) {
+            if let Some(sel) = selected {
+                if sel < scroll {
+                    scroll = sel;
+                }
+                let height =
+                    |from: usize| -> usize { wrapped_rows[from..=sel].iter().map(Vec::len).sum() };
+                while scroll < sel && height(scroll) > entries_height as usize {
+                    scroll += 1;
+                }
+            }
+        }
+        st.list_scroll = scroll as u16;
 
-        // Pack entries top-down by their wrapped row count (1..=3) until
-        // we run out of vertical space. Don't render a partial entry —
-        // either the whole entry fits or we stop. `entries_rendered`
-        // is fed to the scrollbar math below so the thumb size
-        // reflects what the user can actually see (variable-row
-        // entries make a simple "entries / total" approximation
-        // close enough; the bar is for orientation, not exactness).
-        // We also stash per-entry `(real_idx, top_y, row_count)` so
-        // the click handler can hit-test variable-height entries
-        // without re-running the wrap math.
+        // Pack rows top-down by their wrapped row count (1..=3) until
+        // we run out of vertical space. Don't render a partial row —
+        // either the whole row fits or we stop. `entries_rendered`
+        // feeds the scrollbar math below; `entry_rows` publishes each
+        // row's `(row_idx, top_y, row_count)` so the click handler can
+        // hit-test variable-height rows without re-running the wrap.
         let mut lines: Vec<Line<'static>> = Vec::with_capacity(entries_height as usize);
         let mut y_used: u16 = 0;
         let mut entries_rendered: usize = 0;
         let mut entry_rows: Vec<(usize, u16, u16)> = Vec::new();
-        for (real_idx, note) in st.notes.iter().enumerate().skip(scroll) {
-            let is_active = real_idx == active;
-            let name = note.display_name();
-            let wrapped = wrap_title_lines(name, text_w_first, text_w_cont, LIST_WRAP_MAX_LINES);
+        for (ri, (row, wrapped)) in rows.iter().zip(&wrapped_rows).enumerate().skip(scroll) {
             if y_used + wrapped.len() as u16 > entries_height {
                 break;
             }
-            let (caret, caret_style, title_style) =
-                self.list_entry_styles(list_focused, content_focused, widget_focused, is_active);
+            let (caret, caret_style, title_style) = self.list_entry_styles(
+                list_focused,
+                content_focused,
+                widget_focused,
+                selected == Some(ri),
+            );
+            let indent = "  ".repeat(row.depth);
+            let marker = match (row.has_children, row.expanded) {
+                (false, _) => "",
+                (true, true) => TREE_EXPANDED,
+                (true, false) => TREE_COLLAPSED,
+            };
             for (li, piece) in wrapped.iter().enumerate() {
-                let lead = if li == 0 { caret } else { LIST_CONT_INDENT };
+                let lead = if li == 0 {
+                    format!("{caret}{indent}{marker}")
+                } else {
+                    format!(
+                        "{LIST_CONT_INDENT}{indent}{}",
+                        " ".repeat(marker.chars().count())
+                    )
+                };
                 lines.push(Line::from(vec![
-                    Span::styled(lead.to_string(), caret_style),
+                    Span::styled(lead, caret_style),
                     Span::styled(piece.clone(), title_style),
                 ]));
             }
-            entry_rows.push((real_idx, area.y + y_used, wrapped.len() as u16));
+            entry_rows.push((ri, area.y + y_used, wrapped.len() as u16));
             y_used += wrapped.len() as u16;
             entries_rendered += 1;
         }
@@ -1796,7 +1997,7 @@ impl NotesWidget {
         // from the body text. Same track `│` / thumb `█` convention
         // as the content pane; thumb brightens when the list sub-
         // pane has focus.
-        let total_entries = st.notes.len();
+        let total_entries = rows.len();
         let max_list_scroll = total_entries.saturating_sub(entries_rendered);
         if needs_scrollbar && entries_height > 0 {
             *self.last_max_list_scroll.lock().unwrap() = max_list_scroll as u16;
@@ -2575,6 +2776,12 @@ impl NotesWidget {
                 self.create_note();
                 EventResult::Handled
             }
+            KeyCode::Char('d') | KeyCode::Char('-')
+                if st.focus == SubFocus::List && st.list_group_sel.is_some() =>
+            {
+                st.set_status("Select a note to delete");
+                EventResult::Handled
+            }
             KeyCode::Char('d') | KeyCode::Char('-') => {
                 if let Some(active) = st.active {
                     if let Some(note) = st.notes.get(active) {
@@ -2699,6 +2906,19 @@ impl NotesWidget {
                 st.content_scroll = max;
                 EventResult::Handled
             }
+            // List focus: h / l walk the note tree — collapse/expand a
+            // group, or step to its parent/first child. `l` on a leaf
+            // still hands focus to the content pane.
+            KeyCode::Char('h') | KeyCode::Left if st.focus == SubFocus::List => {
+                drop(st);
+                self.list_left();
+                EventResult::Handled
+            }
+            KeyCode::Char('l') | KeyCode::Right if st.focus == SubFocus::List => {
+                drop(st);
+                self.list_right();
+                EventResult::Handled
+            }
             // h / l switch sub-pane focus directly — they never move
             // a "cursor" in normal mode because normal mode has none.
             KeyCode::Char('h') | KeyCode::Left => {
@@ -2710,11 +2930,12 @@ impl NotesWidget {
                 EventResult::Handled
             }
             // Enter while the list is focused: "open" the selected note
-            // by jumping focus to the content pane — same effect as `l`
-            // / →, just the keystroke a list naturally suggests.
-            // Ignored when the content pane already has focus.
+            // by jumping focus to the content pane, or toggle a group
+            // row that has no note of its own. Ignored when the content
+            // pane already has focus.
             KeyCode::Enter if st.focus == SubFocus::List => {
-                st.focus = SubFocus::Content;
+                drop(st);
+                self.list_enter();
                 EventResult::Handled
             }
             // j / k:
@@ -2723,7 +2944,7 @@ impl NotesWidget {
             KeyCode::Char('j') | KeyCode::Down => {
                 if st.focus == SubFocus::List {
                     drop(st);
-                    self.cycle_active(1);
+                    self.move_list_cursor(1);
                 } else {
                     // Only advance if the note actually has more rows
                     // than the viewport — `max_scroll` of zero means
@@ -2736,7 +2957,7 @@ impl NotesWidget {
             KeyCode::Char('k') | KeyCode::Up => {
                 if st.focus == SubFocus::List {
                     drop(st);
-                    self.cycle_active(-1);
+                    self.move_list_cursor(-1);
                 } else {
                     st.content_scroll = st.content_scroll.saturating_sub(1);
                 }
@@ -3133,6 +3354,22 @@ fn wrap_title_lines(text: &str, first_w: usize, cont_w: usize, max_lines: usize)
     let mut out = head;
     out.push(tail_row);
     out
+}
+
+/// Cells a tree row's depth indent + group marker take ahead of its
+/// label, on top of the list's own caret prefix.
+fn tree_row_lead_w(row: &TreeRow) -> usize {
+    row.depth * 2 + if row.has_children { 2 } else { 0 }
+}
+
+/// Label as shown in the list — collapsed groups carry a count of the
+/// notes hidden inside them.
+fn tree_row_text(row: &TreeRow) -> String {
+    if row.has_children && !row.expanded {
+        format!("{} ({})", row.label, row.descendant_notes)
+    } else {
+        row.label.clone()
+    }
 }
 
 fn truncate_for_meta(s: &str, max: usize) -> String {

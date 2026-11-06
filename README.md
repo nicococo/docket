@@ -31,7 +31,8 @@ docket                          # first run seeds a working default layout
 - **Notes with a kanban board** — the natural landing spot for those
   todos. Any note toggles (`t`) between plain markdown and a
   colourful board view, columns from `## Heading` lines, cards from
-  `- [ ]` items — still just a `.md` file underneath.
+  `- [ ]` items — still just a `.md` file underneath. Titles like
+  `Work>TODOs` group notes into a collapsible tree in the list.
 - **Calendar** — day/week/month agenda over CalDAV, ICS, or local
   events, so the dates you pull out of an email land somewhere
   you'll actually see them again.

@@ -789,3 +789,85 @@ fn open_board_link_preview_falls_back_to_wikilinks_without_an_email_ref() {
     );
     assert!(st.board_link_preview.is_some());
 }
+
+fn seed_notes(w: &NotesWidget, titles: &[&str]) {
+    let mut st = w.state.lock().unwrap();
+    st.notes = titles
+        .iter()
+        .map(|t| Note {
+            id: t.to_string(),
+            body: format!("{t}\n"),
+            modified: std::time::SystemTime::UNIX_EPOCH,
+        })
+        .collect();
+    st.active = Some(0);
+    st.expanded.clear();
+    st.list_group_sel = None;
+    st.focus = SubFocus::List;
+    st.mode = Mode::Normal;
+}
+
+fn key(code: KeyCode) -> KeyEvent {
+    KeyEvent::new(code, KeyModifiers::NONE)
+}
+
+fn cursor_label(w: &NotesWidget) -> String {
+    let (rows, i) = w.cursor_row().expect("cursor on a visible row");
+    rows[i].label.clone()
+}
+
+#[test]
+fn list_j_steps_onto_group_rows_and_enter_expands() {
+    let mut w = make_widget();
+    seed_notes(&w, &["Shopping", "Work>TODOs", "Work>Meetings"]);
+    w.handle_key(key(KeyCode::Char('j')));
+    assert_eq!(cursor_label(&w), "Work");
+    assert_eq!(
+        w.state.lock().unwrap().active,
+        Some(0),
+        "group row opens no note"
+    );
+    w.handle_key(key(KeyCode::Enter));
+    w.handle_key(key(KeyCode::Char('j')));
+    assert_eq!(cursor_label(&w), "TODOs");
+    assert_eq!(w.state.lock().unwrap().active, Some(1));
+}
+
+#[test]
+fn list_h_climbs_to_parent_then_collapses() {
+    let mut w = make_widget();
+    seed_notes(&w, &["Work>TODOs", "Shopping"]);
+    w.state.lock().unwrap().reveal_active();
+    assert_eq!(cursor_label(&w), "TODOs");
+    w.handle_key(key(KeyCode::Char('h')));
+    assert_eq!(cursor_label(&w), "Work");
+    w.handle_key(key(KeyCode::Char('h')));
+    let st = w.state.lock().unwrap();
+    assert!(!st.expanded.contains("Work"));
+    assert_eq!(st.visible_rows().len(), 2, "Work collapsed + Shopping");
+}
+
+#[test]
+fn list_l_expands_then_enters_group() {
+    let mut w = make_widget();
+    seed_notes(&w, &["Work>TODOs"]);
+    {
+        let mut st = w.state.lock().unwrap();
+        st.list_group_sel = Some("Work".into());
+    }
+    w.handle_key(key(KeyCode::Char('l')));
+    assert!(w.state.lock().unwrap().expanded.contains("Work"));
+    w.handle_key(key(KeyCode::Char('l')));
+    assert_eq!(cursor_label(&w), "TODOs");
+    w.handle_key(key(KeyCode::Char('l')));
+    assert_eq!(w.state.lock().unwrap().focus, SubFocus::Content);
+}
+
+#[test]
+fn delete_on_group_row_does_not_target_hidden_active_note() {
+    let mut w = make_widget();
+    seed_notes(&w, &["Work>TODOs"]);
+    w.state.lock().unwrap().list_group_sel = Some("Work".into());
+    w.handle_key(key(KeyCode::Char('d')));
+    assert!(w.state.lock().unwrap().confirm_delete.is_none());
+}

@@ -6,6 +6,15 @@ the `Cargo.toml` `version` field.
 
 ## [Unreleased]
 
+### Added
+
+- **Notes list is a tree.** A `>` in a note's title nests it: `Work>TODOs`
+  shows as a `TODOs` leaf under a collapsible `Work` group (a note
+  titled exactly `Work` becomes the group's own row). In list focus,
+  `h`/`l` collapse/expand or step to parent/child, Enter toggles a
+  group, and open groups are remembered across restarts. Files stay
+  flat on disk (`Work-TODOs.md`).
+
 ### Changed
 
 - **docket is now a fixed 4-pane app, not a configurable dashboard.**
