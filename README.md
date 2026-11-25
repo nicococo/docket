@@ -1,5 +1,7 @@
 # docket
 
+[![CI](https://github.com/nicococo/docket/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/nicococo/docket/actions/workflows/ci.yml) [![Coverage](https://codecov.io/gh/nicococo/docket/graph/badge.svg)](https://codecov.io/gh/nicococo/docket) [![License: GPL-3.0-or-later](https://img.shields.io/badge/license-GPL--3.0--or--later-blue.svg)](LICENSE)
+
 Calendar, feeds, notes and email in one keyboard-driven terminal dashboard.
 
 ![Illustrated mockup of the docket dashboard](assets/docket-mockup.png)
@@ -50,7 +52,7 @@ cargo install --path . --locked
 docket
 ```
 
-Docket creates its default configuration on first run. Press `?` for keys, `Tab` to switch panes, `z` to zoom, and `Ctrl+G` for settings. In settings, `Tab` switches tabs, arrow keys select a field, `Enter` edits, `Ctrl+S` saves, and `Esc` cancels.
+Docket creates its default configuration on first run. Press `?` for keys, `Tab` to switch panes, `z` to zoom, and `Ctrl+G` for settings. Use `Tab` to choose a settings page, arrows to select, `Enter` to edit, `Ctrl+S` to save, and `Esc` to close. On Herdr, the Herdr page adds or removes shortcuts and updates the plugin; shortcut changes apply when saved.
 
 ## Data and setup
 
@@ -62,7 +64,10 @@ There is no telemetry or docket-hosted service. Docket contacts the feeds, calen
 
 ```sh
 cargo test --features widgets-all
-python3 -m unittest discover -s tests -p 'test_herdr_toggle.py'
+python3 -m unittest discover -s tests -p 'test_herdr*.py'
 ```
+
+CI uploads an LCOV report as an artifact on every run. The coverage badge uses
+Codecov; enable this repository in Codecov to publish the main-branch report.
 
 Docket is GPL-3.0-or-later and is a fork of [glint](https://github.com/ntrospect0/glint) by ntrospect0. See [LICENSE](LICENSE) and [CONTRIBUTING.md](CONTRIBUTING.md).

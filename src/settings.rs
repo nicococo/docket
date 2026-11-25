@@ -11,10 +11,16 @@ use ratatui::{
     widgets::{Block, Borders, Clear, Paragraph},
     Frame,
 };
-use std::path::PathBuf;
+use std::{
+    path::PathBuf,
+    process::Command,
+    sync::{Arc, Mutex},
+    thread,
+};
 use toml_edit::{DocumentMut, Item, Table};
 
-const TABS: [&str; 4] = ["Email", "Calendar", "Feeds", "Notes"];
+const TABS: [&str; 5] = ["Email", "Calendar", "Feeds", "Notes", "Herdr"];
+const HERDR_ACTION: &str = "nicococo.docket.toggle";
 
 #[derive(Clone)]
 struct Field {
@@ -49,6 +55,12 @@ pub struct Settings {
     editing: bool,
     saved: bool,
     error: Option<String>,
+    herdr_path: PathBuf,
+    herdr_original: Option<String>,
+    herdr_doc: DocumentMut,
+    herdr_bindings: Vec<String>,
+    herdr_new_binding: String,
+    herdr_update_status: Arc<Mutex<String>>,
 }
 
 impl Settings {
@@ -518,6 +530,30 @@ impl Settings {
             original: ics_original,
             doc: ics_doc,
         });
+        let herdr_path = std::env::var_os("HERDR_CONFIG_PATH")
+            .map(PathBuf::from)
+            .or_else(|| {
+                std::env::var_os("XDG_CONFIG_HOME")
+                    .map(PathBuf::from)
+                    .map(|p| p.join("herdr/config.toml"))
+            })
+            .or_else(|| {
+                std::env::var_os("HOME")
+                    .map(PathBuf::from)
+                    .map(|p| p.join(".config/herdr/config.toml"))
+            })
+            .context("Could not locate Herdr config")?;
+        let herdr_original = match std::fs::read_to_string(&herdr_path) {
+            Ok(text) => Some(text),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+            Err(e) => return Err(e.into()),
+        };
+        let herdr_doc: DocumentMut = herdr_original
+            .as_deref()
+            .unwrap_or("")
+            .parse()
+            .context("Invalid Herdr configuration")?;
+        let herdr_bindings = herdr_bindings(&herdr_doc);
         Ok(Self {
             path,
             original,
@@ -529,6 +565,12 @@ impl Settings {
             editing: false,
             saved: false,
             error: None,
+            herdr_path,
+            herdr_original,
+            herdr_doc,
+            herdr_bindings,
+            herdr_new_binding: String::new(),
+            herdr_update_status: Arc::new(Mutex::new(String::new())),
         })
     }
 
@@ -538,9 +580,16 @@ impl Settings {
 
     pub fn insert(&mut self, text: &str) {
         if self.editing {
-            self.fields[self.tab][self.row]
-                .value
-                .extend(text.chars().filter(|c| !c.is_control()));
+            if self.tab == 4 {
+                self.herdr_new_binding.extend(
+                    text.chars()
+                        .filter(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '_')),
+                );
+            } else {
+                self.fields[self.tab][self.row]
+                    .value
+                    .extend(text.chars().filter(|c| !c.is_control()));
+            }
         }
     }
 
@@ -634,8 +683,52 @@ impl Settings {
         self.row = self.fields[2].len() - 2;
     }
 
+    fn herdr_row_count(&self) -> usize {
+        self.herdr_bindings.len() + 2
+    }
+
+    fn dirty(&self) -> bool {
+        self.doc.to_string() != self.original
+            || self
+                .fields
+                .iter()
+                .flatten()
+                .any(|field| field.value != field.original)
+            || self.herdr_bindings != herdr_bindings(&self.herdr_doc)
+    }
+
+    fn update_herdr_plugin(&mut self) {
+        let status = Arc::clone(&self.herdr_update_status);
+        if let Ok(mut text) = status.lock() {
+            if text.as_str() == "Updating docket plugin…" {
+                return;
+            }
+            *text = "Updating docket plugin…".into();
+        }
+        thread::spawn(move || {
+            let result = Command::new("herdr")
+                .args(["plugin", "update", "nicococo.docket"])
+                .stdin(std::process::Stdio::null())
+                .output();
+            let message = match result {
+                Ok(output) if output.status.success() => "Plugin updated. Reopen docket.".into(),
+                Ok(output) => format!(
+                    "Plugin update failed: {}",
+                    String::from_utf8_lossy(&output.stderr).trim()
+                ),
+                Err(error) => format!("Could not run Herdr: {error}"),
+            };
+            if let Ok(mut text) = status.lock() {
+                *text = message;
+            }
+        });
+    }
+
     pub fn handle_key(&mut self, key: KeyEvent) -> bool {
         self.error = None;
+        if self.tab == 4 {
+            return self.handle_herdr_key(key);
+        }
         match (key.modifiers, key.code) {
             (KeyModifiers::CONTROL, KeyCode::Char('s')) => match self.save() {
                 Ok(()) => {
@@ -669,6 +762,68 @@ impl Settings {
             }
             (m, KeyCode::Char(c)) if self.editing && (m.is_empty() || m == KeyModifiers::SHIFT) => {
                 self.fields[self.tab][self.row].value.push(c)
+            }
+            _ => {}
+        }
+        false
+    }
+
+    fn handle_herdr_key(&mut self, key: KeyEvent) -> bool {
+        match (key.modifiers, key.code) {
+            (KeyModifiers::CONTROL, KeyCode::Char('s')) => match self.save() {
+                Ok(()) => {
+                    self.saved = true;
+                    return true;
+                }
+                Err(error) => self.error = Some(format!("{error:#}")),
+            },
+            (_, KeyCode::Esc) if self.editing => self.editing = false,
+            (_, KeyCode::Esc) => return true,
+            (_, KeyCode::Tab) if !self.editing => {
+                self.tab = (self.tab + 1) % TABS.len();
+                self.row = 0;
+            }
+            (_, KeyCode::BackTab) if !self.editing => {
+                self.tab = (self.tab + TABS.len() - 1) % TABS.len();
+                self.row = 0;
+            }
+            (_, KeyCode::Up) if !self.editing => self.row = self.row.saturating_sub(1),
+            (_, KeyCode::Down) if !self.editing => {
+                self.row = (self.row + 1).min(self.herdr_row_count().saturating_sub(1))
+            }
+            (_, KeyCode::Char('x')) if !self.editing && self.row < self.herdr_bindings.len() => {
+                self.herdr_bindings.remove(self.row);
+                self.row = self.row.min(self.herdr_row_count().saturating_sub(1));
+            }
+            (_, KeyCode::Enter) if self.row == self.herdr_bindings.len() && !self.editing => {
+                self.herdr_new_binding.clear();
+                self.editing = true;
+            }
+            (_, KeyCode::Enter) if self.editing => {
+                let key = self.herdr_new_binding.trim().to_owned();
+                if key.is_empty() {
+                    self.error = Some("Enter a Herdr key sequence".into());
+                } else if self.herdr_bindings.contains(&key) {
+                    self.error = Some("That docket shortcut is already listed".into());
+                } else {
+                    self.herdr_bindings.push(key);
+                    self.row = self.herdr_bindings.len() - 1;
+                    self.editing = false;
+                }
+            }
+            (_, KeyCode::Enter) if self.row == self.herdr_bindings.len() + 1 => {
+                self.update_herdr_plugin();
+            }
+            (KeyModifiers::CONTROL, KeyCode::Char('u')) if self.editing => {
+                self.herdr_new_binding.clear();
+            }
+            (_, KeyCode::Backspace) if self.editing => {
+                self.herdr_new_binding.pop();
+            }
+            (m, KeyCode::Char(c)) if self.editing && (m.is_empty() || m == KeyModifiers::SHIFT) => {
+                if c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '_') {
+                    self.herdr_new_binding.push(c);
+                }
             }
             _ => {}
         }
@@ -786,6 +941,64 @@ impl Settings {
         }
         let text = doc.to_string();
         let _: crate::config::Config = toml::from_str(&text).context("Invalid settings")?;
+        let herdr_changed = self.herdr_bindings != herdr_bindings(&self.herdr_doc);
+        let mut herdr_doc = self.herdr_doc.clone();
+        if herdr_changed {
+            let commands = herdr_doc
+                .get("keys")
+                .and_then(|keys| keys.get("command"))
+                .and_then(Item::as_array_of_tables);
+            for key in &self.herdr_bindings {
+                if commands.is_some_and(|commands| {
+                    commands.iter().any(|command| {
+                        command.get("command").and_then(Item::as_str) != Some(HERDR_ACTION)
+                            && command.get("key").and_then(Item::as_str) == Some(key)
+                    })
+                }) {
+                    bail!("Herdr shortcut {key:?} is already assigned");
+                }
+            }
+            if herdr_doc.get("keys").is_none() {
+                herdr_doc["keys"] = Item::Table(Table::new());
+            }
+            if herdr_doc["keys"].get("command").is_none() {
+                herdr_doc["keys"]["command"] = Item::ArrayOfTables(toml_edit::ArrayOfTables::new());
+            }
+            let commands = herdr_doc["keys"]["command"]
+                .as_array_of_tables_mut()
+                .context("Herdr key commands are not a list")?;
+            let mut index = 0;
+            while index < commands.len() {
+                if commands
+                    .get(index)
+                    .and_then(|command| command.get("command"))
+                    .and_then(Item::as_str)
+                    == Some(HERDR_ACTION)
+                {
+                    commands.remove(index);
+                } else {
+                    index += 1;
+                }
+            }
+            for key in &self.herdr_bindings {
+                let mut command = Table::new();
+                command["key"] = toml_edit::value(key.as_str());
+                command["type"] = toml_edit::value("plugin_action");
+                command["command"] = toml_edit::value(HERDR_ACTION);
+                command["description"] = toml_edit::value("Toggle docket");
+                commands.push(command);
+            }
+        }
+        if herdr_changed {
+            let current = match std::fs::read_to_string(&self.herdr_path) {
+                Ok(text) => Some(text),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+                Err(error) => return Err(error.into()),
+            };
+            if current != self.herdr_original {
+                bail!("Herdr settings changed on disk. Reopen before saving.");
+            }
+        }
         for (i, credential) in self.credentials.iter().enumerate() {
             if credential_docs[i].to_string() == credential.doc.to_string() {
                 continue;
@@ -871,6 +1084,19 @@ impl Settings {
             let _ = std::fs::remove_file(&tmp);
         }
         result?;
+        if herdr_changed {
+            write_config_atomic(&self.herdr_path, &herdr_doc.to_string())?;
+            self.herdr_original = Some(herdr_doc.to_string());
+            self.herdr_doc = herdr_doc;
+            let _ = thread::Builder::new()
+                .name("docket-herdr-reload".into())
+                .spawn(|| {
+                    let _ = Command::new("herdr")
+                        .args(["server", "reload-config"])
+                        .stdin(std::process::Stdio::null())
+                        .output();
+                });
+        }
         self.original = text;
         self.doc = doc;
         Ok(())
@@ -878,10 +1104,75 @@ impl Settings {
 
     pub fn render(&self, frame: &mut Frame) {
         let area = frame.area();
-        if area.width < 20 || area.height < 8 {
+        if area.width < 20 || area.height < 9 {
             return;
         }
-        let rect = Rect::new(area.x + 1, area.y + 1, area.width - 2, area.height - 2);
+        let herdr = self.tab == 4;
+        let row_count = if herdr {
+            self.herdr_row_count()
+        } else {
+            self.fields[self.tab].len()
+        };
+        let hint = if self.editing {
+            "Type · ^U clear · Enter done · ^S save"
+        } else if herdr {
+            "Enter action · x remove · ^S save · Esc close"
+        } else if self.tab == 1 || self.tab == 2 {
+            "Tab pages · ↑/↓ move · Enter edit · n add · ^S save"
+        } else {
+            "Tab pages · ↑/↓ move · Enter edit · ^S save · Esc close"
+        };
+        let footer = if self.dirty() {
+            format!("{hint} · unsaved")
+        } else {
+            hint.to_owned()
+        };
+        let visible_rows = row_count
+            .min(usize::from(area.height.saturating_sub(8)))
+            .max(1);
+        let label_width = if herdr {
+            24
+        } else {
+            self.fields[self.tab]
+                .iter()
+                .map(|f| f.label.chars().count())
+                .max()
+                .unwrap_or(12)
+                .min(24)
+        };
+        let value_width = if herdr {
+            self.herdr_bindings
+                .iter()
+                .map(String::len)
+                .max()
+                .unwrap_or(12)
+                .min(30)
+        } else {
+            self.fields[self.tab]
+                .iter()
+                .map(|f| f.value.chars().count())
+                .max()
+                .unwrap_or(12)
+                .min(36)
+        };
+        let natural_width = label_width
+            .saturating_add(value_width)
+            .saturating_add(8)
+            .max(TABS.iter().map(|tab| tab.len()).sum::<usize>() + TABS.len() * 2)
+            .max(footer.chars().count() + 2)
+            .max(46);
+        let width = natural_width
+            .min(usize::from(area.width.saturating_sub(4)))
+            .max(16) as u16;
+        let height = (visible_rows + 6)
+            .min(usize::from(area.height.saturating_sub(2)))
+            .max(7) as u16;
+        let rect = Rect::new(
+            area.x + (area.width - width) / 2,
+            area.y + (area.height - height) / 2,
+            width,
+            height,
+        );
         frame.render_widget(Clear, rect);
         let block = Block::default()
             .borders(Borders::ALL)
@@ -913,37 +1204,88 @@ impl Settings {
         );
         let h = inner.height.saturating_sub(4) as usize;
         let top = self.row.saturating_sub(h.saturating_sub(1));
-        let lines = self.fields[self.tab]
-            .iter()
-            .enumerate()
-            .skip(top)
-            .take(h)
-            .map(|(i, f)| {
-                let style = if i == self.row {
-                    Style::default().fg(Color::Black).bg(Color::LightYellow)
+        let lines = if herdr {
+            let mut rows: Vec<(String, String)> = self
+                .herdr_bindings
+                .iter()
+                .map(|key| ("Shortcut".into(), key.clone()))
+                .collect();
+            rows.push((
+                "Add shortcut".into(),
+                if self.editing {
+                    self.herdr_new_binding.clone()
                 } else {
-                    Style::default()
-                };
-                Line::from(format!(
-                    " {:<22} {}",
-                    f.label,
-                    if f.secret {
-                        "*".repeat(f.value.chars().count())
+                    "Enter to add".into()
+                },
+            ));
+            rows.push(("Update plugin".into(), "Enter to update".into()));
+            rows.into_iter()
+                .enumerate()
+                .skip(top)
+                .take(h)
+                .map(|(i, (label, value))| {
+                    Line::from(format!(" {label:<24} {value}")).style(if i == self.row {
+                        Style::default().fg(Color::Black).bg(Color::LightYellow)
                     } else {
-                        f.value.clone()
-                    }
-                ))
-                .style(style)
-            })
-            .collect::<Vec<_>>();
+                        Style::default()
+                    })
+                })
+                .collect::<Vec<_>>()
+        } else {
+            self.fields[self.tab]
+                .iter()
+                .enumerate()
+                .skip(top)
+                .take(h)
+                .map(|(i, f)| {
+                    let style = if i == self.row {
+                        Style::default().fg(Color::Black).bg(Color::LightYellow)
+                    } else {
+                        Style::default()
+                    };
+                    Line::from(format!(
+                        " {:<width$} {}",
+                        f.label,
+                        if f.secret {
+                            "*".repeat(f.value.chars().count())
+                        } else {
+                            f.value.clone()
+                        },
+                        width = label_width,
+                    ))
+                    .style(style)
+                })
+                .collect::<Vec<_>>()
+        };
         frame.render_widget(
             Paragraph::new(lines),
             Rect::new(inner.x, inner.y + 1, inner.width, h as u16),
         );
-        let desc = self
-            .error
-            .as_deref()
-            .unwrap_or(self.fields[self.tab][self.row].description);
+        let herdr_status = self
+            .herdr_update_status
+            .lock()
+            .ok()
+            .map(|s| s.clone())
+            .unwrap_or_default();
+        let herdr_desc = if self.row < self.herdr_bindings.len() {
+            "Herdr shortcut that toggles the docket dashboard. Press x to remove."
+        } else if self.row == self.herdr_bindings.len() {
+            "Add a shortcut such as prefix+d; save to write Herdr config."
+        } else if herdr_status.is_empty() {
+            "Update the installed plugin in the background; reopen after it finishes."
+        } else {
+            &herdr_status
+        };
+        let desc = self.error.as_deref().unwrap_or_else(|| {
+            if herdr {
+                herdr_desc
+            } else {
+                self.fields[self.tab]
+                    .get(self.row)
+                    .map(|f| f.description)
+                    .unwrap_or("")
+            }
+        });
         frame.render_widget(
             Paragraph::new(desc).style(Style::default().fg(if self.error.is_some() {
                 Color::LightRed
@@ -952,18 +1294,66 @@ impl Settings {
             })),
             Rect::new(inner.x, inner.y + inner.height - 3, inner.width, 1),
         );
-        let hint = if self.editing {
-            "Type · Ctrl+U clear · Enter done · Ctrl+S save"
-        } else if self.tab == 1 || self.tab == 2 {
-            "Tab switch · ↑/↓ select · Enter edit · n add source · Ctrl+S save · Esc cancel"
-        } else {
-            "Tab switch · ↑/↓ select · Enter edit · Ctrl+S save · Esc cancel"
-        };
         frame.render_widget(
-            Paragraph::new(hint).style(Style::default().fg(Color::LightYellow)),
+            Paragraph::new(footer).style(Style::default().fg(Color::LightYellow)),
             Rect::new(inner.x, inner.y + inner.height - 1, inner.width, 1),
         );
     }
+}
+
+fn herdr_bindings(doc: &DocumentMut) -> Vec<String> {
+    doc.get("keys")
+        .and_then(|keys| keys.get("command"))
+        .and_then(Item::as_array_of_tables)
+        .map(|commands| {
+            commands
+                .iter()
+                .filter_map(|command| {
+                    (command.get("command").and_then(Item::as_str) == Some(HERDR_ACTION)).then(
+                        || {
+                            command
+                                .get("key")
+                                .and_then(Item::as_str)
+                                .unwrap_or("")
+                                .to_owned()
+                        },
+                    )
+                })
+                .filter(|key| !key.is_empty())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn write_config_atomic(path: &std::path::Path, text: &str) -> Result<()> {
+    let parent = path.parent().context("Config path has no directory")?;
+    std::fs::create_dir_all(parent)?;
+    let tmp = path.with_extension(format!("toml.{}.tmp", std::process::id()));
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        let mode = std::fs::metadata(path)
+            .map(|metadata| {
+                use std::os::unix::fs::PermissionsExt;
+                metadata.permissions().mode() & 0o777
+            })
+            .unwrap_or(0o600);
+        options.mode(mode);
+    }
+    let mut file = options.open(&tmp)?;
+    let result = (|| -> Result<()> {
+        use std::io::Write;
+        file.write_all(text.as_bytes())?;
+        file.sync_all()?;
+        std::fs::rename(&tmp, path)?;
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(&tmp);
+    }
+    result
 }
 
 #[cfg(test)]

@@ -4,21 +4,74 @@ on:
   push:
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
-  build-test:
+  test:
+    name: Tests and coverage
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - name: Clippy (warn-only)
-        # The repo carries pre-existing clippy warnings in several widgets
-        # (field-assignment-outside-Default, too-many-arguments, etc.) that
-        # are unrelated to Focus Zoom. Running without -D warnings keeps CI
-        # green on the current codebase while still surfacing any new lints
-        # introduced by a PR.
-        # To harden this step: address the pre-existing debt in a dedicated
-        # cleanup PR, then replace this line with:
-        #   cargo clippy --all-targets --all-features -- -D warnings
-        run: cargo clippy --all-targets --all-features
-      - name: Test
-        run: cargo test --quiet
+        with:
+          components: llvm-tools-preview
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@cargo-llvm-cov
+      - name: Rust tests and coverage
+        run: cargo llvm-cov --locked --features widgets-all --lcov --output-path lcov.info
+      - name: Herdr integration script tests
+        run: python3 -m unittest discover -s tests -p 'test_herdr*.py' -v
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-lcov
+          path: lcov.info
+          if-no-files-found: error
+      - name: Publish coverage to Codecov
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: codecov/codecov-action@v5
+        with:
+          files: lcov.info
+          use_oidc: true
+          fail_ci_if_error: false
+      - name: Clippy
+        run: cargo clippy --locked --all-targets --all-features
+
+  herdr-install:
+    name: Herdr plugin install
+    runs-on: ubuntu-latest
+    env:
+      XDG_CONFIG_HOME: ${{ runner.temp }}/docket-ci-config
+      PLUGIN_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
+      PLUGIN_REF: ${{ github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install Herdr
+        run: |
+          curl --fail --location --retry 3 --output "$RUNNER_TEMP/herdr" \
+            https://github.com/herdrdev/herdr/releases/download/v0.9.5/herdr-linux-x86_64
+          echo '14d9e8bc8b4a9e0118d77c32266f76d461f09b40342eb23752960bd89f59929d  '"$RUNNER_TEMP/herdr" | sha256sum --check
+          chmod +x "$RUNNER_TEMP/herdr"
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+      - name: Install the tested plugin revision
+        run: herdr plugin install "$PLUGIN_REPOSITORY" --ref "$PLUGIN_REF" --yes
+      - name: Verify registration and binary
+        run: |
+          python3 - <<'PY'
+          import json, os, pathlib, subprocess
+          data = json.loads(pathlib.Path(os.environ['XDG_CONFIG_HOME'], 'herdr/plugins.json').read_text())
+          plugin, = (plugin for plugin in data if plugin['plugin_id'] == 'nicococo.docket')
+          assert plugin['plugin_id'] == 'nicococo.docket' and plugin['enabled']
+          assert plugin['source']['resolved_commit'] == os.environ['PLUGIN_REF']
+          assert any(action['id'] == 'toggle' for action in plugin['actions'])
+          assert any(pane['id'] == 'dashboard' for pane in plugin['panes'])
+          binary = pathlib.Path(plugin['plugin_root'], 'target/release/docket')
+          assert binary.is_file() and os.access(binary, os.X_OK)
+          subprocess.run([str(binary), '--version'], check=True)
+          PY

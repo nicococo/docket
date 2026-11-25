@@ -1271,25 +1271,30 @@ pub async fn run(config_path_override: Option<PathBuf>) -> Result<()> {
                 apply_config_change(&mut app, &path);
             }
             Event::Tick => {
-                // While zoomed, throttle backdrop widget updates to
-                // `background_poll_ratio` cadence. The zoom target always
-                // updates at full rate so its data stays live inside the
-                // frame (Req 4).
-                app.zoom_backdrop_tick_counter = app.zoom_backdrop_tick_counter.wrapping_add(1);
-                let ratio = app.config.global.background_poll_ratio.max(1) as u64;
-                let allow_backdrop_tick = app.zoom_target.is_none()
-                    || ratio == 1
-                    || app.zoom_backdrop_tick_counter % ratio == 0;
-                let zoomed_id: Option<String> =
-                    app.zoom_target.as_ref().map(|z| z.widget_id.clone());
-                for id in app.manager.ids().to_vec() {
-                    // Skip backdrop widgets on non-quota ticks while zoomed.
-                    if !allow_backdrop_tick && zoomed_id.as_deref() != Some(id.as_str()) {
-                        continue;
-                    }
-                    if let Some(w) = app.manager.get_mut(&id) {
-                        if let Err(err) = w.update(&ctx).await {
-                            tracing::warn!(widget = %id, error = %err, "widget update failed");
+                if app.settings.is_some() {
+                    deferred_draw = true;
+                    deferred_force_full = true;
+                } else {
+                    // While zoomed, throttle backdrop widget updates to
+                    // `background_poll_ratio` cadence. The zoom target always
+                    // updates at full rate so its data stays live inside the
+                    // frame (Req 4).
+                    app.zoom_backdrop_tick_counter = app.zoom_backdrop_tick_counter.wrapping_add(1);
+                    let ratio = app.config.global.background_poll_ratio.max(1) as u64;
+                    let allow_backdrop_tick = app.zoom_target.is_none()
+                        || ratio == 1
+                        || app.zoom_backdrop_tick_counter % ratio == 0;
+                    let zoomed_id: Option<String> =
+                        app.zoom_target.as_ref().map(|z| z.widget_id.clone());
+                    for id in app.manager.ids().to_vec() {
+                        // Skip backdrop widgets on non-quota ticks while zoomed.
+                        if !allow_backdrop_tick && zoomed_id.as_deref() != Some(id.as_str()) {
+                            continue;
+                        }
+                        if let Some(w) = app.manager.get_mut(&id) {
+                            if let Err(err) = w.update(&ctx).await {
+                                tracing::warn!(widget = %id, error = %err, "widget update failed");
+                            }
                         }
                     }
                 }
