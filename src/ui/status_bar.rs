@@ -30,7 +30,11 @@ pub fn render(
     let dim = Style::default().add_modifier(Modifier::DIM);
     let sep = Span::styled("│", dim);
 
-    let mut spans: Vec<Span> = vec![Span::styled(format!(" docket v{version} "), dim)];
+    let mut spans: Vec<Span> = vec![
+        Span::styled(" Ctrl+G settings ", theme.text_selected),
+        sep.clone(),
+        Span::styled(format!(" docket v{version} "), dim),
+    ];
 
     spans.extend([
         sep.clone(),

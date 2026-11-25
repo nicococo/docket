@@ -226,7 +226,7 @@ impl App {
             theme: &self.theme,
             help_scroll: self.help_scroll,
             help_scroll_max: &self.help_scroll_max,
-            show_status_bar: self.config.global.show_status_bar,
+            show_status_bar: true,
             zoom_target: self.zoom_target.as_ref(),
             zoom_margin: self.config.global.zoom_margin,
             mouse_capture: self.mouse_capture,
@@ -510,6 +510,14 @@ impl App {
 
     // ── End zoom methods ──────────────────────────────────────────────────
 
+    fn route_help_key(&mut self, key: crossterm::event::KeyEvent) -> bool {
+        if !self.show_help {
+            return false;
+        }
+        self.handle_global_key(key);
+        true
+    }
+
     fn handle_global_key(&mut self, key: crossterm::event::KeyEvent) {
         // Help overlay swallows every key — Esc / ? / q close it; arrows / k /
         // j / PgUp / PgDn / Home / End scroll. Everything else is dropped so
@@ -731,21 +739,25 @@ impl App {
 /// state file, or the log are not config changes. Parse failures log and
 /// skip — the next save event will retry.
 fn apply_config_change(app: &mut App, path: &std::path::Path) {
-    let Ok(config_path) = config::config_path() else {
+    let Some(config_path) = app
+        .settings_path
+        .clone()
+        .or_else(|| config::config_path().ok())
+    else {
         return;
     };
     if path.file_name() != config_path.file_name() {
         return;
     }
 
-    let new_config: Config = match config::load(None) {
+    let new_config: Config = match config::load(Some(&config_path)) {
         Ok(c) => c,
         Err(err) => {
             tracing::warn!(error = %err, "config.toml parse failed, will retry on next event");
             return;
         }
     };
-    let raw_sections = config::load_raw(None).unwrap_or_else(|err| {
+    let raw_sections = config::load_raw(Some(&config_path)).unwrap_or_else(|err| {
         tracing::warn!(error = %err, "failed to re-parse config.toml for widget sections");
         toml::Value::Table(Default::default())
     });
@@ -967,6 +979,9 @@ pub async fn run(config_path_override: Option<PathBuf>) -> Result<()> {
 
     let mut app = App::new(config);
     app.settings_path = config_path_override;
+    if let Some(path) = app.settings_path.clone() {
+        apply_config_change(&mut app, &path);
+    }
 
     // Live-reload via the `notify` crate. Failure is non-fatal — we just
     // run without hot-reload.
@@ -1010,7 +1025,26 @@ pub async fn run(config_path_override: Option<PathBuf>) -> Result<()> {
                 }
                 if let Some(settings) = app.settings.as_mut() {
                     if settings.handle_key(key) {
+                        let saved = settings.saved();
                         app.settings = None;
+                        if saved {
+                            let path = app
+                                .settings_path
+                                .clone()
+                                .or_else(|| config::config_path().ok());
+                            if let Some(path) = path {
+                                apply_config_change(&mut app, &path);
+                            }
+                            for kind in ["email", "calendar"] {
+                                let section =
+                                    config::widget_section_json(&app.last_raw_sections, kind);
+                                if let Some(widget) = app.manager.get_mut(kind) {
+                                    if let Err(error) = widget.apply_config(section) {
+                                        tracing::warn!(%error, %kind, "failed to reload settings");
+                                    }
+                                }
+                            }
+                        }
                     }
                     deferred_draw = true;
                     deferred_force_full = true;
@@ -1018,7 +1052,14 @@ pub async fn run(config_path_override: Option<PathBuf>) -> Result<()> {
                 }
                 // Command bar takes precedence over both widgets and globals
                 // — typing into it routes nowhere else.
-                if app.command_buffer.is_some() {
+                if app.route_help_key(key) {
+                    // The help overlay owns input until it closes.
+                } else if key.modifiers == KeyModifiers::CONTROL
+                    && key.code == KeyCode::Char('g')
+                    && app.command_buffer.is_none()
+                {
+                    app.execute_command("settings");
+                } else if app.command_buffer.is_some() {
                     app.handle_command_bar_key(key);
                     if app.should_quit {
                         break;
@@ -1101,9 +1142,7 @@ pub async fn run(config_path_override: Option<PathBuf>) -> Result<()> {
                     let target = widget_at(&app, full, mouse.column, mouse.row);
                     if app.zoom_target.is_some() {
                         // Three-zone mouse dispatch while zoom is active.
-                        let chrome_visible = app.command_buffer.is_some()
-                            || app.command_feedback.is_some()
-                            || app.config.global.show_status_bar;
+                        let chrome_visible = true;
                         let chrome_h: u16 = if chrome_visible { 1 } else { 0 };
                         let main_area = Rect::new(
                             full.x,
@@ -1371,6 +1410,27 @@ impl Drop for TerminalGuard {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn help_intercepts_scroll_keys_before_the_focused_widget() {
+        let mut app = App::new(Config::default());
+        app.show_help = true;
+        app.help_scroll_max.set(10);
+        assert!(app.route_help_key(crossterm::event::KeyEvent::new(
+            KeyCode::Down,
+            KeyModifiers::NONE
+        )));
+        assert_eq!(app.help_scroll, 1);
+        assert!(app.route_help_key(crossterm::event::KeyEvent::new(
+            KeyCode::Esc,
+            KeyModifiers::NONE
+        )));
+        assert!(!app.show_help);
+        assert!(!app.route_help_key(crossterm::event::KeyEvent::new(
+            KeyCode::Down,
+            KeyModifiers::NONE
+        )));
+    }
 
     #[test]
     fn widget_at_maps_clicks_to_cells() {

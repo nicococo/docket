@@ -1347,7 +1347,7 @@ impl Widget for EmailWidget {
             }
             lines.push(Line::from(""));
             lines.push(Line::from(Span::styled(
-                "Run `docket --setup` to configure email.",
+                "Press Ctrl+G for settings to configure email.",
                 self.theme.text_dim,
             )));
             let body = Paragraph::new(lines).alignment(Alignment::Center);

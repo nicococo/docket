@@ -1624,7 +1624,7 @@ fn build_help_sections(manager: &WidgetManager) -> Vec<help::Section> {
             ("z / Z".into(), "zoom focused widget".into()),
             ("z / Z (while zoomed)".into(), "exit zoom".into()),
             (":".into(), "open command bar".into()),
-            (":settings".into(), "edit settings".into()),
+            ("Ctrl+G / :settings".into(), "open settings".into()),
             (
                 "Ctrl+U (in :)".into(),
                 "clear the command bar (keeps the `:` prompt)".into(),

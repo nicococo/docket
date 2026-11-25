@@ -1,6 +1,6 @@
 # Connect your sources
 
-Start docket once to create `~/.config/docket/`. Edit `config.toml` with `:settings` inside docket (`Ctrl+S` saves), or use your text editor. Credentials live in `~/.config/docket/credentials/`; keep them private and use app passwords where available.
+Start docket once to create `~/.config/docket/`. Open settings with `Ctrl+G` (`Tab` switches tabs, `Enter` edits, `Ctrl+U` clears a field, `Ctrl+S` saves). Add feeds or calendar sources with `n`. You can also edit `config.toml` with your text editor. Existing IMAP and CalDAV credentials can be edited in settings; additional IMAP accounts and ICS feeds still require the files below. Credentials live in `~/.config/docket/credentials/`; keep them private and use app passwords where available.
 
 ## Calendar
 

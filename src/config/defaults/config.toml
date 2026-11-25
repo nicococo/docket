@@ -19,11 +19,6 @@ mouse_scroll = "natural"
 # `:mouse [on|off]`.
 mouse_capture = true
 
-# Bottom-of-screen status bar (docket version, ticking clock, focus,
-# quick hints). Set false to reclaim that row for the widget grid; `?`
-# still surfaces the full help overlay either way.
-show_status_bar = true
-
 # Zoom-overlay margin — percent of screen carved off each side when a widget
 # is zoomed. Follows CSS shorthand: a single number sets all four sides; a
 # 2-value list sets [top+bottom, left+right]; 3 values set [top, left+right,
