@@ -44,16 +44,8 @@ first_day_of_week = "sunday"
 # Calendar sources. Each [[calendar.providers]] entry pulls events from one
 # backend; add multiple entries to merge timelines (e.g. work Google +
 # personal Outlook). The default config is "local" — events listed below —
-# which works offline. Comment in any of these and `docket --auth <name>`
-# to connect a real backend.
-#
-# [[calendar.providers]]
-# kind = "google"            # run `docket --auth google` first
-# calendar_ids = ["primary"] # or e.g. ["team@group.calendar.google.com"]
-#
-# [[calendar.providers]]
-# kind = "outlook"           # run `docket --auth microsoft` first
-# calendar_ids = []          # empty = the account's default calendar
+# which works offline. Configure a CalDAV or ICS source to connect a
+# remote calendar.
 #
 # [[calendar.providers]]
 # kind = "caldav"            # fill in credentials/caldav.toml
@@ -75,7 +67,7 @@ first_day_of_week = "sunday"
 # synced/reachable folder, subscribable from) Google Calendar or any other
 # app. `~` expands to $HOME. Empty/unset defaults to
 # <config dir>/calendar.ics, which `docket --init` seeds with a few example
-# events. The Email widget's "extract dates" popup action also writes here.
+# events.
 # local_ics_path = "~/calendar.ics"
 
 [feeds]

@@ -1,204 +1,58 @@
-# Docket setup instructions
+# Connect your sources
 
-Docket has no interactive setup wizard, and no OAuth — `docket --init`
-seeds default config files directly to disk, and you configure
-everything by hand-editing TOML and filling in app passwords / API
-keys. This file walks through the one-time provider setup (CalDAV,
-ICS, IMAP) and the moving parts a config file alone can't walk you
-through (where to generate an app-specific password, third-party
-portals).
+Start docket once to create `~/.config/docket/`. Edit `config.toml` with `:settings` inside docket (`Ctrl+S` saves), or use your text editor. Credentials live in `~/.config/docket/credentials/`; keep them private and use app passwords where available.
 
-If you're stuck, see [Troubleshooting](#troubleshooting) at the bottom or open an issue at https://github.com/nicococo/docket/issues.
+## Calendar
 
----
-
-## CalDAV (iCloud / Fastmail / Nextcloud)
-
-CalDAV is the open standard for calendar sync, authenticated with an
-app-specific password. Docket already ships the credentials template —
-you just fill it in.
-
-### Apple iCloud
-
-1. Go to https://appleid.apple.com and sign in.
-2. *Sign-In and Security* → *App-Specific Passwords* → *+ Generate*.
-3. Name it `docket` and copy the generated 4-block password (looks like `abcd-efgh-ijkl-mnop`).
-4. Edit `~/.config/docket/credentials/caldav.toml`:
-
-   ```toml
-   server = "https://caldav.icloud.com"
-   username = "your.apple.id@icloud.com"
-   app_password = "abcd-efgh-ijkl-mnop"
-   ```
-5. Add a `[[calendar.providers]]` block with `kind = "caldav"` to
-   `~/.config/docket/config.toml`:
-
-   ```toml
-   [[calendar.providers]]
-   kind = "caldav"
-   ```
-
-   `credentials/caldav.toml` currently holds one server/username/password —
-   CalDAV is single-account. For multiple calendar accounts, use ICS
-   (below), which supports any number of labeled feeds.
-
-### Fastmail
-
-1. https://www.fastmail.com/settings/security/devicekeys → *New app password* → scope: *CalDAV*.
-2. Same `caldav.toml` layout, with `server = "https://caldav.fastmail.com"`.
-
-### Nextcloud, Synology, generic CalDAV
-
-Use your normal username + an app-specific password from the server's UI. Server URL is whatever the server exposes (e.g. `https://nextcloud.example.com/remote.php/dav`).
-
----
-
-## ICS / webcal feeds (multiple calendars, incl. Google Calendar)
-
-A plain ICS feed is a single HTTP GET against a static `.ics` URL — no
-CalDAV discovery, no OAuth, no per-app registration. It's read-only and
-typically only refreshes every few hours server-side, so it's not
-real-time, but it's the simplest way to pull in a calendar — including
-**Google Calendar**, via its "secret address in iCal format".
-
-Unlike CalDAV, ICS supports any number of **labeled feeds** in one
-credentials file, so it's the way to add multiple calendar accounts.
-
-### Get a feed URL
-
-- **Google Calendar**: Settings → pick a calendar under "Settings for
-  my calendars" → *Integrate calendar* → copy "Secret address in iCal
-  format".
-- Any other calendar app that publishes a public or secret iCalendar
-  export works the same way.
-
-### Setup
-
-Edit `~/.config/docket/credentials/ics.toml`, adding one `[[feeds]]`
-block per calendar:
+The default calendar is local (`calendar.ics`). For CalDAV, edit `credentials/caldav.toml`:
 
 ```toml
-[[feeds]]
-label = "work"
-url = "https://calendar.google.com/calendar/ical/x/basic.ics"
-
-[[feeds]]
-label = "family"
-url = "https://calendar.google.com/calendar/ical/y/basic.ics"
+server = "https://caldav.icloud.com"
+username = "you@example.com"
+app_password = "your-app-password"
 ```
 
-Then add one `[[calendar.providers]]` block per feed in
-`~/.config/docket/config.toml`, matching `account` to the feed's `label`:
+Add to `config.toml`:
 
 ```toml
+[[calendar.providers]]
+kind = "caldav"
+```
+
+For an ICS feed, add it to `credentials/ics.toml` and reference its label:
+
+```toml
+# credentials/ics.toml
+[[feeds]]
+label = "work"
+url = "https://example.com/calendar.ics"
+```
+
+```toml
+# config.toml
 [[calendar.providers]]
 kind = "ics"
 account = "work"
-
-[[calendar.providers]]
-kind = "ics"
-account = "family"
 ```
 
-Each account's `calendar_colors` key follows `kind/label` for a named
-account (`"ics/work:primary"`), or just `kind` for the account labeled
-`"default"` (`"ics:primary"`) — so different feeds never share a color.
+Repeat both blocks for additional ICS calendars. Treat private feed URLs as secrets.
 
----
+## Email
 
-## IMAP (Gmail / iCloud / Fastmail / self-hosted)
-
-docket's only email backend. You provide host, port, username, and an app-specific password and docket connects directly. Works against any IMAP4rev1 server.
-
-### Per-provider hosts + app-password recipes
-
-| Provider | Host | Port | App-password URL |
-|---|---|---|---|
-| Gmail | `imap.gmail.com` | 993 | https://myaccount.google.com/ → Security → 2-Step Verification → App passwords |
-| iCloud | `imap.mail.me.com` | 993 | https://appleid.apple.com → Sign-In and Security → App-Specific Passwords |
-| Fastmail | `imap.fastmail.com` | 993 | https://www.fastmail.com/settings/security/devicekeys → *New app password* → scope *IMAP* |
-| Yahoo | `imap.mail.yahoo.com` | 993 | https://login.yahoo.com/account/security → Generate app password |
-| Outlook / O365 | `outlook.office365.com` | 993 | ⚠️ Microsoft has been phasing out IMAP basic auth for these accounts — may not work; no OAuth alternative in docket |
-| Self-hosted | whatever your server exposes | usually 993 | depends on the server (Mailcow / Dovecot / etc.) |
-
-(Gmail requires 2-Step Verification to be enabled before you can generate app passwords. iCloud and Fastmail also force app passwords for third-party clients — your account password won't work.)
-
-### Setup
-
-Drop a file at `~/.config/docket/credentials/imap.toml`:
+Create `credentials/imap.toml`:
 
 ```toml
 host = "imap.gmail.com"
 port = 993
 use_tls = true
-username = "alice@gmail.com"
-app_password = "abcd-efgh-ijkl-mnop"
+username = "you@example.com"
+app_password = "your-app-password"
 ```
 
-Then in `config.toml`'s `[email]` table:
+Set `provider = "imap"` under `[email]` in `config.toml`. For multiple accounts, use `[[email.accounts]]` entries with `label` and `folders`, and name the matching credential files `imap_<label>.toml`. App-password setup varies by provider; some services do not support IMAP password authentication.
 
-```toml
-[email]
-provider = "imap"
-folders = ["INBOX"]
-```
+## Feeds and notes
 
-Docket will connect lazily on the first fetch.
+Each `[[feeds.feeds]]` entry in `config.toml` has a `topic` and `url`. Notes are Markdown; set `[notes] notes_dir` to use a different folder.
 
----
-
-## Troubleshooting
-
-### "Fill in the template at … then retry" but I edited the file and it still complains
-
-The credentials check re-reads the file on every connection attempt.
-Double-check:
-
-- File path is exactly `~/.config/docket/credentials/<name>.toml`
-  (`caldav.toml`, `ics.toml`, `imap.toml`).
-- Values are quoted TOML strings: `username = "alice@example.com"`.
-- Neither value still starts with `REPLACE_WITH_…`.
-
-### Calendar / email shows "Last fetch failed: …"
-
-Read the message — it carries the provider's error verbatim. Common causes:
-
-- **Wrong password**: most providers require an app-specific password,
-  not your account password — see the per-provider sections above.
-- **Network**: corporate proxies sometimes interact badly with
-  CalDAV/IMAP. Try from a non-corporate network or set `HTTPS_PROXY`
-  if needed.
-
-### I want to start completely fresh
-
-```bash
-rm -rf ~/.config/docket
-docket --init
-```
-
-This wipes everything — config, tokens, cache. `docket --init` seeds fresh defaults from docket's built-in templates.
-
----
-
-## What lives where on disk
-
-```
-~/.config/docket/
-├── config.toml                # [global] + [calendar] + [feeds] + [notes] + [email]
-├── calendar.ics                # local calendar events, real iCalendar — see `local_ics_path`
-├── credentials/                # account secrets (0700)
-│   ├── caldav.toml  ics.toml  imap.toml
-├── notes/<instance>/<id>.md    # each note as a plain markdown file
-└── .runtime_state.toml  docket.log
-```
-
-`config.toml` is plain text — edit in your favourite editor; the
-config watcher picks up changes live, no restart or `:reload` needed.
-
----
-
-## Further reading
-
-- `README.md` — install, keybindings, configuration.
-- `AGENTS.md` — architecture overview for contributors and AI assistants.
-- https://github.com/nicococo/docket — source, issues, releases.
+Docket reloads configuration changes automatically. If a connection fails, check the error in the pane, the credentials and `~/.config/docket/docket.log`.

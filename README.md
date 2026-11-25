@@ -1,217 +1,59 @@
 # docket
 
-A keyboard-driven terminal dashboard for calendar, feeds, notes, and email.
-Written in Rust with [ratatui](https://ratatui.rs).
+Calendar, feeds, notes and email in one keyboard-driven terminal dashboard.
 
-![docket dashboard: calendar, a news feed, a kanban notes board, and an email inbox](assets/screenshot.png)
+![Illustrated mockup of the docket dashboard](assets/docket-mockup.png)
 
-No accounts, no telemetry, no OAuth. Everything lives in one plain
-TOML file, `~/.config/docket/config.toml` — hand-edit it, back it up,
-sync it with dotfiles, whatever you'd do with any other config.
+*Illustrated mockup; content and colors depend on your terminal and data.*
 
-```sh
-git clone https://github.com/nicococo/docket.git && cd docket
-make install PREFIX=~/.local   # or: sudo make install
-docket                          # first run seeds a working default layout
-```
+## Install in Herdr
 
----
-
-## Highlights
-
-- **Email and feeds** — browse recent messages and articles, then open the originals when needed.
-- **Notes with a kanban board** — the natural landing spot for those
-  notes. Any note toggles (`t`) between plain markdown and a
-  colourful board view, columns from `## Heading` lines, cards from
-  `- [ ]` items — still just a `.md` file underneath. Titles like
-  `Work>TODOs` group notes into a collapsible tree in the list.
-- **Calendar** — day/week/month agenda over CalDAV, ICS, or local
-  events.
-- **No wizard, no cloud** — `docket --init` seeds default TOML
-  directly; hand-edit credentials under `credentials/` (0600 perms).
-  No accounts, no telemetry, no OAuth, nothing phones home beyond the
-  provider you point a widget at yourself.
-- **One layout, on purpose** — calendar, feeds, notes, and email in a
-  fixed 4-pane arrangement. No grid to assemble, no widget catalogue
-  to pick from; docket already decided the shape so you don't have
-  to. Live TOML reload and Focus Zoom (`z`) are
-  still there — just not the point.
-
----
-
-## Install
-
-Requires Rust 1.81+ via [`rustup`](https://rustup.rs/).
+Requires Herdr 0.9+, Rust, Cargo and Python 3 on Linux or macOS:
 
 ```sh
-git clone https://github.com/nicococo/docket.git docket && cd docket
-make install PREFIX=~/.local    # per-user, no sudo
-# or: sudo make install         # system-wide
-export PATH="$HOME/.local/bin:$PATH"   # if not already on $PATH
-docket --version
+herdr plugin install nicococo/docket
 ```
 
-| target | what it does |
-|---|---|
-| `make` / `make release` | release build at `target/release/docket` |
-| `make install` | release build + copy to `$(PREFIX)/bin/docket` |
-| `make test` | run the test suite |
-| `make uninstall` / `make clean` | remove the binary / `cargo clean` |
-
-**Slim builds** — each of the 4 panes is its own Cargo feature; the
-default `widgets-all` turns them all on:
+Herdr builds docket on installation. To open it, run:
 
 ```sh
-cargo install --path . --no-default-features --features widget-calendar,widget-feeds
+herdr plugin action invoke nicococo.docket.toggle
 ```
 
-Available: `widget-calendar`, `widget-feeds`, `widget-email`,
-`widget-notes`. A pane whose feature isn't compiled in just renders
-empty.
+For a shortcut, add this to `~/.config/herdr/config.toml`, choosing an unused key:
 
-**Updating**: `git pull && make install PREFIX=~/.local`.
+```toml
+[[keys.command]]
+key = "prefix+d"
+type = "plugin_action"
+command = "nicococo.docket.toggle"
+description = "Toggle docket"
+```
 
-**macOS**: `./assets/icon/install-macos-app.sh` wraps docket in a
-double-clickable `~/Applications/Docket.app` (auto-detects your
-terminal; force one with `TERMINAL=alacritty …`).
+Reload with `herdr server reload-config`. The shortcut opens the dashboard, focuses it if already open, and closes it when focused. Each workspace has its own overlay. Update with `herdr plugin update nicococo.docket`.
 
----
+For a local checkout, run `cargo build --release --locked` and `herdr plugin link /path/to/docket`. Linking does not build the binary.
 
-## Quickstart
-
-First launch writes one `~/.config/docket/config.toml` with working
-example content already filled in under `[calendar]`, `[feeds]`,
-`[notes]`, and `[email]`. From there:
-
-1. Hand-edit each table for your own feeds, providers, and folders.
-2. Fill in credentials where needed — templates are seeded under
-   `credentials/`; no OAuth, just TOML. See
-   [INSTRUCTIONS.md](INSTRUCTIONS.md) for the walkthrough per provider.
-
-`docket --init` re-runs the seeding step any time (idempotent — only
-fills in what's missing). Press `?` while running for the full
-keybinding overlay.
-
----
-
-## Configuration
-
-Everything lives under `~/.config/docket/`:
-
-| path | what it controls |
-|---|---|
-| `config.toml` | one file: `[global]` (mouse-scroll, …) plus a `[calendar]` / `[feeds]` / `[notes]` / `[email]` table per pane |
-| `credentials/` | API keys + app passwords, 0600 perms |
-| `notes/<instance>/` | one `.md` file per note |
-
-Open `:settings` to edit `config.toml` inside docket. Use the arrow keys to
-navigate, `Ctrl+S` to validate and save, and `Esc` to cancel. Changes reload
-live. Account credentials remain in the separate `credentials/` files.
-
----
-
-## Keybindings
-
-| key | action |
-|---|---|
-| `Tab` / `Shift+Tab` | cycle focused widget |
-| `Shift+<letter>` | jump to a widget by its shortcut letter |
-| `z` / `Esc` | zoom the focused widget in / out |
-| `:` | command bar (`:settings`, `:reload`, `:ai <terms>`) |
-| `Ctrl+T` | release / re-grab the mouse (drag-to-select in tmux, herdr, …) |
-| `?` | full keybinding overlay (per-widget keys included) |
-| `q` / `Ctrl+C` | quit |
-
-Every widget has its own keys on top of these — press `?` any time to
-see them for whatever's focused.
-
----
-
-## CLI reference
+## Standalone
 
 ```sh
-docket                     # launch (seeds defaults on first run)
-docket --init               # create/refresh ~/.config/docket/
-docket --clear-cache [TARGET]   # wipe ~/.cache/docket/, or scope to a widget/instance
-docket --config <FILE>      # override the default config location
-docket --version
+cargo install --path . --locked
+docket
 ```
 
----
+Docket creates its default configuration on first run. Press `?` for keys, `Tab` to switch panes, `z` to zoom, and `:settings` to edit configuration. Save settings with `Ctrl+S` or cancel with `Esc`.
 
-## Data & privacy
+## Data and setup
 
-| where | what |
-|---|---|
-| `~/.config/docket/config.toml` | your config |
-| `~/.config/docket/credentials/` (0600) | API keys, app passwords |
-| `~/.config/docket/notes/` | notes as plain `.md` |
-| `~/.cache/docket/` | regenerable caches; swept after 30 days |
-| `~/.config/docket/docket.log` | runtime log |
+Settings live in `~/.config/docket/config.toml`; notes are Markdown files under `~/.config/docket/notes/` by default. Calendar, feed and email connections are optional. Credentials are stored separately in `~/.config/docket/credentials/`. See [setup instructions](INSTRUCTIONS.md).
 
-docket never sends data anywhere except the provider you point a
-widget at yourself (a CalDAV server or an IMAP host) — no
-telemetry, no OAuth, no docket-owned backend. See
-[INSTRUCTIONS.md](INSTRUCTIONS.md) for exactly what each provider
-needs.
+There is no telemetry or docket-hosted service. Docket contacts the feeds, calendars and mail servers you configure.
 
-Credentials are plain TOML, 0600, atomic writes — same convention as
-`aws`/`gcloud`/`gh`/`ssh`. That protects against other local users and
-offline disk theft, not against anything running as *your* user or a
-backup tool sweeping `~/.config/`. Exclude `credentials/` from backups
-if that matters to you, and prefer app passwords over master passwords.
+## Development
 
----
+```sh
+cargo test --features widgets-all
+python3 -m unittest discover -s tests -p 'test_herdr_toggle.py'
+```
 
-## Troubleshooting
-
-- **`docket` not found** — make sure `$(PREFIX)/bin` is on `$PATH`.
-- **A pane is empty / logs "unknown widget kind"** — that pane's
-  widget isn't compiled in (slim build).
-- **Logs**: `tail -f ~/.config/docket/docket.log`.
-- **Reset**: move aside `~/.config/docket/` and re-run `docket --init`.
-
----
-
-## Contributing
-
-`make test` should pass clean on `main`. Adding a widget is purely
-additive — implement `Widget` under `src/widgets/<name>/`, declare a
-`widget-<name>` feature, register it in `src/widgets/registry.rs`. See
-[CONTRIBUTING.md](CONTRIBUTING.md) and [AGENTS.md](AGENTS.md) for the
-full picture. Issues and PRs welcome.
-
----
-
-## Origins
-
-docket is a hard fork of [**glint**](https://github.com/ntrospect0/glint),
-a fast, keyboard-driven terminal dashboard written by
-[**ntrospect0**](https://github.com/ntrospect0). Every widget engine,
-the rendering pipeline, the config/cache architecture — the whole
-foundation this project stands on — is ntrospect0's design and work.
-glint's own goal is to be a general-purpose, highly adaptable
-dashboard: whatever mix of stocks, weather, calendar, news, and more
-you want, composed your way. That idea, and the care put into making
-it genuinely pleasant to use in a terminal, is what made this fork
-worth doing in the first place — thank you, ntrospect0.
-
-docket exists because I wanted something narrower and more
-opinionated: not a general-purpose canvas of widgets you configure,
-but a dashboard purpose-built around pulling my own information
-sources together, distilling them, and moving what matters between
-them with as little friction as possible. That's a different design
-goal than glint's, not a better one, so rather than pile my opinions
-onto glint as options and flags, I forked it and started shaping it
-toward that one purpose. This is a standalone project going forward —
-it doesn't track glint's upstream changes, and its own direction will
-keep diverging further this way over time. If you want the
-general-purpose dashboard, go use glint; it's great, and this project
-wouldn't exist without it.
-
-## License
-
-GNU GPL v3 or later — see [LICENSE](LICENSE). You're free to use,
-modify, and redistribute docket; any modified version you distribute
-must stay GPL-licensed with copyright notices intact. See
-[CONTRIBUTING.md](CONTRIBUTING.md) for the contributor sign-off.
+Docket is GPL-3.0-or-later and is a fork of [glint](https://github.com/ntrospect0/glint) by ntrospect0. See [LICENSE](LICENSE) and [CONTRIBUTING.md](CONTRIBUTING.md).
