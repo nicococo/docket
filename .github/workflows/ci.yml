@@ -45,13 +45,14 @@ jobs:
     name: Herdr plugin install
     runs-on: ubuntu-latest
     env:
-      XDG_CONFIG_HOME: ${{ runner.temp }}/docket-ci-config
       PLUGIN_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
       PLUGIN_REF: ${{ github.event.pull_request.head.sha || github.sha }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+      - name: Isolate Herdr config
+        run: echo "XDG_CONFIG_HOME=$RUNNER_TEMP/docket-ci-config" >> "$GITHUB_ENV"
       - name: Install Herdr
         run: |
           curl --fail --location --retry 3 --output "$RUNNER_TEMP/herdr" \
