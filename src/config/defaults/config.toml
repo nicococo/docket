@@ -1,11 +1,6 @@
 version = 1
 
 [global]
-# Active color scheme — one of the built-in palettes compiled into
-# docket: "default", "chalktone", "gruvbox", "tokyonight", "rosepine",
-# "nord", "bluloco", "onedark", "miasma". An unrecognized name falls
-# back to docket's built-in palette.
-theme = "default"
 command_key = ":"
 refresh_all_on_focus = true
 log_level = "info"
@@ -24,7 +19,7 @@ mouse_scroll = "natural"
 # `:mouse [on|off]`.
 mouse_capture = true
 
-# Bottom-of-screen status bar (docket version, ticking clock, scheme name,
+# Bottom-of-screen status bar (docket version, ticking clock, focus,
 # quick hints). Set false to reclaim that row for the widget grid; `?`
 # still surfaces the full help overlay either way.
 show_status_bar = true
@@ -88,13 +83,12 @@ first_day_of_week = "sunday"
 # below. `docket --init` seeds this alongside the fixed feeds pane
 # so there's real content on first launch.
 poll_interval_secs = 900
-default_summary_length = "medium"
 
 # Preferred Shift+<letter> shortcut keys. First-fit: the app claims
 # the first letter not already taken by another widget.
 shortcuts = ["A", "I"]
 
-# Command aliases — :ai <terms>, :ai-summary, :ai-refresh on top of
+# Command aliases — :ai <terms>, :ai-refresh on top of
 # the always-available kind-level :feeds* commands.
 commands = ["ai"]
 
@@ -140,38 +134,3 @@ url = "https://towardsdatascience.com/feed"
 [[feeds.feeds]]
 topic = "arXiv"
 url = "https://export.arxiv.org/api/query?search_query=cat:cs.AI&sortBy=submittedDate&sortOrder=descending&max_results=16"
-
-# ── LLM ──────────────────────────────────────────────────────────────────────
-# Master switch. If false, every LLM-backed feature falls back to its
-# structured-only counterpart (keyword filtering, raw RSS summaries, …).
-[llm]
-enabled = true
-
-# docket can use one LLM provider at a time. Switch by changing `name`
-# (and the matching credentials file — see `model` notes below).
-#
-#   name = "anthropic"
-#     model     — e.g. "claude-sonnet-4-6", "claude-haiku-4-5"
-#     api_base  — https://api.anthropic.com
-#     key file  — credentials/anthropic_key.toml
-#
-#   name = "openai"
-#     model     — e.g. "gpt-5-mini", "gpt-4o-mini", "gpt-4o"
-#     api_base  — https://api.openai.com
-#     key file  — credentials/openai_key.toml
-#
-# `model` is free-form — any model name the provider's API accepts works,
-# so you can track new releases without waiting for a docket update.
-[llm.provider]
-name = "anthropic"
-model = "claude-sonnet-4-6"
-api_base = "https://api.anthropic.com"
-max_tokens = 512
-
-# Cached entries also expire 7 days after insertion regardless of capacity.
-[llm.limits]
-max_requests_per_minute = 20
-cache_capacity = 128
-
-# Per-widget LLM toggles live in each widget's own table — e.g. email has
-# `summarize_with_llm = true`. Nothing widget-specific belongs in [llm].

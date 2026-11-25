@@ -120,8 +120,7 @@ pub fn render(s: &str) -> Vec<String> {
 /// `Normal` mode paints `█` with `style` directly so the terminal bg shows
 /// through. Pass the scheme role you want the digits to follow
 /// (`text.focused` for the clock, `text.selected` for the calendar today
-/// numeral, etc.) and the digits will restyle when the user runs
-/// `:scheme`.
+/// numeral, etc.).
 ///
 /// Gradient modes use `style.fg` as the seed for a scheme-derived palette:
 /// the variant picks the *shape* of the ramp and the seed color picks the

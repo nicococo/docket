@@ -37,7 +37,6 @@ pub struct FeedArticle {
     /// First media URL found in `<media:content>` / `<media:thumbnail>`,
     /// if any. Empty for feeds that omit media (rare for the major
     /// Dow Jones sources).
-    pub hero_image_url: Option<String>,
     pub authors: Vec<String>,
 }
 
@@ -181,11 +180,6 @@ fn entry_to_article(
         .map(|s| s.content)
         .filter(|s| !s.trim().is_empty())
         .map(|s| sanitize_summary(&s));
-    let hero_image_url = entry
-        .media
-        .iter()
-        .flat_map(|m| m.content.iter())
-        .find_map(|c| c.url.as_ref().map(|u| u.to_string()));
     let authors = entry
         .authors
         .into_iter()
@@ -205,7 +199,6 @@ fn entry_to_article(
         source: source.to_string(),
         published,
         summary,
-        hero_image_url,
         authors,
     })
 }
@@ -254,7 +247,6 @@ mod tests {
                 source: "WSJ".into(),
                 published: Utc::now(),
                 summary: None,
-                hero_image_url: None,
                 authors: vec![],
             },
             FeedArticle {
@@ -264,7 +256,6 @@ mod tests {
                 source: "WSJ".into(),
                 published: Utc::now(),
                 summary: None,
-                hero_image_url: None,
                 authors: vec![],
             },
         ];
@@ -287,7 +278,6 @@ mod tests {
                 source: "WSJ World".into(),
                 published: Utc::now(),
                 summary: None,
-                hero_image_url: None,
                 authors: vec![],
             },
             FeedArticle {
@@ -297,7 +287,6 @@ mod tests {
                 source: "WSJ Tech".into(),
                 published: Utc::now(),
                 summary: None,
-                hero_image_url: None,
                 authors: vec![],
             },
         ];

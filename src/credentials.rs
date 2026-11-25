@@ -3,7 +3,7 @@
 // Copyright (C) 2026 nicococo
 
 //! On-disk credentials store — one home for "load a TOML file holding a
-//! secret" across every widget backend (IMAP, CalDAV, ICS, LLM API keys).
+//! secret" across every widget backend (IMAP, CalDAV, ICS).
 //!
 //! All files live under `~/.config/docket/credentials/`, created with mode
 //! `0700` on first use. Every credential file here is hand-edited by the
@@ -20,7 +20,7 @@ use anyhow::{Context, Result};
 use serde::de::DeserializeOwned;
 
 /// The credentials dir — `<config_dir>/credentials/`, created mode `0700`
-/// on first use. Holds account-level secrets (CalDAV, IMAP, LLM keys).
+/// on first use. Holds account-level secrets (CalDAV and IMAP).
 /// Idempotent.
 pub fn dir() -> Result<PathBuf> {
     ensure_0700(crate::config::config_dir()?.join("credentials"))

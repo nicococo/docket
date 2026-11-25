@@ -1,14 +1,9 @@
 # docket
 
-A fast, keyboard-driven terminal dashboard that pulls your
-information sources into one place, distills them with AI, and moves
-what matters between them — an email's action items become a Notes
-board card or a Calendar event with one keystroke, not a copy-paste
-detour. Calendar, email, and notes today; Slack, research/paper
-feeds, and deeper project-management integration are next. Written
-in Rust with [ratatui](https://ratatui.rs).
+A keyboard-driven terminal dashboard for calendar, feeds, notes, and email.
+Written in Rust with [ratatui](https://ratatui.rs).
 
-![docket dashboard: calendar, an AI news feed, a kanban notes board, and an email inbox](assets/screenshot.png)
+![docket dashboard: calendar, a news feed, a kanban notes board, and an email inbox](assets/screenshot.png)
 
 No accounts, no telemetry, no OAuth. Everything lives in one plain
 TOML file, `~/.config/docket/config.toml` — hand-edit it, back it up,
@@ -24,18 +19,14 @@ docket                          # first run seeds a working default layout
 
 ## Highlights
 
-- **Distill, then move it where it's useful** — `Enter` on an email
-  pops the full message with one-key AI summarize / explain /
-  extract. Extracted todos and dates are selectable — `space` adds
-  them straight to Notes or Calendar. No copy-paste detour.
+- **Email and feeds** — browse recent messages and articles, then open the originals when needed.
 - **Notes with a kanban board** — the natural landing spot for those
-  todos. Any note toggles (`t`) between plain markdown and a
+  notes. Any note toggles (`t`) between plain markdown and a
   colourful board view, columns from `## Heading` lines, cards from
   `- [ ]` items — still just a `.md` file underneath. Titles like
   `Work>TODOs` group notes into a collapsible tree in the list.
 - **Calendar** — day/week/month agenda over CalDAV, ICS, or local
-  events, so the dates you pull out of an email land somewhere
-  you'll actually see them again.
+  events.
 - **No wizard, no cloud** — `docket --init` seeds default TOML
   directly; hand-edit credentials under `credentials/` (0600 perms).
   No accounts, no telemetry, no OAuth, nothing phones home beyond the
@@ -43,7 +34,7 @@ docket                          # first run seeds a working default layout
 - **One layout, on purpose** — calendar, feeds, notes, and email in a
   fixed 4-pane arrangement. No grid to assemble, no widget catalogue
   to pick from; docket already decided the shape so you don't have
-  to. Live TOML reload, nine colour schemes, and Focus Zoom (`z`) are
+  to. Live TOML reload and Focus Zoom (`z`) are
   still there — just not the point.
 
 ---
@@ -90,7 +81,7 @@ terminal; force one with `TERMINAL=alacritty …`).
 
 First launch writes one `~/.config/docket/config.toml` with working
 example content already filled in under `[calendar]`, `[feeds]`,
-`[notes]`, `[email]`, and `[llm]`. From there:
+`[notes]`, and `[email]`. From there:
 
 1. Hand-edit each table for your own feeds, providers, and folders.
 2. Fill in credentials where needed — templates are seeded under
@@ -109,23 +100,13 @@ Everything lives under `~/.config/docket/`:
 
 | path | what it controls |
 |---|---|
-| `config.toml` | one file: `[global]` (theme, mouse-scroll, …) plus a `[calendar]` / `[feeds]` / `[notes]` / `[email]` / `[llm]` table per pane |
+| `config.toml` | one file: `[global]` (mouse-scroll, …) plus a `[calendar]` / `[feeds]` / `[notes]` / `[email]` table per pane |
 | `credentials/` | API keys + app passwords, 0600 perms |
 | `notes/<instance>/` | one `.md` file per note |
 
-Colour palettes (`default`, `gruvbox`, `nord`, `tokyonight`, …) are
-built into the binary — switch with `:scheme <name>`, no file to edit.
-
-Hand-edit `config.toml` — the config watcher picks up changes live,
-no `:reload` needed. Any pane's table can also carry a `[colors]`
-block to override the active theme just for that pane:
-
-```toml
-[calendar.colors]
-border.focused = { fg = "#e07b00", modifiers = ["bold"] }
-```
-
-> ⚠️ Dotted keys must be **unquoted** — `border.focused`, not `"border.focused"`.
+Open `:settings` to edit `config.toml` inside docket. Use the arrow keys to
+navigate, `Ctrl+S` to validate and save, and `Esc` to cancel. Changes reload
+live. Account credentials remain in the separate `credentials/` files.
 
 ---
 
@@ -136,7 +117,7 @@ border.focused = { fg = "#e07b00", modifiers = ["bold"] }
 | `Tab` / `Shift+Tab` | cycle focused widget |
 | `Shift+<letter>` | jump to a widget by its shortcut letter |
 | `z` / `Esc` | zoom the focused widget in / out |
-| `:` | command bar (`:scheme <name>`, `:reload`, `:ai <terms>`) |
+| `:` | command bar (`:settings`, `:reload`, `:ai <terms>`) |
 | `Ctrl+T` | release / re-grab the mouse (drag-to-select in tmux, herdr, …) |
 | `?` | full keybinding overlay (per-widget keys included) |
 | `q` / `Ctrl+C` | quit |
@@ -169,7 +150,7 @@ docket --version
 | `~/.config/docket/docket.log` | runtime log |
 
 docket never sends data anywhere except the provider you point a
-widget at yourself (a CalDAV server, an IMAP host, an LLM API) — no
+widget at yourself (a CalDAV server or an IMAP host) — no
 telemetry, no OAuth, no docket-owned backend. See
 [INSTRUCTIONS.md](INSTRUCTIONS.md) for exactly what each provider
 needs.
@@ -185,8 +166,6 @@ if that matters to you, and prefer app passwords over master passwords.
 ## Troubleshooting
 
 - **`docket` not found** — make sure `$(PREFIX)/bin` is on `$PATH`.
-- **Feed images look chunky** — your terminal doesn't speak iTerm2 /
-  Kitty / Sixel graphics; docket falls back to unicode half-blocks.
 - **A pane is empty / logs "unknown widget kind"** — that pane's
   widget isn't compiled in (slim build).
 - **Logs**: `tail -f ~/.config/docket/docket.log`.

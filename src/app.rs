@@ -26,9 +26,8 @@ use crate::{
     cache::Cache,
     config::{self, Config},
     event::{Event, EventReader},
-    llm::{self, LlmProvider},
     pane_layout::{PaneAreas, FOCUS_ORDER},
-    theme::{self, Theme},
+    theme::Theme,
     ui,
     widgets::{registry, AppContext, EventResult, WidgetCtx, WidgetManager},
     zoom::ZoomTarget,
@@ -51,6 +50,8 @@ pub struct App {
     shortcuts: HashMap<char, String>,
     should_quit: bool,
     show_help: bool,
+    settings: Option<crate::settings::Settings>,
+    settings_path: Option<PathBuf>,
     help_scroll: u16,
     /// Max scroll updated by `ui::help::render` so the scroll handler can
     /// clamp without re-computing the layout.
@@ -82,11 +83,10 @@ pub struct App {
     /// diffs each widget's section against this before deciding
     /// whether to call `apply_config` on it: a widget whose own
     /// section didn't change gets left alone. Without this, ANY
-    /// config.toml write (e.g. `calendar::local::add_event` saving an
-    /// extracted date, or just `:scheme` touching `[global]`) would
+    /// config.toml write to an unrelated section would
     /// rebuild every widget unconditionally — including Email, whose
     /// `apply_config` does `*self = Self::with_config(...)`, silently
-    /// discarding in-memory-only UI state like an open AI popup.
+    /// discarding in-memory-only UI state like an open message.
     last_raw_sections: toml::Value,
     /// Whether the terminal is currently in mouse-capture mode. Starts from
     /// `[global] mouse_capture`; `Ctrl+T` / `:mouse` flip it at runtime.
@@ -95,18 +95,7 @@ pub struct App {
 
 impl App {
     pub fn new(config: Config) -> Self {
-        // Theme + LLM are both best-effort: missing files / unknown schemes /
-        // missing API keys all log a warning and continue with sensible
-        // defaults (built-in palette, no LLM).
-        let theme = theme::load(&config.global.theme).unwrap_or_else(|err| {
-            tracing::warn!(error = %err, "failed to resolve color scheme, using built-in defaults");
-            Arc::new(Theme::builtin_defaults())
-        });
-
-        let llm_provider = llm::build_provider(&config.llm).unwrap_or_else(|err| {
-            tracing::warn!(error = %err, "failed to build LLM provider");
-            None
-        });
+        let theme = Arc::new(Theme::builtin_defaults());
 
         // Cache root opened once and scoped per-widget at registration time.
         // If the home dir can't be resolved (exotic environment), fall back
@@ -131,13 +120,7 @@ impl App {
             toml::Value::Table(Default::default())
         });
         let mut manager = WidgetManager::new();
-        register_default_widgets(
-            &mut manager,
-            theme.clone(),
-            llm_provider,
-            &cache,
-            &raw_sections,
-        );
+        register_default_widgets(&mut manager, theme.clone(), &cache, &raw_sections);
 
         let focus_order = focus_order_from_manager(&manager);
         let shortcuts = assign_shortcuts(&mut manager);
@@ -151,6 +134,8 @@ impl App {
             shortcuts,
             should_quit: false,
             show_help: false,
+            settings: None,
+            settings_path: None,
             help_scroll: 0,
             help_scroll_max: Cell::new(0),
             command_buffer: None,
@@ -239,7 +224,6 @@ impl App {
             command_buffer: self.command_buffer.as_deref(),
             command_feedback: self.feedback_for_render(),
             theme: &self.theme,
-            theme_name: &self.config.global.theme,
             help_scroll: self.help_scroll,
             help_scroll_max: &self.help_scroll_max,
             show_status_bar: self.config.global.show_status_bar,
@@ -360,45 +344,15 @@ impl App {
         false
     }
 
-    /// Drain every widget's `take_notes_refresh_request` /
-    /// `take_calendar_refresh_request` / `take_open_email_request` and
-    /// act on whichever fired. Called right after key dispatch, same
-    /// as `process_zoom_requests`:
-    /// - Notes/Calendar refresh: Email's extract action writes
-    ///   straight to the notes store / the local `.ics` file,
-    ///   bypassing the target widget entirely, so nothing else would
-    ///   ever pick up the change.
-    /// - Open-email: Notes' board-card action for a card carrying an
-    ///   email reference — resolves `(account, id)` against Email's
-    ///   currently-loaded messages and, on success, focuses Email too
-    ///   (a no-op reference — message no longer in the fetched window
-    ///   — leaves focus where it was).
+    /// Open an email referenced by a note, if it is still loaded.
     fn process_cross_widget_refresh_requests(&mut self) {
         let all_ids: Vec<String> = self.manager.ids().to_vec();
-        let mut needs_notes_refresh = false;
-        let mut needs_calendar_refresh = false;
         let mut open_email: Option<(String, String)> = None;
         for id in all_ids {
             if let Some(w) = self.manager.get_mut(&id) {
-                if w.take_notes_refresh_request() {
-                    needs_notes_refresh = true;
-                }
-                if w.take_calendar_refresh_request() {
-                    needs_calendar_refresh = true;
-                }
                 if let Some(req) = w.take_open_email_request() {
                     open_email = Some(req);
                 }
-            }
-        }
-        if needs_notes_refresh {
-            if let Some(notes) = self.manager.get_mut("notes") {
-                notes.reload_external_changes();
-            }
-        }
-        if needs_calendar_refresh {
-            if let Some(calendar) = self.manager.get_mut("calendar") {
-                calendar.reload_external_changes();
             }
         }
         if let Some((account, id)) = open_email {
@@ -674,71 +628,6 @@ impl App {
         }
     }
 
-    /// `:scheme <name>` — switch among the built-in color schemes and
-    /// propagate the new palette to every widget. Unknown names surface a
-    /// feedback line listing the available schemes.
-    fn execute_scheme_command(&mut self, args: &[&str]) {
-        let file = match theme::load_schemes_file() {
-            Ok(f) => f,
-            Err(err) => {
-                self.set_feedback(format!("color schemes: {err}"), ui::FeedbackSeverity::Error);
-                return;
-            }
-        };
-
-        // Sort once — used by both the "no arg" hint and the "not found"
-        // message so the order is stable from the user's perspective.
-        let mut available: Vec<&str> = file.schemes.keys().map(String::as_str).collect();
-        available.sort_unstable();
-        let available_csv = available.join(", ");
-
-        let Some(name) = args.first() else {
-            let msg = if available.is_empty() {
-                "usage: :scheme <name> — (no built-in schemes found)".to_string()
-            } else {
-                format!("usage: :scheme <name>. Available: {available_csv}")
-            };
-            self.set_feedback(msg, ui::FeedbackSeverity::Warning);
-            return;
-        };
-
-        let Some(scheme) = file.schemes.get(*name) else {
-            let msg = if available.is_empty() {
-                format!("unknown scheme {name:?} — no built-in schemes found")
-            } else {
-                format!("unknown scheme {name:?}. Available: {available_csv}")
-            };
-            self.set_feedback(msg, ui::FeedbackSeverity::Error);
-            return;
-        };
-
-        let new_theme = theme::theme_from_scheme(scheme);
-        self.theme = new_theme.clone();
-        self.config.global.theme = (*name).to_string();
-        for id in self.manager.ids().to_vec() {
-            if let Some(widget) = self.manager.get_mut(&id) {
-                widget.set_app_theme(new_theme.clone());
-            }
-        }
-        // Persist so the choice survives restart. In-memory swap already
-        // happened; a write failure only downgrades the success line.
-        match theme::persist_active_scheme(name) {
-            Ok(()) => {
-                self.set_feedback(
-                    format!("scheme → {name}"),
-                    ui::FeedbackSeverity::Confirmation,
-                );
-            }
-            Err(err) => {
-                tracing::warn!(error = %err, scheme = %name, "failed to persist scheme");
-                self.set_feedback(
-                    format!("scheme → {name} (not persisted: {err})"),
-                    ui::FeedbackSeverity::Warning,
-                );
-            }
-        }
-    }
-
     fn execute_command(&mut self, line: &str) {
         if line.is_empty() {
             return;
@@ -753,6 +642,19 @@ impl App {
                 self.should_quit = true;
                 return;
             }
+            "settings" => {
+                let path = self
+                    .settings_path
+                    .clone()
+                    .or_else(|| crate::config::config_path().ok());
+                match path.and_then(|p| crate::settings::Settings::open(p).ok()) {
+                    Some(settings) => self.settings = Some(settings),
+                    None => {
+                        self.set_feedback("Unable to open settings", ui::FeedbackSeverity::Error)
+                    }
+                }
+                return;
+            }
             "help" | "?" => {
                 self.show_help = true;
                 self.help_scroll = 0;
@@ -765,10 +667,6 @@ impl App {
                         let _ = widget.handle_command("refresh", &args);
                     }
                 }
-                return;
-            }
-            "scheme" | "theme" => {
-                self.execute_scheme_command(&args);
                 return;
             }
             "mouse" => {
@@ -827,7 +725,7 @@ impl App {
 }
 
 /// Re-read `config.toml` after a filesystem-watcher event and propagate it:
-/// theme, LLM provider, and every registered widget's own section. `path`
+/// every registered widget's own section. `path`
 /// is whatever changed inside `~/.config/docket/` — only react when it's
 /// `config.toml` itself; edits to `credentials/`, `notes/`, the runtime
 /// state file, or the log are not config changes. Parse failures log and
@@ -852,14 +750,6 @@ fn apply_config_change(app: &mut App, path: &std::path::Path) {
         toml::Value::Table(Default::default())
     });
 
-    // Theme: re-resolve against the (possibly unchanged) scheme name and
-    // push it to every widget, same as `:scheme` does.
-    let new_theme = theme::load(&new_config.global.theme).unwrap_or_else(|err| {
-        tracing::warn!(error = %err, "failed to reload theme on config change, using built-in defaults");
-        Arc::new(Theme::builtin_defaults())
-    });
-    app.theme = new_theme.clone();
-
     for (kind, widget_id) in [
         ("calendar", "calendar"),
         ("feeds", "feeds@ai"),
@@ -873,10 +763,8 @@ fn apply_config_change(app: &mut App, path: &std::path::Path) {
         // Only rebuild the widget when its OWN section actually
         // changed. Every widget's `apply_config` reconstructs the
         // widget from scratch (`*self = Self::with_config(...)`),
-        // which discards any in-memory-only UI state — an open AI
-        // popup, scroll position, the active tab. A config.toml write
-        // to an unrelated section (e.g. Calendar's local-events
-        // extraction, or `:scheme` touching `[global]`) must not
+        // which discards any in-memory-only UI state — an open message,
+        // scroll position, or active tab. An unrelated config write must not
         // reset every other widget's live state just because the
         // watcher fires on the whole file.
         let old_json = config::widget_section_json(&app.last_raw_sections, kind);
@@ -887,7 +775,6 @@ fn apply_config_change(app: &mut App, path: &std::path::Path) {
                 tracing::info!(widget = %widget_id, "live-reloaded config");
             }
         }
-        widget.set_app_theme(new_theme.clone());
     }
     app.last_raw_sections = raw_sections;
 
@@ -1029,7 +916,6 @@ fn register_widget(
     kind: &str,
     instance: &str,
     theme: Arc<Theme>,
-    llm_provider: Option<Arc<dyn LlmProvider>>,
     cache: &Cache,
     config_json: serde_json::Value,
 ) {
@@ -1037,7 +923,6 @@ fn register_widget(
     let widget = registry::build_for(kind, instance, |instance| WidgetCtx {
         instance,
         theme,
-        llm: llm_provider,
         cache: scoped,
         config: config_json,
     });
@@ -1058,7 +943,6 @@ fn register_widget(
 fn register_default_widgets(
     manager: &mut WidgetManager,
     theme: Arc<Theme>,
-    llm_provider: Option<Arc<dyn LlmProvider>>,
     cache: &Cache,
     raw_sections: &toml::Value,
 ) {
@@ -1069,15 +953,7 @@ fn register_default_widgets(
         ("email", "main"),
     ] {
         let config_json = config::widget_section_json(raw_sections, kind);
-        register_widget(
-            manager,
-            kind,
-            instance,
-            theme.clone(),
-            llm_provider.clone(),
-            cache,
-            config_json,
-        );
+        register_widget(manager, kind, instance, theme.clone(), cache, config_json);
     }
 }
 
@@ -1090,6 +966,7 @@ pub async fn run(config_path_override: Option<PathBuf>) -> Result<()> {
     let _guard = TerminalGuard;
 
     let mut app = App::new(config);
+    app.settings_path = config_path_override;
 
     // Live-reload via the `notify` crate. Failure is non-fatal — we just
     // run without hot-reload.
@@ -1129,6 +1006,14 @@ pub async fn run(config_path_override: Option<PathBuf>) -> Result<()> {
         match evt {
             Event::Key(key) => {
                 if key.kind != KeyEventKind::Press {
+                    continue;
+                }
+                if let Some(settings) = app.settings.as_mut() {
+                    if settings.handle_key(key) {
+                        app.settings = None;
+                    }
+                    deferred_draw = true;
+                    deferred_force_full = true;
                     continue;
                 }
                 // Command bar takes precedence over both widgets and globals
@@ -1180,6 +1065,9 @@ pub async fn run(config_path_override: Option<PathBuf>) -> Result<()> {
             }
             Event::Mouse(mut mouse) => {
                 let mut mouse_acted = false;
+                if app.settings.is_some() {
+                    continue;
+                }
                 // Apply the global `mouse_scroll` preference once at the
                 // dispatch boundary so every downstream consumer (help
                 // overlay + widgets) sees a consistent direction without
@@ -1327,7 +1215,9 @@ pub async fn run(config_path_override: Option<PathBuf>) -> Result<()> {
                 // (notes) override Widget::handle_paste to insert it
                 // atomically. The command bar swallows paste while open so
                 // pasted text doesn't smuggle commands into widgets.
-                if app.command_buffer.is_some() {
+                if let Some(settings) = app.settings.as_mut() {
+                    settings.insert(&text);
+                } else if app.command_buffer.is_some() {
                     app.handle_command_bar_paste(&text);
                 } else if let Some(id) = app.focused_widget().map(str::to_string) {
                     if let Some(widget) = app.manager.get_mut(&id) {
@@ -1427,6 +1317,9 @@ pub async fn run(config_path_override: Option<PathBuf>) -> Result<()> {
                     force_full,
                     &mut cache,
                 );
+                if let Some(settings) = app.settings.as_ref() {
+                    settings.render(frame);
+                }
             })?;
             app.partial_draw = cache;
         }

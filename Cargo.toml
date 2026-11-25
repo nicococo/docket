@@ -2,7 +2,7 @@
 name = "docket-tui"
 version = "0.1.0"
 edition = "2021"
-description = "A fast terminal dashboard that pulls your information sources together, distills them with AI, and moves what matters between them — forked from glint"
+description = "A fast terminal dashboard that brings calendar, feeds, notes, and email together — forked from glint"
 license = "GPL-3.0-or-later"
 repository = "https://github.com/nicococo/docket"
 keywords = ["tui", "dashboard", "terminal", "productivity", "ratatui"]
@@ -31,15 +31,14 @@ default = ["widgets-all"]
 # Each widget gates its widget-exclusive dependencies through the matching
 # `dep:` entry below, so `--no-default-features --features "widget-calendar"`
 # really does compile out everything email / news / etc. pull in. Shared
-# infra (chrono, reqwest, tokio, ratatui, anyhow, serde, sha2, …) stays
+# infra (chrono, reqwest, tokio, ratatui, anyhow, serde, …) stays
 # unconditional — gating it would either need every widget to opt in or
 # break the runtime, neither of which is worth the LOC.
 widget-calendar = ["dep:roxmltree", "dep:ical"]
 widget-email = ["dep:imap", "dep:native-tls", "dep:mail-parser", "dep:html2text"]
 widget-notes = []
-# Renders article images via ratatui-image, so it pulls the image stack
-# directly. Hosts the tabbed multi-source RSS reader.
-widget-feeds = ["dep:feed-rs", "dep:image", "dep:ratatui-image"]
+# Hosts the tabbed multi-source RSS reader.
+widget-feeds = ["dep:feed-rs"]
 widgets-all = [
   "widget-calendar",
   "widget-email",
@@ -53,7 +52,7 @@ ratatui = "0.28"
 crossterm = { version = "0.28", features = ["event-stream"] }
 
 # Async. We pull only what we use: `rt-multi-thread` for the runtime +
-# `spawn_blocking` / `block_in_place` (sync IMAP, readability extract);
+# `spawn_blocking` / `block_in_place` (sync IMAP);
 # `macros` for `#[tokio::main]` / `#[tokio::test]` / `join!` / `select!`;
 # `net` + `io-util` for the OAuth loopback TCP listener; `time` for
 # polling intervals + per-request timeouts; `sync` for the mpsc channels.
@@ -83,10 +82,8 @@ futures = "0.3"
 open = "5"
 urlencoding = "2"
 feed-rs = { version = "2", optional = true }   # widget-feeds
-lru = "0.12"
 roxmltree = { version = "0.20", optional = true } # widget-calendar (CalDAV provider)
 ical = { version = "0.11", optional = true }     # widget-calendar (CalDAV provider)
-sha2 = "0.10"
 getrandom = "0.2"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
@@ -116,22 +113,6 @@ clap = { version = "4", features = ["derive"] }
 # compositor's wlr-data-control protocol) that arboard tries first on
 # Wayland, sidestepping the XWayland dependency entirely.
 arboard = { version = "3", features = ["wayland-data-control"] }
-
-# Inline image rendering (powers the Feeds widget's article images). Detects the host
-# terminal's image protocol — iTerm2, Kitty, Sixel — and falls back to
-# unicode halfblocks when none is available. Pulls in the `image` crate
-# for PNG/JPEG/GIF decoding.
-# NB: deliberately *not* requesting `image-defaults` here — that feature
-# turns on `image/default` (every codec including AVIF/EXR/HDR/QOI), and
-# Cargo's feature unification then forces them across the whole tree even
-# though our direct `image = { default-features = false, ... }` line opts
-# out. Only the codecs in our direct features list end up in the build.
-ratatui-image = { version = "2", default-features = false, features = ["crossterm", "rustix"], optional = true }
-# Gallery only enumerates JPEG/PNG/GIF/WebP/BMP/TIFF/ICO (see
-# `IMAGE_EXTENSIONS` in widgets/gallery/mod.rs). Disabling the default
-# features sheds AVIF/EXR/HDR/PNM/QOI/Farbfeld plus `ravif`, `rayon`,
-# `moxcms`, `exr` and assorted color-space crates.
-image = { version = "0.25", default-features = false, features = ["jpeg", "png", "gif", "webp", "bmp", "tiff", "ico"], optional = true }
 
 # IMAP support for the Email widget's IMAP provider (third option
 # alongside Gmail OAuth and Outlook OAuth). The sync `imap` crate is

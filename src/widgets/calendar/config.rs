@@ -11,7 +11,6 @@ use std::collections::HashMap;
 use chrono::Weekday;
 use serde::{Deserialize, Serialize};
 
-use crate::theme::ColorScheme;
 use crate::ui::big_digits;
 
 pub(super) const VIEW_TABS: &[(CalendarView, &str)] = &[
@@ -84,11 +83,6 @@ pub struct CalendarConfig {
     /// `g` cycles. Only applies to today — anchor/preview days stay solid.
     #[serde(default)]
     pub gradient: big_digits::Gradient,
-
-    /// Per-widget overrides layered on the app theme. Distinct from
-    /// `calendar_colors`, which colors per-provider event blocks.
-    #[serde(default)]
-    pub colors: ColorScheme,
 
     /// `Shift+<letter>` focus shortcuts; falls back to `['c', 'd', 'a', 'l', 'e', 'n', 'r']`.
     #[serde(default)]
@@ -198,7 +192,6 @@ impl Default for CalendarConfig {
             color_palette: Vec::new(),
             calendar_colors: HashMap::new(),
             gradient: big_digits::Gradient::default(),
-            colors: ColorScheme::default(),
             shortcuts: Vec::new(),
             first_day_of_week: FirstDayOfWeek::default(),
         }

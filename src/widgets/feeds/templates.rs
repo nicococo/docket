@@ -27,7 +27,7 @@ pub struct Template {
     /// Human-readable name. Reserved for a future flow that scaffolds a
     /// fresh instance TOML from a template (would seed `display_name =
     /// "..."`, which the runtime uses for the title bar, dashboard
-    /// label, and LLM summarizer prompt).
+    /// and label).
     #[allow(dead_code)]
     pub display_name: String,
 

@@ -21,10 +21,8 @@ pub struct Config {
     // threads a widget's config to it via a separate raw-TOML→JSON bridge
     // (`config::widget_section_json`) rather than these typed fields, so
     // widget config structs don't need to derive `Serialize` just to
-    // round-trip through here — these exist for direct in-memory access
-    // (e.g. `notes.notes_dir`, read by email's extract-actions) and as the
-    // single source of truth the `default_config.toml` seed is verified
-    // against in tests.
+    // round-trip through here — these provide typed defaults and verify
+    // that the default config seed parses.
     #[cfg(feature = "widget-calendar")]
     #[allow(dead_code)]
     #[serde(default)]
@@ -43,9 +41,6 @@ pub struct Config {
     #[allow(dead_code)]
     #[serde(default)]
     pub email: crate::widgets::email::EmailConfig,
-
-    #[serde(default)]
-    pub llm: crate::llm::LlmConfig,
 }
 
 fn default_version() -> u32 {
@@ -55,9 +50,6 @@ fn default_version() -> u32 {
 #[allow(dead_code)] // surfaced by status bar + command bar render paths.
 #[derive(Debug, Clone, Deserialize)]
 pub struct GlobalConfig {
-    #[serde(default = "default_theme")]
-    pub theme: String,
-
     #[serde(default = "default_command_key")]
     pub command_key: String,
 
@@ -140,10 +132,6 @@ pub enum MouseScroll {
     Inverted,
 }
 
-fn default_theme() -> String {
-    "default".into()
-}
-
 fn default_command_key() -> String {
     ":".into()
 }
@@ -159,7 +147,6 @@ fn default_log_level() -> String {
 impl Default for GlobalConfig {
     fn default() -> Self {
         Self {
-            theme: default_theme(),
             command_key: default_command_key(),
             refresh_all_on_focus: default_refresh_on_focus(),
             log_level: default_log_level(),
@@ -186,7 +173,6 @@ impl Default for Config {
             notes: Default::default(),
             #[cfg(feature = "widget-email")]
             email: Default::default(),
-            llm: Default::default(),
         }
     }
 }

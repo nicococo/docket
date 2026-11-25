@@ -106,15 +106,8 @@ pub fn widget_section_json(raw: &toml::Value, key: &str) -> serde_json::Value {
 }
 
 /// Default `config.toml` contents written by `--init` — one file with
-/// `[global]`, `[calendar]`, `[feeds]`, and `[llm]` tables. Notes and
-/// email ship no seed content (widgets fall back to their own
-/// `Default` impl) — same as before consolidation.
+/// `[global]`, `[calendar]`, `[feeds]`, `[notes]`, and `[email]` tables.
 pub const DEFAULT_CONFIG_TOML: &str = include_str!("defaults/config.toml");
-
-pub const DEFAULT_ANTHROPIC_KEY_TEMPLATE: &str =
-    include_str!("defaults/credentials/anthropic.toml");
-
-pub const DEFAULT_OPENAI_KEY_TEMPLATE: &str = include_str!("defaults/credentials/openai.toml");
 
 pub const DEFAULT_CALDAV_TEMPLATE: &str = include_str!("defaults/credentials/caldav.toml");
 
@@ -143,11 +136,6 @@ pub fn init_default_config() -> Result<PathBuf> {
         use std::os::unix::fs::PermissionsExt;
         let _ = std::fs::set_permissions(&creds, std::fs::Permissions::from_mode(0o700));
     }
-    seed_credentials(
-        &creds.join("anthropic_key.toml"),
-        DEFAULT_ANTHROPIC_KEY_TEMPLATE,
-    )?;
-    seed_credentials(&creds.join("openai_key.toml"), DEFAULT_OPENAI_KEY_TEMPLATE)?;
     seed_credentials(&creds.join("caldav.toml"), DEFAULT_CALDAV_TEMPLATE)?;
     seed_credentials(&creds.join("ics.toml"), DEFAULT_ICS_TEMPLATE)?;
     Ok(dir.join("config.toml"))
@@ -213,8 +201,22 @@ mod tests {
             !cfg.feeds.feeds.is_empty(),
             "[feeds] seed should ship example feeds — it's in the fixed layout"
         );
-        assert!(cfg.llm.enabled);
-        assert_eq!(cfg.llm.provider.name, "anthropic");
+    }
+
+    #[test]
+    fn legacy_ai_and_theme_settings_are_ignored() {
+        let old = r#"
+            [global]
+            theme = "nord"
+            [llm]
+            enabled = true
+            [llm.provider]
+            name = "anthropic"
+            [email]
+            summarize_with_llm = true
+        "#;
+        let cfg: Config = toml::from_str(old).expect("old settings should still load");
+        assert_eq!(cfg.version, 1);
     }
 
     #[test]

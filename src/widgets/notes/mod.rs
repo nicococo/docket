@@ -111,10 +111,6 @@ pub struct NotesConfig {
     /// through to a built-in default list.
     #[serde(default)]
     pub shortcuts: Vec<char>,
-    /// Per-widget theme overrides (border + text colours). Same shape
-    /// as every other widget's `[colors]` block.
-    #[serde(default)]
-    pub colors: crate::theme::ColorScheme,
 }
 
 /// Below this total pane width (in cells) the list column hides and
@@ -527,7 +523,7 @@ impl NotesWidget {
         } else {
             format!("Notes ({instance})")
         };
-        let theme = app_theme.with_overrides(&config.colors);
+        let theme = (*app_theme).clone();
         let shortcut_prefs = if config.shortcuts.is_empty() {
             vec!['n', 'o', 't', 'e', 's']
         } else {
@@ -1720,7 +1716,7 @@ impl Widget for NotesWidget {
 
     fn apply_config(&mut self, config: serde_json::Value) -> Result<()> {
         let new_cfg: NotesConfig = serde_json::from_value(config)?;
-        self.theme = self.app_theme.with_overrides(&new_cfg.colors);
+        self.theme = (*self.app_theme).clone();
         self.shortcut_prefs = if new_cfg.shortcuts.is_empty() {
             vec!['s', 'n', 't', 'i', 'o']
         } else {
@@ -1764,11 +1760,6 @@ impl Widget for NotesWidget {
                 "open source email (extracted cards) or preview [[linked]] notes",
             ),
         ]
-    }
-
-    fn set_app_theme(&mut self, theme: Arc<Theme>) {
-        self.app_theme = theme;
-        self.theme = self.app_theme.with_overrides(&self.config.colors);
     }
 
     fn shortcut_preferences(&self) -> &[char] {
@@ -3432,8 +3423,7 @@ fn resolve_root_or_emergency(
 }
 
 /// Parse a `<!-- docket:email-ref:<account>|<id> -->` comment line —
-/// written by Email's extract-to-notes action (see
-/// `email::extract_actions::email_ref_line`) — into `(account, id)`.
+/// used by older extracted notes — into `(account, id)`.
 /// Deliberately duplicated rather than imported from the email module
 /// so Notes recognizes the marker syntax without needing
 /// `widget-email` compiled in.

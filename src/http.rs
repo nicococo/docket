@@ -10,7 +10,7 @@
 //! ## When to share, when to bespoke
 //!
 //! Use [`shared`] for plain JSON/RSS/ICS over HTTPS with a docket
-//! user-agent — news, feeds, calendar (CalDAV, ICS), LLM providers.
+//! user-agent — news, feeds, calendar (CalDAV, ICS).
 //!
 //! Keep a bespoke client for callers needing client-scoped state the
 //! shared instance can't carry:
@@ -26,11 +26,7 @@ static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
 /// Process-wide reqwest client. Lazily constructed on first call; later
 /// calls return cheap clones (Client is internally `Arc`).
 ///
-/// Carries a 30-second timeout — generous enough for slow LLM
-/// completions (Anthropic + OpenAI both can take >20s under load), tight
-/// enough that a wedged TCP connection won't hang a widget refresh
-/// forever. Callers needing a shorter bound apply it per-request via
-/// `RequestBuilder::timeout`.
+/// Carries a 30-second timeout. Callers may override it per request.
 pub fn shared() -> reqwest::Client {
     CLIENT
         .get_or_init(|| {

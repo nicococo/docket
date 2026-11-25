@@ -19,7 +19,6 @@ pub fn render(
     frame: &mut Frame,
     area: Rect,
     focused_widget: Option<&str>,
-    scheme_name: &str,
     mouse_capture: bool,
     theme: &Theme,
 ) {
@@ -39,10 +38,6 @@ pub fn render(
         sep.clone(),
         Span::styled(" Focus: ", dim),
         Span::styled(focus.to_string(), theme.text_focused),
-        Span::styled(" ", dim),
-        sep.clone(),
-        Span::styled(" Scheme: ", dim),
-        Span::styled(scheme_name.to_string(), theme.text_selected),
         Span::styled(" ", dim),
         sep.clone(),
         Span::styled(" Tab: switch · ? help · q quit ", dim),

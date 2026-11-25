@@ -47,7 +47,7 @@ use ratatui::{
 use provider::{CalendarProvider, Event};
 
 use crate::cache::ScopedCache;
-use crate::theme::{ColorScheme, Theme};
+use crate::theme::Theme;
 use crate::ui::{apply_title_row, big_digits, MetadataEmphasis};
 
 /// How long a *focused* calendar must sit without key/mouse activity
@@ -77,13 +77,7 @@ pub struct CalendarWidget {
     auth_hint: Option<String>,
     colors: CalendarColors,
     state: Arc<Mutex<CalendarState>>,
-    /// App-level theme; kept so live config reloads can rebuild `theme`
-    /// from updated `colors` overrides.
     app_theme: Arc<Theme>,
-    /// Cached widget-level `[colors]` overrides. Stored so `:scheme` can
-    /// rebuild the merged theme without re-reading `calendar.toml`.
-    colors_override: ColorScheme,
-    /// Merged theme (app + widget overrides). Rebuilt on `apply_config`.
     theme: Theme,
     /// Letter assigned by the app for `Shift+<letter>` focus, painted in
     /// the title via `text.shortcut`. `None` = no shortcut claimed.
@@ -153,8 +147,7 @@ impl CalendarWidget {
             state.events = entry.value.into_iter().map(Arc::new).collect();
         }
         state.poll.apply_jitter(&format!("calendar@{instance}"));
-        let colors_override = config.colors.clone();
-        let theme = app_theme.with_overrides(&colors_override);
+        let theme = (*app_theme).clone();
         let shortcut_prefs = if config.shortcuts.is_empty() {
             vec!['c', 'd', 'a', 'l', 'e', 'n', 'r']
         } else {
@@ -183,7 +176,6 @@ impl CalendarWidget {
             colors,
             state: Arc::new(Mutex::new(state)),
             app_theme,
-            colors_override,
             theme,
             shortcut: None,
             shortcut_prefs,
@@ -2547,11 +2539,6 @@ impl Widget for CalendarWidget {
         let instance = self.instance.clone();
         *self = Self::with_config(instance, new_config, app_theme, cache);
         Ok(())
-    }
-
-    fn set_app_theme(&mut self, theme: Arc<Theme>) {
-        self.theme = theme.with_overrides(&self.colors_override);
-        self.app_theme = theme;
     }
 
     /// Re-read config.toml and rebuild `self.provider` from it, then

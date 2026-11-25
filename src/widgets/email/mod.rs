@@ -2,25 +2,8 @@
 // Copyright (C) 2026 ntrospect0
 // Copyright (C) 2026 nicococo
 
-//! Email widget — read-only feed of recent messages over IMAP.
-//!
-//! Closely mirrors the News widget (provider trait, expand/select/open flow,
-//! optional LLM summarization, refresh polling). Key differences:
-//!   - "Folders" replace News's topic tabs.
-//!   - Server-side read state is OR'd with a local "seen via docket" cache
-//!     so docket never has to write to the server.
-//!   - Bodies come from the provider's body endpoint, with HTML→text fallback.
-//!
-//! `Enter` opens a popup with the selected message's full body (see
-//! `AiPopup`/`render_ai_popup`). When an LLM is configured
-//! (`summarize_with_llm = true` + a provider key), the popup also
-//! exposes three AI actions on `s`/`x`/`t` — summarize, explain, and
-//! extract todos/dates (`AiAction`) — each independently cached per
-//! message. This is separate from the inline `e`-key expand/`s`-key
-//! summary toggle, which is untouched and still lives in the compact
-//! list/read-pane views.
+//! Email widget — recent messages over IMAP.
 
-mod extract_actions;
 pub mod html_strip;
 pub mod imap;
 pub mod provider;
@@ -45,8 +28,7 @@ use ratatui::{
 use serde::Deserialize;
 
 use crate::cache::ScopedCache;
-use crate::llm::{LlmMessage, LlmProvider, LlmRequest, Role};
-use crate::theme::{ColorScheme, Theme};
+use crate::theme::Theme;
 use crate::ui::status::{live_value, TimedFeedback};
 use crate::ui::{apply_title_row, MetadataEmphasis};
 
@@ -70,188 +52,10 @@ const ALL_ACCOUNTS_TAB: &str = "All";
 /// (Per-widget deviation — see the ViewTier convention-sweep note.)
 const READ_PANE_MIN_WIDTH: u16 = 176;
 
-const SUMMARY_SYSTEM_PROMPT: &str = "You are a concise email summarizer. \
-Given a sender, subject, and the message body, return a neutral summary in at \
-most 4 sentences. Capture the asks, decisions, and dates only. Do not editorialize, \
-do not greet, do not use markdown. If the input is too sparse to summarize \
-faithfully, respond with the single sentence: \"Insufficient content to summarize.\"";
-
-const EXPLAIN_SYSTEM_PROMPT: &str = "You explain emails in plain language. \
-Given a sender, subject, and the message body, explain in at most 5 sentences: \
-who this is from, why they're writing, and what — if anything — they need from \
-the recipient. Avoid jargon, don't quote the raw text back verbatim, do not use \
-markdown. If the input is too sparse to explain faithfully, respond with the \
-single sentence: \"Insufficient content to explain.\"";
-
-/// Timeout for any of the three AI popup actions (Summarize/Explain/
-/// ExtractTodo) — longer than the shared HTTP client's 30s default
-/// since a 16k-token budget on a reasoning model can genuinely take
-/// that long. Same value as the Feeds digest's own override.
-const EMAIL_LLM_TIMEOUT_SECS: u64 = 180;
-
-const EXTRACT_SYSTEM_PROMPT: &str = "You extract action items and dates from \
-emails as JSON. You are given the message's received date so you can resolve \
-relative dates (\"next Tuesday\", \"in two weeks\") to real calendar dates. \
-Respond with ONLY a single JSON object, no markdown code fence, no commentary, \
-in exactly this shape: \
-{\"todos\": [\"...\"], \"dates\": [{\"title\": \"...\", \"date\": \"YYYY-MM-DD\"}]}. \
-`todos` is every concrete action item as a short phrase, in the order \
-mentioned. `dates` is every date or deadline mentioned, each with an \
-absolute ISO 8601 date resolved against the received date — never emit a \
-relative phrase in `date` — and a title that names the specific event, \
-deadline, or meeting it refers to. The title lands on a calendar full of \
-many other events from many other emails with no link back to this \
-message, so it must be understandable entirely on its own, with zero \
-context from the email. HARD RULE: never use a bare category word or \
-phrase alone as the title — \"deadline\", \"start\", \"end\", \"begins\", \
-\"closes\", \"due\", \"check-in\", \"check-out\", \"RSVP\", and similar are \
-never acceptable by themselves, in English or any other language the \
-email is written in. Always pair that category with the specific proper \
-noun the email itself uses for the place, event, trip, product, order, \
-person, or organization involved. Bad: \"RSVP deadline\", \"Registration \
-closes\", \"Booking start\", \"Buchungsbeginn\". Good: \"RSVP deadline for \
-Sarah's birthday dinner\", \"AIDAQ Summit registration closes\", \"Check-in \
-for Gründhütte cabin booking\". If the email names a specific \
-place/organization/event/person anywhere, that name belongs in the title. \
-Still keep it to one short phrase, not a full sentence. Omit an item \
-entirely if you can't give it a real date. Use empty arrays (not omitted \
-keys) when there's nothing to extract for that field. Never invent todos \
-or dates that aren't actually in the message.";
-
-/// One of the AI-powered actions available on a message from the
-/// Enter popup (see `open_popup`/`handle_popup_key`). Each variant
-/// owns its own system prompt, cache namespace, and trigger key so
-/// adding a fourth action is a one-line addition to each method
-/// rather than a hunt through every call site.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-enum AiAction {
-    Summarize,
-    Explain,
-    ExtractTodo,
-}
-
-impl AiAction {
-    const ALL: [AiAction; 3] = [
-        AiAction::Summarize,
-        AiAction::Explain,
-        AiAction::ExtractTodo,
-    ];
-
-    fn key(self) -> char {
-        match self {
-            AiAction::Summarize => 's',
-            AiAction::Explain => 'x',
-            AiAction::ExtractTodo => 't',
-        }
-    }
-
-    fn label(self) -> &'static str {
-        match self {
-            AiAction::Summarize => "summarize",
-            AiAction::Explain => "explain",
-            AiAction::ExtractTodo => "extract todos/dates",
-        }
-    }
-
-    fn system_prompt(self) -> &'static str {
-        match self {
-            AiAction::Summarize => SUMMARY_SYSTEM_PROMPT,
-            AiAction::Explain => EXPLAIN_SYSTEM_PROMPT,
-            AiAction::ExtractTodo => EXTRACT_SYSTEM_PROMPT,
-        }
-    }
-
-    /// Cache-key prefix — kept distinct per action so switching
-    /// actions on the same message never reads another action's
-    /// cached result.
-    fn cache_prefix(self) -> &'static str {
-        match self {
-            AiAction::Summarize => "summary-",
-            AiAction::Explain => "explain-",
-            AiAction::ExtractTodo => "extract-",
-        }
-    }
-
-    /// Text shown while `SummaryState::Requested` for this action.
-    fn pending_label(self) -> &'static str {
-        match self {
-            AiAction::Summarize => "Summarizing…",
-            AiAction::Explain => "Explaining…",
-            AiAction::ExtractTodo => "Extracting…",
-        }
-    }
-
-    /// `LlmRequest::max_tokens` budget for this action. Reasoning
-    /// models (gpt-5-mini, o-series) spend part of this budget on
-    /// invisible reasoning tokens before the visible answer, so it
-    /// needs real headroom, not just "how long is the expected
-    /// output" — too little silently returns empty text rather than
-    /// erroring (confirmed in practice: a technical email was enough
-    /// to burn a 1000-token Summarize budget on reasoning alone).
-    /// Matches the budget the Feeds digest needed for the same reason.
-    fn max_tokens(self) -> u32 {
-        match self {
-            AiAction::Summarize | AiAction::Explain | AiAction::ExtractTodo => 16_000,
-        }
-    }
-}
-
 #[derive(Debug, Clone)]
-enum SummaryState {
-    Requested,
-    Ready(String),
-    Failed,
-}
-
-/// State for the Enter popup — the full message plus AI action keys.
-/// See `open_popup`/`handle_popup_key`/`render_ai_popup`.
-#[derive(Debug, Clone)]
-struct AiPopup {
+struct MessagePopup {
     message_id: String,
-    /// `None` shows the raw body; `Some(action)` shows that action's
-    /// AI result (or its Requested/Failed placeholder).
-    active_action: Option<AiAction>,
     scroll: u16,
-    /// Selected row in the flattened todos+dates list when
-    /// `active_action == Some(AiAction::ExtractTodo)` and the cached
-    /// result parses as `ExtractedItems`. Unused otherwise.
-    extract_selected: usize,
-}
-
-/// `AiAction::ExtractTodo`'s structured result — see
-/// `EXTRACT_SYSTEM_PROMPT`. Parsed on demand from the cached JSON
-/// string (never stored parsed — the cache/request machinery in
-/// `request_ai` stays action-agnostic and only ever deals in `String`).
-#[derive(Debug, Clone, Deserialize)]
-struct ExtractedItems {
-    #[serde(default)]
-    todos: Vec<String>,
-    #[serde(default)]
-    dates: Vec<ExtractedDate>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-struct ExtractedDate {
-    title: String,
-    /// ISO 8601 `YYYY-MM-DD`, per the system prompt. Not validated
-    /// here — `calendar::local::add_event` is the one place that
-    /// needs it to actually parse, and it fails closed if it doesn't.
-    date: String,
-}
-
-/// Parse `text` as [`ExtractedItems`], tolerating a ` ```json ` /
-/// ` ``` ` fence some models wrap JSON in despite being told not to.
-/// `None` on anything that isn't valid JSON in the expected shape —
-/// callers fall back to plain-text rendering rather than erroring.
-fn parse_extracted_items(text: &str) -> Option<ExtractedItems> {
-    let trimmed = text.trim();
-    let unfenced = trimmed
-        .strip_prefix("```json")
-        .or_else(|| trimmed.strip_prefix("```"))
-        .unwrap_or(trimmed)
-        .trim();
-    let unfenced = unfenced.strip_suffix("```").unwrap_or(unfenced).trim();
-    serde_json::from_str(unfenced).ok()
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -281,18 +85,10 @@ pub struct EmailConfig {
     #[serde(default)]
     pub accounts: Vec<EmailAccountEntry>,
 
-    /// On-demand message summarisation when an LLM provider is configured.
-    /// Press `s` on an expanded message.
-    #[serde(default)]
-    pub summarize_with_llm: bool,
-
     /// Pre-populates the title's address before the provider's `/me` lookup
     /// resolves. The lookup still runs and overwrites this once it returns.
     #[serde(default)]
     pub account_address: Option<String>,
-
-    #[serde(default)]
-    pub colors: ColorScheme,
 
     /// `Shift+<letter>` focus shortcuts; falls back to the letters in "email".
     #[serde(default)]
@@ -332,9 +128,7 @@ impl Default for EmailConfig {
             refresh_minutes: default_refresh_minutes(),
             folders: default_folders(),
             accounts: Vec::new(),
-            summarize_with_llm: false,
             account_address: None,
-            colors: ColorScheme::default(),
             shortcuts: Vec::new(),
         }
     }
@@ -366,38 +160,13 @@ struct EmailState {
     /// Cached account address (e.g. "alice@example.com") for the title row.
     /// Populated lazily from the provider once the first fetch resolves.
     account: Option<String>,
-    /// Per-message, per-action AI result state (summarize/explain/
-    /// extract), keyed by `(message id, action)`. Feeds both the
-    /// inline expand's Body ⇄ Summary toggle (`Summarize` only) and
-    /// the Enter popup (all three).
-    ai_results: std::collections::HashMap<(String, AiAction), SummaryState>,
-    /// Per-message view preference, keyed by message id. `true` means
-    /// "prefer the LLM summary"; missing/`false` means "show the raw
-    /// body" (the historical default). Set by `s`: first press flips
-    /// to summary (and kicks off the request if needed); subsequent
-    /// presses toggle without re-firing the LLM (cached summary is
-    /// reused). Only ever reads/writes the `Summarize` action —
-    /// unrelated to the popup's `AiPopup::active_action`.
-    summary_view: std::collections::HashMap<String, bool>,
     /// `Some` while the Enter popup is open for a message.
-    popup: Option<AiPopup>,
+    popup: Option<MessagePopup>,
     /// One-shot signal for [`EmailWidget::take_zoom_request`]: `Some(true)`
     /// when the popup just opened and wants full-screen room, `Some(false)`
     /// when it just closed and should hand zoom back. Drained by the app
     /// right after key dispatch.
     zoom_request: Option<bool>,
-    /// One-shot signal for [`EmailWidget::take_notes_refresh_request`]:
-    /// set after a successful `add_todo`/`remove_todo` in
-    /// `toggle_extract_selected` so the app tells the Notes widget to
-    /// pick up the change — that write goes straight through
-    /// `notes::store::save`, bypassing the Notes widget entirely, so
-    /// nothing else would ever refresh its in-memory list.
-    notes_refresh_pending: bool,
-    /// Same idea as `notes_refresh_pending`, for `add_event`/
-    /// `remove_event` — those write straight into the local
-    /// `calendar.ics` file, which the Calendar widget only ever reads
-    /// once at construction.
-    calendar_refresh_pending: bool,
     /// Transient footer feedback (e.g. "Copied to clipboard"). Set by
     /// `copy_body`; drained after [`STATUS_TTL`] in `update()`, same
     /// pattern as the Feeds/Notes widgets' own status line.
@@ -432,16 +201,6 @@ const CACHE_KEY_MESSAGES: &str = "messages";
 /// configured account.
 const CACHE_KEY_ACCOUNT_ADDRESS: &str = "account_address";
 
-/// Cache-key namespace for LLM-generated AI-action results (summarize,
-/// explain, extract). Each result is keyed by `<action-prefix><sha256(id)>`
-/// — see `AiAction::cache_prefix`. Provider IDs are filesystem-safe today
-/// but hashing keeps the namespace bounded and future-provider-proof. Email
-/// bodies don't change post-delivery so a cached result is valid until the
-/// user explicitly clears the cache.
-fn ai_cache_key(action: AiAction, id: &str) -> String {
-    crate::cache::short_hash_key(action.cache_prefix(), id)
-}
-
 pub struct EmailWidget {
     id: String,
     instance: String,
@@ -459,8 +218,6 @@ pub struct EmailWidget {
     /// [`Self::tab_labels`] and [`Self::spawn_refresh_multi_imap`].
     imap_accounts: Vec<ImapAccountHandle>,
     latest_days: u32,
-    summarize_with_llm: bool,
-    llm: Option<Arc<dyn LlmProvider>>,
     /// "imap" / "none" — drives the bracketed source tag in the title.
     provider_label: String,
     /// True when no real provider was configurable (missing token, missing
@@ -471,14 +228,13 @@ pub struct EmailWidget {
     /// false. Walk-through tells the user what to run.
     auth_hint: Option<String>,
     app_theme: Arc<Theme>,
-    colors_override: ColorScheme,
     theme: Theme,
     shortcut: Option<char>,
     shortcut_prefs: Vec<char>,
     /// Persistent cache of the merged message list across configured folders.
     cache: ScopedCache,
-    /// Highest valid scroll offset for the open AI popup (see
-    /// `AiPopup`), updated by `render_ai_popup`.
+    /// Highest valid scroll offset for the open message popup (see
+    /// `MessagePopup`), updated by `render_message_popup`.
     last_popup_max_scroll: Arc<Mutex<u16>>,
 }
 
@@ -534,19 +290,17 @@ impl EmailProviderHandle {
 impl EmailWidget {
     #[cfg(test)]
     pub fn with_config(config: EmailConfig) -> Self {
-        Self::with_config_and_llm(
+        Self::with_dependencies(
             "main".to_string(),
             config,
-            None,
             Arc::new(Theme::builtin_defaults()),
             ScopedCache::ephemeral(),
         )
     }
 
-    pub fn with_config_and_llm(
+    pub fn with_dependencies(
         instance: String,
         config: EmailConfig,
-        llm: Option<Arc<dyn LlmProvider>>,
         app_theme: Arc<Theme>,
         cache: ScopedCache,
     ) -> Self {
@@ -574,8 +328,7 @@ impl EmailWidget {
             (p, label, ready, hint, Vec::new())
         };
 
-        let colors_override = config.colors.clone();
-        let theme = app_theme.with_overrides(&colors_override);
+        let theme = (*app_theme).clone();
         let shortcut_prefs = if config.shortcuts.is_empty() {
             vec!['e', 'm', 'a', 'i', 'l']
         } else {
@@ -681,13 +434,10 @@ impl EmailWidget {
             folders,
             imap_accounts,
             latest_days: config.latest_days.max(1),
-            summarize_with_llm: config.summarize_with_llm,
-            llm,
             provider_label,
             provider_ready,
             auth_hint,
             app_theme,
-            colors_override,
             theme,
             shortcut: None,
             shortcut_prefs,
@@ -807,8 +557,7 @@ impl EmailWidget {
             // Trim oversized bodies. The expanded view caps at
             // `MAX_SUMMARY_LINES` (5), and even the Enter popup's "full
             // body" view is reading this same capped `plain_body` —
-            // 4 KB is ample headroom for the visible snippet + LLM
-            // context + popup display, and drops mailing-list bodies
+            // 4 KB is ample headroom for the popup display and drops mailing-list bodies
             // that routinely ship 50+ KB of HTML-stripped text per
             // message.
             for m in &mut messages {
@@ -1182,8 +931,7 @@ impl EmailWidget {
         st.expanded = !st.expanded;
     }
 
-    /// `Enter`: open the AI popup for the selected message, starting
-    /// on the raw body view. No-op if there's no selected message.
+    /// Open the selected message, if any.
     fn open_popup(&self) {
         let filtered = self.filtered_messages();
         let msg = {
@@ -1192,11 +940,9 @@ impl EmailWidget {
         };
         let Some(msg) = msg else { return };
         let mut st = self.state.lock().expect("email state poisoned");
-        st.popup = Some(AiPopup {
+        st.popup = Some(MessagePopup {
             message_id: msg.id.clone(),
-            active_action: None,
             scroll: 0,
-            extract_selected: 0,
         });
         // Ask the app to zoom this widget so the popup renders at
         // near-full-screen size instead of being capped to the Email
@@ -1204,60 +950,22 @@ impl EmailWidget {
         st.zoom_request = Some(true);
     }
 
-    /// Key dispatch while the AI popup is open. `j`/`k`/arrows scroll;
-    /// `s`/`x`/`t` (via `AiAction::key()`) request/toggle that action's
-    /// result, no-op if AI isn't configured; anything else closes the
-    /// popup — same "any other key cancels" convention as the
-    /// delete-confirm modal.
+    /// Scroll the message or close it.
     fn handle_popup_key(&mut self, key: KeyEvent) -> EventResult {
-        let message_id = {
-            let st = self.state.lock().expect("email state poisoned");
-            st.popup.as_ref().map(|p| p.message_id.clone())
-        };
-        // `Some` only when the popup is showing a successfully-parsed
-        // extract list — in that mode j/k/space mean "navigate/toggle
-        // the list" instead of "scroll"/"close".
-        let extract = message_id
-            .as_deref()
-            .and_then(|id| self.parsed_extract_for(id));
-        let extract_len = extract.as_ref().map(|e| e.todos.len() + e.dates.len());
-
+        let mut st = self.state.lock().expect("email state poisoned");
         match key.code {
             KeyCode::Char('j') | KeyCode::Down => {
                 let max_scroll = *self.last_popup_max_scroll.lock().unwrap();
-                let mut st = self.state.lock().expect("email state poisoned");
-                if let Some(p) = st.popup.as_mut() {
-                    match extract_len {
-                        Some(len) if len > 0 => {
-                            p.extract_selected = (p.extract_selected + 1).min(len - 1);
-                        }
-                        Some(_) => {} // empty list — nothing to move to
-                        None => p.scroll = p.scroll.saturating_add(1).min(max_scroll),
-                    }
+                if let Some(popup) = st.popup.as_mut() {
+                    popup.scroll = popup.scroll.saturating_add(1).min(max_scroll);
                 }
             }
             KeyCode::Char('k') | KeyCode::Up => {
-                let mut st = self.state.lock().expect("email state poisoned");
-                if let Some(p) = st.popup.as_mut() {
-                    if extract_len.is_some() {
-                        p.extract_selected = p.extract_selected.saturating_sub(1);
-                    } else {
-                        p.scroll = p.scroll.saturating_sub(1);
-                    }
+                if let Some(popup) = st.popup.as_mut() {
+                    popup.scroll = popup.scroll.saturating_sub(1);
                 }
-            }
-            KeyCode::Char(' ') if extract_len.is_some() => {
-                if let (Some(id), Some(items)) = (message_id, extract) {
-                    self.toggle_extract_selected(&id, &items);
-                }
-            }
-            KeyCode::Char(c) if AiAction::ALL.iter().any(|a| a.key() == c) => {
-                self.trigger_popup_action(
-                    AiAction::ALL.into_iter().find(|a| a.key() == c).unwrap(),
-                );
             }
             _ => {
-                let mut st = self.state.lock().expect("email state poisoned");
                 st.popup = None;
                 st.zoom_request = Some(false);
             }
@@ -1265,148 +973,7 @@ impl EmailWidget {
         EventResult::Handled
     }
 
-    /// Parse `(message_id, ExtractTodo)`'s cached result as
-    /// `ExtractedItems`, if it's `Ready` and actually parses. `None`
-    /// covers every other case (no result yet, still `Requested`,
-    /// `Failed`, or a non-JSON response) — callers fall back to
-    /// plain-text rendering / scroll-not-list-nav behavior.
-    fn parsed_extract_for(&self, message_id: &str) -> Option<ExtractedItems> {
-        let st = self.state.lock().expect("email state poisoned");
-        match st
-            .ai_results
-            .get(&(message_id.to_string(), AiAction::ExtractTodo))
-        {
-            Some(SummaryState::Ready(text)) => parse_extracted_items(text),
-            _ => None,
-        }
-    }
-
-    /// `space` in the extract list: add or remove whichever item
-    /// `popup.extract_selected` currently points at, based on its
-    /// current on-disk marker state. A no-op (not an error) if the
-    /// relevant integration's feature isn't compiled in — the write
-    /// functions themselves are already safe no-ops in that case, see
-    /// `extract_actions`.
-    fn toggle_extract_selected(&self, message_id: &str, items: &ExtractedItems) {
-        let selected = {
-            let st = self.state.lock().expect("email state poisoned");
-            st.popup.as_ref().map(|p| p.extract_selected)
-        };
-        let Some(selected) = selected else { return };
-        if selected < items.todos.len() {
-            let text = &items.todos[selected];
-            let id = extract_actions::todo_item_id(message_id, text);
-            let result = if extract_actions::todo_marker_present(&id) {
-                extract_actions::remove_todo(&id)
-            } else {
-                let msg = self
-                    .filtered_messages()
-                    .into_iter()
-                    .find(|m| m.id == message_id);
-                let Some(msg) = msg else { return };
-                // Just the display name (falling back to the bare
-                // address) rather than `format_sender`'s "Name <addr>"
-                // — a note line is read at a glance, not addressed,
-                // so the full address is noise here.
-                let sender = msg
-                    .from_name
-                    .as_deref()
-                    .map(str::trim)
-                    .filter(|n| !n.is_empty())
-                    .unwrap_or(&msg.from_address)
-                    .to_string();
-                let subject = if msg.subject.trim().is_empty() {
-                    "(no subject)".to_string()
-                } else {
-                    msg.subject.clone()
-                };
-                let received = msg.received.format("%Y-%m-%d").to_string();
-                extract_actions::add_todo(
-                    text,
-                    &id,
-                    &extract_actions::EmailContext {
-                        sender: &sender,
-                        subject: &subject,
-                        received: &received,
-                        account: &msg.account,
-                        message_ref: &msg.id,
-                    },
-                )
-            };
-            match result {
-                Ok(()) => {
-                    self.state
-                        .lock()
-                        .expect("email state poisoned")
-                        .notes_refresh_pending = true;
-                }
-                Err(err) => {
-                    tracing::warn!(error = %err, "email extract: todo add/remove failed");
-                }
-            }
-        } else if let Some(date) = items.dates.get(selected - items.todos.len()) {
-            let id = extract_actions::date_item_id(message_id, &date.title, &date.date);
-            let result = if extract_actions::event_marker_present(&id) {
-                extract_actions::remove_event(&id)
-            } else {
-                extract_actions::add_event(&date.title, &date.date, &id)
-            };
-            match result {
-                Ok(()) => {
-                    self.state
-                        .lock()
-                        .expect("email state poisoned")
-                        .calendar_refresh_pending = true;
-                }
-                Err(err) => {
-                    tracing::warn!(error = %err, "email extract: date add/remove failed");
-                }
-            }
-        }
-    }
-
-    /// Toggle the popup's `active_action`: pressing the currently
-    /// active action's key again reverts to the raw body view (same
-    /// ergonomics as the existing inline `s` summary toggle); pressing
-    /// a different action's key switches to it and fires `request_ai`
-    /// (idempotent on a cache hit or an already-in-flight request).
-    fn trigger_popup_action(&self, action: AiAction) {
-        if !self.summarize_with_llm || self.llm.is_none() {
-            return;
-        }
-        let msg = {
-            let st = self.state.lock().expect("email state poisoned");
-            let Some(popup) = st.popup.as_ref() else {
-                return;
-            };
-            let id = popup.message_id.clone();
-            drop(st);
-            self.filtered_messages().into_iter().find(|m| m.id == id)
-        };
-        let Some(msg) = msg else { return };
-        {
-            let mut st = self.state.lock().expect("email state poisoned");
-            let Some(popup) = st.popup.as_mut() else {
-                return;
-            };
-            popup.active_action = if popup.active_action == Some(action) {
-                None
-            } else {
-                Some(action)
-            };
-            popup.extract_selected = 0;
-        }
-        self.request_ai(action, &msg);
-    }
-
-    /// Centred, scrollable overlay for the Enter popup: the selected
-    /// message's sender/subject plus either the full raw body or the
-    /// active AI action's result. Structurally modeled on the Notes
-    /// widget's link-preview modal (`Clear` + rounded `Block` +
-    /// ~80%-of-parent sizing + scrollable `Paragraph` + a footer
-    /// hint) — bespoke rather than `crate::ui::modal`, which is a
-    /// fixed-size y/N confirm shape, not a scrollable content viewer.
-    fn render_ai_popup(&self, frame: &mut Frame, parent: Rect, popup: &AiPopup) {
+    fn render_message_popup(&self, frame: &mut Frame, parent: Rect, popup: &MessagePopup) {
         let Some(msg) = self
             .filtered_messages()
             .into_iter()
@@ -1458,12 +1025,7 @@ impl EmailWidget {
         let body_height = inner.height.saturating_sub(footer_rows);
         let text_w = inner.width as usize;
 
-        let ai_enabled = self.summarize_with_llm && self.llm.is_some();
         let mut lines: Vec<Line<'static>> = Vec::new();
-        // Set true below when the extract action's cached result
-        // parses into a non-empty list — swaps the footer hint from
-        // "scroll" to "select"/"toggle" wording for that mode.
-        let mut extract_list_active = false;
         let subject = if msg.subject.trim().is_empty() {
             "(no subject)"
         } else {
@@ -1474,86 +1036,13 @@ impl EmailWidget {
             self.theme.text_brilliant,
         )));
         lines.push(Line::from(""));
-
-        match popup.active_action {
-            None => {
-                let body = if msg.plain_body.is_empty() {
-                    "(empty body)"
-                } else {
-                    msg.plain_body.as_str()
-                };
-                for row in wrap_text(body, text_w, usize::MAX) {
-                    lines.push(Line::from(Span::styled(row, self.theme.text_plain)));
-                }
-            }
-            Some(action) => {
-                let state = {
-                    let st = self.state.lock().expect("email state poisoned");
-                    st.ai_results.get(&(msg.id.clone(), action)).cloned()
-                };
-                let extracted = if action == AiAction::ExtractTodo {
-                    match &state {
-                        Some(SummaryState::Ready(text)) => parse_extracted_items(text),
-                        _ => None,
-                    }
-                } else {
-                    None
-                };
-                if let Some(items) = extracted {
-                    if items.todos.is_empty() && items.dates.is_empty() {
-                        lines.push(Line::from(Span::styled(
-                            "Nothing to extract.",
-                            self.theme.text_dim,
-                        )));
-                    } else {
-                        extract_list_active = true;
-                    }
-                    if !items.todos.is_empty() {
-                        lines.push(Line::from(Span::styled("Todos", self.theme.text_brilliant)));
-                        for (i, todo) in items.todos.iter().enumerate() {
-                            let id = extract_actions::todo_item_id(&msg.id, todo);
-                            lines.extend(extract_row_lines(
-                                &self.theme,
-                                i == popup.extract_selected,
-                                extract_actions::todo_marker_present(&id),
-                                todo,
-                                text_w,
-                            ));
-                        }
-                        lines.push(Line::from(""));
-                    }
-                    if !items.dates.is_empty() {
-                        lines.push(Line::from(Span::styled("Dates", self.theme.text_brilliant)));
-                        for (i, date) in items.dates.iter().enumerate() {
-                            let flat_idx = items.todos.len() + i;
-                            let id =
-                                extract_actions::date_item_id(&msg.id, &date.title, &date.date);
-                            let label = format!("{} — {}", date.date, date.title);
-                            lines.extend(extract_row_lines(
-                                &self.theme,
-                                flat_idx == popup.extract_selected,
-                                extract_actions::event_marker_present(&id),
-                                &label,
-                                text_w,
-                            ));
-                        }
-                    }
-                } else {
-                    let (text, style) = match state {
-                        Some(SummaryState::Ready(text)) => (text, self.theme.text_plain),
-                        Some(SummaryState::Requested) | None => {
-                            (action.pending_label().to_string(), self.theme.text_dim)
-                        }
-                        Some(SummaryState::Failed) => (
-                            "Couldn't generate a response.".to_string(),
-                            self.theme.text_dim,
-                        ),
-                    };
-                    for row in wrap_text(&text, text_w, usize::MAX) {
-                        lines.push(Line::from(Span::styled(row, style)));
-                    }
-                }
-            }
+        let body = if msg.plain_body.is_empty() {
+            "(empty body)"
+        } else {
+            msg.plain_body.as_str()
+        };
+        for row in wrap_text(body, text_w, usize::MAX) {
+            lines.push(Line::from(Span::styled(row, self.theme.text_plain)));
         }
 
         let max_scroll = (lines.len() as u16).saturating_sub(body_height);
@@ -1573,31 +1062,7 @@ impl EmailWidget {
         };
         frame.render_widget(Paragraph::new(visible), body_rect);
 
-        let nav_hint = if extract_list_active {
-            "j/k select"
-        } else {
-            "j/k scroll"
-        };
-        let hint = if ai_enabled {
-            let actions: Vec<String> = AiAction::ALL
-                .iter()
-                .map(|a| format!("{} {}", a.key(), a.label()))
-                .collect();
-            let toggle_hint = if extract_list_active
-                && (extract_actions::notes_integration_available()
-                    || extract_actions::calendar_integration_available())
-            {
-                "  ·  space add/remove"
-            } else {
-                ""
-            };
-            format!(
-                "  {nav_hint}{toggle_hint}  ·  {}  ·  Esc close",
-                actions.join("  ·  ")
-            )
-        } else {
-            format!("  {nav_hint}  ·  Esc close")
-        };
+        let hint = "  j/k scroll  ·  Esc close";
         let footer_rect = Rect {
             x: inner.x,
             y: inner.y + body_height,
@@ -1608,185 +1073,6 @@ impl EmailWidget {
             Paragraph::new(Line::from(Span::styled(hint, self.theme.text_dim))),
             footer_rect,
         );
-    }
-
-    /// Press-`s` entry point. Drives the per-message Body ⇄ Summary
-    /// toggle with a side-effect of expanding when the user hits it from
-    /// collapsed mode. Never changes read state — only `space`
-    /// ([`Self::toggle_read_state`]) does that.
-    ///
-    /// - **Collapsed**: expand, switch to Summary view, fire the LLM
-    ///   (cache-hit returns instantly).
-    /// - **Expanded + currently Body**: switch to Summary; if not yet
-    ///   requested, fire the LLM (cache-hit returns instantly).
-    /// - **Expanded + currently Summary**: switch back to Body — no
-    ///   LLM call, no state mutation beyond the view-pref flip.
-    fn toggle_summary_view(&mut self) {
-        if !self.summarize_with_llm || self.llm.is_none() {
-            return;
-        }
-        let filtered = self.filtered_messages();
-        let selected: Option<Arc<EmailMessage>> = {
-            let st = self.state.lock().expect("email state poisoned");
-            filtered.get(st.selected).cloned()
-        };
-        let Some(msg) = selected else {
-            return;
-        };
-
-        let will_show_summary = {
-            let mut st = self.state.lock().expect("email state poisoned");
-            let was_collapsed = !st.expanded;
-            if was_collapsed {
-                st.expanded = true;
-                st.summary_view.insert(msg.id.clone(), true);
-                true
-            } else {
-                let cur = *st.summary_view.get(&msg.id).unwrap_or(&false);
-                let new = !cur;
-                st.summary_view.insert(msg.id.clone(), new);
-                new
-            }
-        };
-
-        if will_show_summary {
-            // request_ai is idempotent — cache-hits jump straight to
-            // Ready without an LLM call. Calling unconditionally here
-            // is safe + cheap.
-            self.request_ai(AiAction::Summarize, &msg);
-        }
-    }
-
-    /// Fire (or reuse a cached/in-flight) LLM call for `action` on
-    /// `msg`. Idempotent: an already-`Ready`/`Requested` result for
-    /// `(msg.id, action)` short-circuits without touching the
-    /// network. Used by both the inline `s` toggle (always
-    /// `Summarize`) and the Enter popup's `s`/`x`/`t` action keys.
-    fn request_ai(&self, action: AiAction, msg: &EmailMessage) {
-        if !self.summarize_with_llm || self.llm.is_none() {
-            return;
-        }
-        let result_key = (msg.id.clone(), action);
-        {
-            let st = self.state.lock().expect("email state poisoned");
-            if st.ai_results.contains_key(&result_key) {
-                return;
-            }
-        }
-        let cache_key = ai_cache_key(action, &msg.id);
-        if let Some(entry) = self.cache.load::<String>(&cache_key) {
-            let mut st = self.state.lock().expect("email state poisoned");
-            st.ai_results
-                .insert(result_key, SummaryState::Ready(entry.value));
-            st.dirty = true;
-            return;
-        }
-        let Some(llm) = self.llm.clone() else {
-            return;
-        };
-        let state = self.state.clone();
-        let cache = self.cache.clone();
-        {
-            let mut st = self.state.lock().expect("email state poisoned");
-            st.ai_results
-                .insert(result_key.clone(), SummaryState::Requested);
-            st.dirty = true;
-        }
-        let id = msg.id.clone();
-        let body = msg.plain_body.clone();
-        let subject = msg.subject.clone();
-        let from = format_sender(&msg.from_name, &msg.from_address);
-        // Only ExtractTodo's prompt actually asks for this, but including
-        // it unconditionally keeps the request-building code uniform
-        // across actions rather than branching on `action` here too.
-        let received = msg.received.format("%Y-%m-%d").to_string();
-        tokio::spawn(async move {
-            let request = LlmRequest {
-                model: None,
-                system: Some(action.system_prompt().into()),
-                messages: vec![LlmMessage {
-                    role: Role::User,
-                    content: format!(
-                        "From: {from}\nSubject: {subject}\nReceived: {received}\n\n{}",
-                        if body.is_empty() {
-                            "(empty body)"
-                        } else {
-                            body.as_str()
-                        }
-                    ),
-                }],
-                max_tokens: action.max_tokens(),
-                cache_system: true,
-                // A 16k-token budget on a reasoning model can genuinely
-                // take longer than the shared HTTP client's 30s default
-                // — same reasoning as the Feeds digest's override.
-                timeout_secs: Some(EMAIL_LLM_TIMEOUT_SECS),
-            };
-            let outcome = match llm.complete(request).await {
-                Ok(resp) => {
-                    let text = resp.text.trim();
-                    // Summarize/Explain's "too sparse" bail-out starts
-                    // with "Insufficient content to ..." — treat that
-                    // as Failed so the UI falls back to showing the
-                    // raw body instead of that sentence. ExtractTodo's
-                    // "Nothing to extract." bail-out is left as a
-                    // normal Ready result — it's informative on its
-                    // own, not a failure. An empty response (a
-                    // reasoning model spending its whole token budget
-                    // on invisible reasoning tokens, leaving nothing
-                    // for the visible answer) is also Failed rather
-                    // than a silently-cached empty "success" — logged
-                    // (unlike the Err branch below, an empty response
-                    // isn't itself an error, so it wouldn't otherwise
-                    // leave any trace to diagnose from).
-                    if text.is_empty() {
-                        tracing::warn!(
-                            id = %id,
-                            action = ?action,
-                            max_tokens = action.max_tokens(),
-                            "LLM email action returned empty text — likely a reasoning model \
-                             spending its whole token budget on invisible reasoning tokens"
-                        );
-                        SummaryState::Failed
-                    } else if text
-                        .to_ascii_lowercase()
-                        .starts_with("insufficient content to")
-                    {
-                        SummaryState::Failed
-                    } else if action == AiAction::ExtractTodo
-                        && parse_extracted_items(text).is_none()
-                    {
-                        // A non-conforming reply here (prose instead of the
-                        // requested bare JSON, wrong schema, …) must NOT be
-                        // cached as `Ready` — `request_ai` short-circuits on
-                        // any cached result for `(id, action)` regardless of
-                        // its parseability, so an unparseable "success"
-                        // would get stuck forever with no way to retry.
-                        // `Failed` lets the user press `t` again to retry.
-                        tracing::warn!(
-                            id = %id,
-                            response = %text,
-                            "email extract: LLM response didn't parse as the expected JSON shape"
-                        );
-                        SummaryState::Failed
-                    } else {
-                        SummaryState::Ready(text.to_string())
-                    }
-                }
-                Err(err) => {
-                    tracing::warn!(error = %err, id = %id, action = ?action, "LLM email action failed");
-                    SummaryState::Failed
-                }
-            };
-            if let SummaryState::Ready(text) = &outcome {
-                if let Err(err) = cache.store(&cache_key, text) {
-                    tracing::warn!(error = %err, id = %id, action = ?action, "email AI-result cache store failed");
-                }
-            }
-            let mut st = state.lock().expect("email state poisoned");
-            st.ai_results.insert(result_key, outcome);
-            st.dirty = true;
-        });
     }
 
     /// True if the message should display the unread `●` indicator.
@@ -2104,12 +1390,6 @@ impl Widget for EmailWidget {
             return;
         }
 
-        // Layout each message row:
-        //   ●  Alice Smith            Re: Project update                                12:43
-        // When expanded: subject + body/summary lines underneath. The
-        // expansion height is variable (depends on whether the user is
-        // viewing the raw body or the LLM summary, and on the wrapped
-        // line count), so we measure it explicitly below.
         const ROWS_PER_ITEM: usize = 1;
         let list_height = list_area.height;
         let items_visible = (list_height as usize / ROWS_PER_ITEM).max(1);
@@ -2120,26 +1400,11 @@ impl Widget for EmailWidget {
         if selected >= scroll + items_visible {
             scroll = selected + 1 - items_visible;
         }
-        // Extra: if expanded, scroll up far enough that the full
-        // expansion (subject + body/summary) fits below the selected
-        // row when possible. Clamps so the selected row never scrolls
-        // off the top — for emails whose expansion exceeds the pane
-        // height, the selected row pins to the top and the bottom of
-        // the expansion clips (the standard "long content" failure
-        // mode; the user can collapse or use the LLM summary to
-        // shorten).
         if expanded && read_area.is_none() {
             if let Some(msg) = filtered.get(selected) {
                 let body_max_width = (list_area.width as usize).saturating_sub(3);
                 let subject_lines = wrap_text(&msg.subject, body_max_width, 2).len();
-                let body_lines = expanded_body_lines(
-                    msg,
-                    &self.state,
-                    body_max_width,
-                    self.summarize_with_llm && self.llm.is_some(),
-                    MAX_SUMMARY_LINES,
-                )
-                .len();
+                let body_lines = expanded_body_lines(msg, body_max_width, MAX_SUMMARY_LINES).len();
                 let expansion_height = subject_lines + body_lines;
                 let want = (selected + 1 + expansion_height).saturating_sub(items_visible);
                 scroll = scroll.max(want).min(selected);
@@ -2206,7 +1471,10 @@ impl Widget for EmailWidget {
             // focused treatment. Selection highlight always wins so the
             // cursor stays visible regardless of read state.
             let row_style = if is_selected {
-                self.theme.text_selected
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(Color::LightYellow)
+                    .add_modifier(Modifier::BOLD)
             } else if !unread {
                 self.theme.text_dim
             } else if focused {
@@ -2236,7 +1504,9 @@ impl Widget for EmailWidget {
             let row = Line::from(vec![
                 Span::styled(
                     format!("{indicator} "),
-                    if unread {
+                    if is_selected {
+                        row_style
+                    } else if unread {
                         self.theme.text_focused
                     } else {
                         self.theme.text_dim
@@ -2246,19 +1516,27 @@ impl Widget for EmailWidget {
                 Span::raw(" "),
                 Span::styled(subject_padded, row_style),
                 Span::raw(" "),
-                Span::styled(date_padded, self.theme.text_dim),
-            ]);
+                Span::styled(
+                    date_padded,
+                    if is_selected {
+                        row_style
+                    } else {
+                        self.theme.text_dim
+                    },
+                ),
+                Span::styled(" ", row_style),
+            ])
+            .style(if is_selected {
+                row_style
+            } else {
+                Style::default()
+            });
             lines.push(row);
             rows_emitted += 1;
 
             if expand_this {
-                let body_lines = expanded_body_lines(
-                    msg,
-                    &self.state,
-                    inner_width.saturating_sub(3),
-                    self.summarize_with_llm && self.llm.is_some(),
-                    MAX_SUMMARY_LINES,
-                );
+                let body_lines =
+                    expanded_body_lines(msg, inner_width.saturating_sub(3), MAX_SUMMARY_LINES);
                 // First the full subject on its own row(s) (up to 2).
                 for sline in wrap_text(&msg.subject, inner_width.saturating_sub(3), 2) {
                     if rows_emitted >= list_height {
@@ -2330,24 +1608,11 @@ impl Widget for EmailWidget {
                     )));
                     // Blank separator between header and body.
                     rp_lines.push(Line::from(""));
-                    // Body: full message with no MAX_SUMMARY_LINES cap,
-                    // wrapped to pane width. Honors the per-message summary
-                    // toggle (`s`) — when the user has switched into summary
-                    // view this renders the already-generated summary (reused
-                    // from the in-memory/disk cache, no fresh LLM call)
-                    // instead of the raw body. Clip to available rows with a
-                    // trailing dim "…" when the content overflows the pane.
                     const HEADER_ROWS: usize = 3; // sender, subject, blank
                     let body_rows_avail = (rp.height as usize).saturating_sub(HEADER_ROWS);
                     if body_rows_avail > 0 {
                         let body_w = (rp.width as usize).saturating_sub(1).max(1);
-                        let all_body = expanded_body_lines(
-                            msg,
-                            &self.state,
-                            body_w,
-                            self.summarize_with_llm && self.llm.is_some(),
-                            usize::MAX,
-                        );
+                        let all_body = expanded_body_lines(msg, body_w, usize::MAX);
                         let clipped = all_body.len() > body_rows_avail;
                         let take = if clipped {
                             body_rows_avail.saturating_sub(1)
@@ -2382,21 +1647,8 @@ impl Widget for EmailWidget {
             frame.render_widget(Paragraph::new(divider_lines), gutter);
         }
 
-        // Hide the `s summarize` hint when summarisation isn't usable —
-        // either the user disabled it in email.toml or there's no LLM
-        // key configured. Surfacing an unbindable key in the footer is
-        // confusing ("I pressed s and nothing happened…").
-        let summarize_usable = self.summarize_with_llm && self.llm.is_some();
-        // When the read pane is active the `e`/Enter key is a no-op, so drop
-        // that hint to avoid implying a binding that does nothing in this mode.
         let footer_hint = if read_area.is_some() {
-            if summarize_usable {
-                "↑/↓ select · ←/→ folder · ⏎ open popup · s summarize · c copy · space read/unread · d delete · r refresh"
-            } else {
-                "↑/↓ select · ←/→ folder · ⏎ open popup · c copy · space read/unread · d delete · r refresh"
-            }
-        } else if summarize_usable {
-            "↑/↓ select · ←/→ folder · e/click expand · ⏎ open popup · s summarize · c copy · space read/unread · d delete · r refresh"
+            "↑/↓ select · ←/→ folder · ⏎ open popup · c copy · space read/unread · d delete · r refresh"
         } else {
             "↑/↓ select · ←/→ folder · e/click expand · ⏎ open popup · c copy · space read/unread · d delete · r refresh"
         };
@@ -2436,7 +1688,7 @@ impl Widget for EmailWidget {
                 },
             );
         } else if let Some(popup) = popup {
-            self.render_ai_popup(frame, area, &popup);
+            self.render_message_popup(frame, area, &popup);
         }
     }
 
@@ -2474,7 +1726,7 @@ impl Widget for EmailWidget {
             }
             return EventResult::Handled;
         }
-        // AI popup: open with the full message + AI action keys.
+        // The message popup captures input while open.
         // Captures every key while open (mirrors the confirm-modal
         // gate above) so the list underneath can't be navigated by
         // accident while it's up.
@@ -2526,10 +1778,6 @@ impl Widget for EmailWidget {
                 self.open_popup();
                 EventResult::Handled
             }
-            KeyCode::Char('s') => {
-                self.toggle_summary_view();
-                EventResult::Handled
-            }
             KeyCode::Char('r') => {
                 self.mark_dirty();
                 EventResult::Handled
@@ -2564,16 +1812,6 @@ impl Widget for EmailWidget {
             .expect("email state poisoned")
             .zoom_request
             .take()
-    }
-
-    fn take_notes_refresh_request(&mut self) -> bool {
-        let mut st = self.state.lock().expect("email state poisoned");
-        std::mem::replace(&mut st.notes_refresh_pending, false)
-    }
-
-    fn take_calendar_refresh_request(&mut self) -> bool {
-        let mut st = self.state.lock().expect("email state poisoned");
-        std::mem::replace(&mut st.calendar_refresh_pending, false)
     }
 
     fn jump_to_reference(&mut self, account: &str, id: &str) -> bool {
@@ -2683,18 +1921,6 @@ impl Widget for EmailWidget {
             ("End", "jump to bottom"),
             ("e / click", "expand selected (inline)"),
             ("Enter", "open full message in a full-screen popup"),
-            ("s (popup)", "AI summarize (when enabled)"),
-            ("x (popup)", "AI explain (when enabled)"),
-            (
-                "t (popup)",
-                "AI extract todos/dates → selectable list (when enabled)",
-            ),
-            ("j/k (extract list)", "select a todo/date"),
-            (
-                "space (extract list)",
-                "add/remove: todo → Notes, date → Calendar",
-            ),
-            ("s", "request inline LLM summary (when enabled)"),
             ("c", "copy message body to clipboard"),
             ("space", "toggle read/unread (IMAP: syncs to server)"),
             (
@@ -2718,24 +1944,17 @@ impl Widget for EmailWidget {
             "latest_days": self.latest_days,
             "refresh_minutes": mail_secs / 60,
             "folders": self.folders,
-            "summarize_with_llm": self.summarize_with_llm,
         })
     }
 
     fn apply_config(&mut self, config: serde_json::Value) -> Result<()> {
         let new_config: EmailConfig =
             serde_json::from_value(config).context("invalid email config payload")?;
-        let llm = self.llm.clone();
         let app_theme = self.app_theme.clone();
         let cache = self.cache.clone();
         let instance = self.instance.clone();
-        *self = Self::with_config_and_llm(instance, new_config, llm, app_theme, cache);
+        *self = Self::with_dependencies(instance, new_config, app_theme, cache);
         Ok(())
-    }
-
-    fn set_app_theme(&mut self, theme: Arc<Theme>) {
-        self.theme = theme.with_overrides(&self.colors_override);
-        self.app_theme = theme;
     }
 
     /// Return whichever tracker is currently in effect — account
@@ -2807,71 +2026,7 @@ fn truncate_body_in_place(body: &mut String, max_chars: usize) {
     body.push_str("…");
 }
 
-/// Body/summary lines for a message, honoring the per-message summary
-/// preference (`summary_view`) and any already-generated summary
-/// (`ai_results`'s `Summarize` entry, populated from the in-memory map
-/// or the disk cache — never a fresh LLM call). `body_max_lines` caps
-/// the *raw body* view: the compact list/expanded panes pass
-/// `MAX_SUMMARY_LINES` to keep long emails from crowding the list,
-/// while the wide read pane passes `usize::MAX` and does its own
-/// row-clipping. LLM summaries are always uncapped (already bounded by
-/// the system prompt).
-fn expanded_body_lines(
-    msg: &EmailMessage,
-    state: &Arc<Mutex<EmailState>>,
-    max_width: usize,
-    llm_enabled: bool,
-    body_max_lines: usize,
-) -> Vec<String> {
-    let (summary_state, prefer_summary) = {
-        let st = state.lock().expect("email state poisoned");
-        (
-            st.ai_results
-                .get(&(msg.id.clone(), AiAction::Summarize))
-                .cloned(),
-            *st.summary_view.get(&msg.id).unwrap_or(&false),
-        )
-    };
-    // Show the summary only when the user has explicitly toggled into
-    // summary view for this message (via `s`). The historical default
-    // — "always prefer summary if cached" — caused a `s` press to
-    // appear to do nothing because the view was already on the
-    // cached summary. With the per-message preference, the user gets
-    // a predictable Body ⇄ Summary toggle and never loses the
-    // original body view to a stale summary.
-    if llm_enabled && prefer_summary {
-        if let Some(s) = summary_state {
-            match s {
-                // Ready summaries render in full — the system prompt
-                // caps the LLM output at ~4 sentences, so the line
-                // count is naturally bounded.
-                SummaryState::Ready(text) => {
-                    return wrap_text(&text, max_width, usize::MAX);
-                }
-                SummaryState::Requested => {
-                    let mut out = vec!["Summarizing…".to_string()];
-                    if !msg.plain_body.is_empty() {
-                        out.extend(wrap_text(
-                            &msg.plain_body,
-                            max_width,
-                            body_max_lines.saturating_sub(1),
-                        ));
-                    }
-                    return out;
-                }
-                // Failed → fall through to body so the user always
-                // sees something readable even when the LLM bailed.
-                SummaryState::Failed => {}
-            }
-        }
-    }
-    // Body view: cap at `body_max_lines`. In the list/expanded panes
-    // this is MAX_SUMMARY_LINES (5) — long raw emails would otherwise
-    // push every other message off-screen and require multi-pane
-    // scrolling. The read pane passes usize::MAX and clips to its own
-    // available rows. The LLM summary above stays uncapped (already
-    // bounded by the system prompt's ~4 sentences); users who want the
-    // full uncapped body press Enter for the AI popup instead.
+fn expanded_body_lines(msg: &EmailMessage, max_width: usize, body_max_lines: usize) -> Vec<String> {
     wrap_text(&msg.plain_body, max_width, body_max_lines)
 }
 
@@ -2883,51 +2038,13 @@ fn wrap_text(text: &str, max_width: usize, max_lines: usize) -> Vec<String> {
     wrap(text, max_width, max_lines, true)
 }
 
-/// One row of the extract popup's selectable todo/date list: a
-/// `▸`/blank selection caret, a `[+]`/`[ ]` added-state mark, then the
-/// wrapped item text with a hanging indent on continuation lines.
-/// Free function (not a method) so it stays testable/reusable without
-/// needing `&EmailWidget` — it only needs the active theme.
-fn extract_row_lines(
-    theme: &Theme,
-    selected: bool,
-    added: bool,
-    text: &str,
-    width: usize,
-) -> Vec<Line<'static>> {
-    let caret = if selected { "▸ " } else { "  " };
-    let mark = if added { "[+] " } else { "[ ] " };
-    let style = if selected {
-        theme.text_focused
-    } else if added {
-        theme.text_dim
-    } else {
-        theme.text_plain
-    };
-    let prefix_w = caret.chars().count() + mark.chars().count();
-    let content_w = width.saturating_sub(prefix_w).max(1);
-    wrap_text(text, content_w, usize::MAX)
-        .into_iter()
-        .enumerate()
-        .map(|(wi, row)| {
-            let prefix = if wi == 0 {
-                format!("{caret}{mark}")
-            } else {
-                " ".repeat(prefix_w)
-            };
-            Line::from(vec![Span::styled(prefix, style), Span::styled(row, style)])
-        })
-        .collect()
-}
-
 pub const KIND: &str = "email";
 
 pub fn build(ctx: &super::WidgetCtx) -> Box<dyn super::Widget> {
     let cfg: EmailConfig = serde_json::from_value(ctx.config.clone()).unwrap_or_default();
-    Box::new(EmailWidget::with_config_and_llm(
+    Box::new(EmailWidget::with_dependencies(
         ctx.instance.clone(),
         cfg,
-        ctx.llm.clone(),
         ctx.theme.clone(),
         ctx.cache.clone(),
     ))

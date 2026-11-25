@@ -15,7 +15,7 @@ pub mod feeds;
 pub mod notes;
 pub mod registry;
 
-use std::{collections::HashMap, sync::Arc};
+use std::collections::HashMap;
 
 use anyhow::Result;
 use async_trait::async_trait;
@@ -23,7 +23,6 @@ use crossterm::event::{KeyEvent, MouseEvent};
 use ratatui::{layout::Rect, Frame};
 
 use crate::cache::ScopedCache;
-use crate::llm::LlmProvider;
 use crate::theme::Theme;
 
 /// Per-tick context passed to `Widget::update`. Reserved for shared
@@ -43,9 +42,6 @@ pub struct WidgetCtx {
     /// one file rather than `<kind>@<instance>.toml`.
     pub instance: String,
     pub theme: std::sync::Arc<Theme>,
-    /// `None` when `[llm] enabled = false` or no API key is on disk.
-    /// Widgets that opt into LLM features must handle this case.
-    pub llm: Option<std::sync::Arc<dyn LlmProvider>>,
     /// Per-widget persistent cache, already namespaced to `(kind, instance)`.
     /// See `src/cache/mod.rs` for the load/store/invalidate primitives.
     pub cache: ScopedCache,
@@ -167,11 +163,6 @@ pub trait Widget: Send + Sync {
         Vec::new()
     }
 
-    /// Called by `:scheme <name>` so palette changes propagate without a
-    /// restart. Widgets that paint themed chrome rebuild their merged theme
-    /// from the new app theme plus their own `[colors]` overrides.
-    fn set_app_theme(&mut self, _theme: Arc<Theme>) {}
-
     /// Optional read-only view of a widget's polling cadence.
     /// Widgets that periodically fetch data (RSS feeds, network
     /// quotes, weather, mail, …) return
@@ -242,31 +233,6 @@ pub trait Widget: Send + Sync {
         None
     }
 
-    /// One-shot: drain whether this widget just wrote data directly
-    /// into another widget's on-disk store, bypassing that widget's
-    /// own editing path — e.g. Email's extract-to-notes action calling
-    /// `notes::store::save` straight through, rather than going
-    /// through the Notes widget's own `create_note`/`save_active`. The
-    /// app polls this after key dispatch and, when `true`, calls
-    /// [`Widget::reload_external_changes`] on the "notes" widget so
-    /// its in-memory list picks up the change without a restart.
-    /// Default `false`; only Email overrides it today. Named for the
-    /// one real cross-widget writer that exists rather than a general
-    /// target list — extend if a second one shows up.
-    fn take_notes_refresh_request(&mut self) -> bool {
-        false
-    }
-
-    /// Same idea as [`Widget::take_notes_refresh_request`], for the
-    /// "calendar" widget: set after Email's extract-dates action
-    /// writes an event into the local `.ics` file. The Calendar
-    /// widget builds its provider once at construction and never
-    /// re-reads that file on its own, so without this signal an
-    /// extracted date would only appear after an app restart.
-    fn take_calendar_refresh_request(&mut self) -> bool {
-        false
-    }
-
     /// One-shot: drain a "please open this source item" request the
     /// widget queued internally — e.g. Notes' board-card action for a
     /// checklist item carrying an email reference. `(account, id)` is
@@ -288,7 +254,7 @@ pub trait Widget: Send + Sync {
     }
 
     /// Re-scan this widget's on-disk data for changes made from
-    /// outside its own actions (see [`Widget::take_notes_refresh_request`]).
+    /// outside its own actions.
     /// Default no-op; only the Notes widget overrides it today.
     /// Implementations must preserve any in-memory state the reload
     /// could otherwise clobber (e.g. an unsaved edit to the note

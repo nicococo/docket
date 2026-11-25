@@ -53,10 +53,6 @@ pub struct RenderState<'a> {
     /// the unknown-widget placeholder). Each widget already carries its own
     /// merged theme — chrome doesn't need to redo that work.
     pub theme: &'a Arc<Theme>,
-    /// Name of the active color scheme (matches a `[schemes.<name>]` block
-    /// in colorschemes.toml). Used by the help overlay to mark the current
-    /// scheme in its listing.
-    pub theme_name: &'a str,
     /// Row offset to apply to the help overlay's vertical scroll. App
     /// owns the canonical value; render reads it and applies it via
     /// `Paragraph::scroll`.
@@ -693,7 +689,6 @@ mod tests {
             command_buffer: None,
             command_feedback: None,
             theme: &theme,
-            theme_name: "default",
             help_scroll: 0,
             help_scroll_max: &help_scroll_max,
             show_status_bar: false,
@@ -756,7 +751,6 @@ mod tests {
             crate::widgets::WidgetCtx {
                 instance,
                 theme: theme.clone(),
-                llm: None,
                 cache: cache.scoped("calendar", "main"),
                 config: serde_json::Value::Null,
             }
@@ -779,7 +773,6 @@ mod tests {
             command_buffer: None,
             command_feedback: None,
             theme: &theme,
-            theme_name: "default",
             help_scroll: 0,
             help_scroll_max: &help_scroll_max,
             show_status_bar: false,
@@ -977,7 +970,6 @@ mod tests {
             command_buffer: None,
             command_feedback: None,
             theme: &theme,
-            theme_name: "default",
             help_scroll: 0,
             help_scroll_max: &help_scroll_max,
             show_status_bar: false,
@@ -1130,7 +1122,6 @@ mod tests {
             command_buffer: None,
             command_feedback: None,
             theme: &theme,
-            theme_name: "default",
             help_scroll: 0,
             help_scroll_max: &help_scroll_max,
             show_status_bar: false,
@@ -1301,7 +1292,6 @@ pub fn render(frame: &mut Frame, state: &RenderState) {
                 frame,
                 chrome_area,
                 state.focused,
-                state.theme_name,
                 state.mouse_capture,
                 state.theme,
             );
@@ -1314,7 +1304,7 @@ pub fn render(frame: &mut Frame, state: &RenderState) {
     }
 
     if state.show_help {
-        let sections = build_help_sections(state.manager, state.theme_name);
+        let sections = build_help_sections(state.manager);
         help::render(
             frame,
             area,
@@ -1522,7 +1512,6 @@ pub fn render_partial(
                 frame,
                 chrome_area,
                 state.focused,
-                state.theme_name,
                 state.mouse_capture,
                 state.theme,
             );
@@ -1622,7 +1611,7 @@ fn render_feedback(
     frame.render_widget(Paragraph::new(line), area);
 }
 
-fn build_help_sections(manager: &WidgetManager, active_scheme: &str) -> Vec<help::Section> {
+fn build_help_sections(manager: &WidgetManager) -> Vec<help::Section> {
     let global = help::Section {
         title: "Global".into(),
         bindings: vec![
@@ -1635,13 +1624,10 @@ fn build_help_sections(manager: &WidgetManager, active_scheme: &str) -> Vec<help
             ("z / Z".into(), "zoom focused widget".into()),
             ("z / Z (while zoomed)".into(), "exit zoom".into()),
             (":".into(), "open command bar".into()),
+            (":settings".into(), "edit settings".into()),
             (
                 "Ctrl+U (in :)".into(),
                 "clear the command bar (keeps the `:` prompt)".into(),
-            ),
-            (
-                ":scheme <name>".into(),
-                "switch color scheme (see list below)".into(),
             ),
             (
                 "Ctrl+T · :mouse".into(),
@@ -1670,36 +1656,6 @@ fn build_help_sections(manager: &WidgetManager, active_scheme: &str) -> Vec<help
             title: widget.display_name().to_string(),
             bindings,
         });
-    }
-
-    // Append a "Color schemes" section listing every built-in scheme so
-    // the user doesn't have to remember them. Marks the active one with
-    // `●`.
-    if let Ok(file) = crate::theme::load_schemes_file() {
-        let mut names: Vec<&str> = file.schemes.keys().map(String::as_str).collect();
-        names.sort_unstable();
-        if !names.is_empty() {
-            let bindings: Vec<(String, String)> = names
-                .into_iter()
-                .map(|name| {
-                    let key = if name == active_scheme {
-                        format!("● {name}")
-                    } else {
-                        format!("  {name}")
-                    };
-                    let desc = if name == active_scheme {
-                        "active scheme".to_string()
-                    } else {
-                        format!(":scheme {name}")
-                    };
-                    (key, desc)
-                })
-                .collect();
-            sections.push(help::Section {
-                title: "Color schemes".into(),
-                bindings,
-            });
-        }
     }
 
     sections
