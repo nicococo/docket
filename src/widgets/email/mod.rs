@@ -1473,7 +1473,7 @@ impl Widget for EmailWidget {
             let row_style = if is_selected {
                 Style::default()
                     .fg(Color::Black)
-                    .bg(Color::LightYellow)
+                    .bg(self.theme.text_selected.fg.unwrap_or(Color::LightYellow))
                     .add_modifier(Modifier::BOLD)
             } else if !unread {
                 self.theme.text_dim

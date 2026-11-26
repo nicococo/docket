@@ -2,11 +2,18 @@
 
 [![CI](https://github.com/nicococo/docket/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/nicococo/docket/actions/workflows/ci.yml) [![Coverage](https://codecov.io/gh/nicococo/docket/graph/badge.svg)](https://codecov.io/gh/nicococo/docket) [![License: GPL-3.0-or-later](https://img.shields.io/badge/license-GPL--3.0--or--later-blue.svg)](LICENSE)
 
-Calendar, feeds, notes and email in one keyboard-driven terminal dashboard.
+**A quick-glance cockpit for the working moment.** Built for Herdr, docket gives you and your coding agents one shared view of the day: catch up on what’s new, scribble a next step before it slips, and get back to the work in front of you.
 
 ![Illustrated mockup of the docket dashboard](assets/docket-mockup.png)
 
 *Illustrated mockup; content and colors depend on your terminal and data.*
+
+## Made for the moment
+
+- **Calendar** — See today’s shape across local, CalDAV, and ICS calendars without leaving the terminal.
+- **Feeds** — Scan chosen RSS and Atom sources to catch what’s new without opening a stack of sites.
+- **Notes** — Write plain Markdown files in the notes folder set in Settings; they stay fully compatible with Obsidian. Headings and checklists can become a Kanban board, keeping quick scribbles and next steps together.
+- **Email** — See unread messages alongside mail from the last *N* days. Quickly mark messages read or unread, or delete them to clear the bulk.
 
 ## Install in Herdr
 
@@ -16,7 +23,7 @@ Requires Herdr 0.9+, Rust, Cargo and Python 3 on Linux or macOS:
 herdr plugin install nicococo/docket
 ```
 
-Herdr builds docket on installation. From a local checkout, `python3 scripts/install-herdr.py` installs the plugin and adds `prefix+d` if the key is free (Python 3.11+). Otherwise, to open it, run:
+Herdr builds docket on installation and adds `prefix+i` if that key is free. If it is already in use, configure another shortcut in docket's Herdr settings or run:
 
 ```sh
 herdr plugin action invoke nicococo.docket.toggle
@@ -26,7 +33,7 @@ For a shortcut, add this to `~/.config/herdr/config.toml`, choosing an unused ke
 
 ```toml
 [[keys.command]]
-key = "prefix+d"
+key = "prefix+i"
 type = "plugin_action"
 command = "nicococo.docket.toggle"
 description = "Toggle docket"
@@ -52,11 +59,11 @@ cargo install --path . --locked
 docket
 ```
 
-Docket creates its default configuration on first run. Press `?` for keys, `Tab` to switch panes, `z` to zoom, and `Ctrl+G` for settings. Use `Tab` to choose a settings page, arrows to select, `Enter` to edit, `Ctrl+S` to save, and `Esc` to close. On Herdr, the Herdr page adds or removes shortcuts and updates the plugin; shortcut changes apply when saved.
+Docket creates its default configuration on first run. Press `?` for keys, `Tab` to switch panes, `z` to zoom, and `s` for settings (`Ctrl+G` also works). In settings, use `Tab` to choose a page, arrows to select, `Enter` to edit, `a` to add a source/account, `x` to remove the last one, `Ctrl+S` to save, and `Esc` to close. On Herdr, add a full key sequence such as `prefix+i`; the `prefix` key itself is configured in Herdr. Shortcut changes apply when saved.
 
 ## Data and setup
 
-Settings live in `~/.config/docket/config.toml`; notes are Markdown files under `~/.config/docket/notes/` by default. Calendar, feed and email connections are optional. Credentials are stored separately in `~/.config/docket/credentials/`. See [setup instructions](INSTRUCTIONS.md).
+Settings live in `~/.config/docket/config.toml`; notes are Obsidian-compatible Markdown files under `~/.config/docket/notes/` by default, with the folder configurable in Settings. Calendar, feed and email connections are optional. Credentials are stored separately in `~/.config/docket/credentials/`. See [setup instructions](INSTRUCTIONS.md).
 
 There is no telemetry or docket-hosted service. Docket contacts the feeds, calendars and mail servers you configure.
 

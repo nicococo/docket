@@ -8,7 +8,7 @@ use ratatui::{
     layout::Rect,
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Clear, Paragraph},
+    widgets::{Block, BorderType, Borders, Clear, Paragraph, Wrap},
     Frame,
 };
 use std::{
@@ -127,7 +127,7 @@ impl Settings {
             None,
             "provider",
             "Provider".into(),
-            "imap enables email; none disables it.",
+            "Use imap to enable email. Add a provider in-app, then enter its IMAP server below; Gmail needs an app password.",
             "imap",
             false,
             false,
@@ -160,7 +160,7 @@ impl Settings {
             None,
             "folders",
             "Folders".into(),
-            "Comma-separated IMAP folders for a single account.",
+            "Comma-separated folders such as INBOX, Sent. Find exact names in your mail app's IMAP settings.",
             "INBOX",
             false,
             true,
@@ -194,7 +194,7 @@ impl Settings {
             None,
             "default_view",
             "Default view".into(),
-            "day, week or month.",
+            "Choose day, week or month. This is the view shown when docket opens.",
             "day",
             false,
             false,
@@ -216,7 +216,7 @@ impl Settings {
             None,
             "first_day_of_week",
             "Week starts".into(),
-            "Weekday name, such as monday or sunday.",
+            "Weekday name. Use monday for ISO weeks or sunday for US-style weeks.",
             "sunday",
             false,
             false,
@@ -227,7 +227,7 @@ impl Settings {
             None,
             "local_ics_path",
             "Local calendar".into(),
-            "Path to a local .ics file; empty uses the default.",
+            "Path to a local .ics calendar file; leave blank to use docket's example calendar.",
             "",
             false,
             false,
@@ -244,7 +244,7 @@ impl Settings {
                     Some(("providers", i)),
                     "kind",
                     format!("Source {} type", i + 1),
-                    "local, caldav or ics.",
+                    "Choose local, caldav or ics. CalDAV credentials go in the fields below; ICS URL goes in credentials/ics.toml.",
                     "local",
                     false,
                     false,
@@ -255,7 +255,7 @@ impl Settings {
                     Some(("providers", i)),
                     "account",
                     format!("Source {} account", i + 1),
-                    "ICS feed label or CalDAV account.",
+                    "ICS label from credentials/ics.toml; leave blank for default CalDAV discovery.",
                     "",
                     false,
                     false,
@@ -285,7 +285,7 @@ impl Settings {
                     Some(("feeds", i)),
                     "topic",
                     format!("Feed {} name", i + 1),
-                    "Name shown on the feed tab.",
+                    "Short tab name. Paste the RSS/Atom feed URL in the next field.",
                     "",
                     false,
                     false,
@@ -296,7 +296,7 @@ impl Settings {
                     Some(("feeds", i)),
                     "url",
                     format!("Feed {} URL", i + 1),
-                    "RSS or Atom feed address.",
+                    "RSS/Atom URL; copy the feed address from the publisher's website.",
                     "",
                     false,
                     false,
@@ -309,7 +309,7 @@ impl Settings {
             None,
             "notes_dir",
             "Notes directory".into(),
-            "Markdown notes folder; empty uses the default.",
+            "Folder for Markdown notes. Leave blank to use ~/.config/docket/notes/.",
             "",
             false,
             false,
@@ -683,6 +683,221 @@ impl Settings {
         self.row = self.fields[2].len() - 2;
     }
 
+    fn add_email_account(&mut self) {
+        if !self.doc.contains_key("email") {
+            self.doc["email"] = Item::Table(Table::new());
+        }
+        if self.doc["email"].get("accounts").is_none() {
+            self.doc["email"]["accounts"] = Item::ArrayOfTables(toml_edit::ArrayOfTables::new());
+        }
+        let is_empty = self.doc["email"]["accounts"]
+            .as_array_of_tables()
+            .is_some_and(|a| a.is_empty());
+        if is_empty {
+            let folders = self
+                .doc
+                .get("email")
+                .and_then(|e| e.get("folders"))
+                .and_then(Item::as_array)
+                .cloned()
+                .unwrap_or_else(|| toml_edit::Array::from_iter(["INBOX"]));
+            let mut legacy = Table::new();
+            legacy["label"] = toml_edit::value("");
+            legacy["folders"] = toml_edit::value(folders.clone());
+            self.doc["email"]["accounts"]
+                .as_array_of_tables_mut()
+                .unwrap()
+                .push(legacy);
+            self.fields[0].retain(|field| !(field.key == "folders" && field.array.is_none()));
+            self.fields[0].push(Field {
+                section: "email",
+                array: Some(("accounts", 0)),
+                key: "folders",
+                label: "Default account folders".into(),
+                description: "Comma-separated IMAP folders; INBOX is the usual starting point.",
+                value: folders
+                    .iter()
+                    .filter_map(|v| v.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", "),
+                original: String::new(),
+                integer: false,
+                list: true,
+                credential: None,
+                secret: false,
+            });
+        }
+        let Some(accounts) = self.doc["email"]["accounts"].as_array_of_tables_mut() else {
+            self.error = Some("Email accounts are not a list".into());
+            return;
+        };
+        let index = accounts.len();
+        let mut label = format!("account{}", index + 1);
+        while accounts
+            .iter()
+            .any(|a| a.get("label").and_then(Item::as_str) == Some(&label))
+        {
+            label.push('_');
+        }
+        let mut account = Table::new();
+        account["label"] = toml_edit::value(label.as_str());
+        account["folders"] = toml_edit::value(toml_edit::Array::from_iter(["INBOX"]));
+        accounts.push(account);
+        let credential_index = self.credentials.len();
+        let credential_path = self
+            .path
+            .parent()
+            .unwrap_or_else(|| std::path::Path::new(""))
+            .join("credentials")
+            .join(format!("imap_{label}.toml"));
+        let credential_doc = DocumentMut::new();
+        for (key, name, description, secret, integer) in [
+            (
+                "host",
+                "IMAP host",
+                "Mail server hostname, such as imap.gmail.com.",
+                false,
+                false,
+            ),
+            (
+                "port",
+                "IMAP port",
+                "IMAP server port; 993 is the usual TLS port.",
+                false,
+                true,
+            ),
+            (
+                "username",
+                "Username",
+                "Email address used to sign in.",
+                false,
+                false,
+            ),
+            (
+                "app_password",
+                "App password",
+                "Use an app-specific password from your mail provider.",
+                true,
+                false,
+            ),
+        ] {
+            let value = if integer {
+                "993".to_owned()
+            } else {
+                String::new()
+            };
+            self.fields[0].push(Field {
+                section: "email",
+                array: None,
+                key,
+                label: format!("{label} {name}"),
+                description,
+                original: value.clone(),
+                value,
+                integer,
+                list: false,
+                credential: Some(credential_index),
+                secret,
+            });
+        }
+        self.fields[0].push(Field {
+            section: "email",
+            array: Some(("accounts", index)),
+            key: "folders",
+            label: format!("{label} folders"),
+            description: "Comma-separated IMAP folders; INBOX is the usual starting point.",
+            value: "INBOX".into(),
+            original: "INBOX".into(),
+            integer: false,
+            list: true,
+            credential: None,
+            secret: false,
+        });
+        self.credentials.push(Credential {
+            kind: "imap",
+            path: credential_path,
+            original: None,
+            doc: credential_doc,
+        });
+        self.row = self.fields[0].len() - 5;
+    }
+
+    fn remove_last_source(&mut self) {
+        let (section, key, tab) = match self.tab {
+            0 => ("email", "accounts", 0),
+            1 => ("calendar", "providers", 1),
+            2 => ("feeds", "feeds", 2),
+            _ => return,
+        };
+        let index = self
+            .doc
+            .get(section)
+            .and_then(|s| s.get(key))
+            .and_then(Item::as_array_of_tables)
+            .map(|a| a.len().saturating_sub(1));
+        let Some(index) = index.filter(|_| {
+            self.doc
+                .get(section)
+                .and_then(|s| s.get(key))
+                .and_then(Item::as_array_of_tables)
+                .is_some_and(|a| !a.is_empty())
+        }) else {
+            self.error = Some(format!(
+                "No {} to remove",
+                match tab {
+                    0 => "email account",
+                    1 => "calendar source",
+                    _ => "feed",
+                }
+            ));
+            return;
+        };
+        let label = (tab == 0)
+            .then(|| {
+                self.doc[section][key]
+                    .as_array_of_tables()
+                    .and_then(|a| a.get(index))
+                    .and_then(|a| a.get("label"))
+                    .and_then(Item::as_str)
+                    .unwrap_or("")
+                    .to_owned()
+            })
+            .unwrap_or_default();
+        if let Some(array) = self.doc[section][key].as_array_of_tables_mut() {
+            array.remove(index);
+        }
+        if tab == 0 {
+            let filename = if label.is_empty() {
+                "imap.toml".into()
+            } else {
+                format!("imap_{label}.toml")
+            };
+            let removed_path = self
+                .path
+                .parent()
+                .unwrap_or_else(|| std::path::Path::new(""))
+                .join("credentials")
+                .join(filename);
+            if let Some(credential) = self.credentials.iter().position(|c| c.path == removed_path) {
+                self.credentials.remove(credential);
+                self.fields[0].retain(|field| field.credential != Some(credential));
+                for field in self.fields.iter_mut().flatten() {
+                    if let Some(i) = field.credential {
+                        if i > credential {
+                            field.credential = Some(i - 1);
+                        }
+                    }
+                }
+            }
+            self.fields[tab].retain(|f| {
+                f.array != Some((key, index)) && !f.label.starts_with(&format!("{label} "))
+            });
+        } else {
+            self.fields[tab].retain(|f| f.array != Some((key, index)));
+        }
+        self.row = self.row.min(self.fields[tab].len().saturating_sub(1));
+    }
+
     fn herdr_row_count(&self) -> usize {
         self.herdr_bindings.len() + 2
     }
@@ -748,11 +963,17 @@ impl Settings {
                 self.tab = (self.tab + TABS.len() - 1) % TABS.len();
                 self.row = 0;
             }
-            (_, KeyCode::Char('n')) if !self.editing && self.tab == 2 => self.add_feed(),
-            (_, KeyCode::Char('n')) if !self.editing && self.tab == 1 => self.add_calendar_source(),
+            (_, KeyCode::Char('a' | 'n')) if !self.editing && self.tab == 0 => {
+                self.add_email_account()
+            }
+            (_, KeyCode::Char('a' | 'n')) if !self.editing && self.tab == 2 => self.add_feed(),
+            (_, KeyCode::Char('a' | 'n')) if !self.editing && self.tab == 1 => {
+                self.add_calendar_source()
+            }
+            (_, KeyCode::Char('x')) if !self.editing && self.tab < 3 => self.remove_last_source(),
             (_, KeyCode::Up) if !self.editing => self.row = self.row.saturating_sub(1),
             (_, KeyCode::Down) if !self.editing => {
-                self.row = (self.row + 1).min(self.fields[self.tab].len() - 1)
+                self.row = (self.row + 1).min(self.fields[self.tab].len().saturating_sub(1))
             }
             (KeyModifiers::CONTROL, KeyCode::Char('u')) if self.editing => {
                 self.fields[self.tab][self.row].value.clear();
@@ -1102,7 +1323,7 @@ impl Settings {
         Ok(())
     }
 
-    pub fn render(&self, frame: &mut Frame) {
+    pub fn render(&self, frame: &mut Frame, theme: &crate::theme::Theme) {
         let area = frame.area();
         if area.width < 20 || area.height < 9 {
             return;
@@ -1113,12 +1334,16 @@ impl Settings {
         } else {
             self.fields[self.tab].len()
         };
-        let hint = if self.editing {
+        let hint = if area.width < 58 && self.editing {
+            "Edit · ^U clear · Enter done · ^S save"
+        } else if area.width < 58 && !self.editing && !herdr {
+            "↑↓ move · a add · x remove · Enter edit · ^S save"
+        } else if self.editing {
             "Type · ^U clear · Enter done · ^S save"
         } else if herdr {
             "Enter action · x remove · ^S save · Esc close"
-        } else if self.tab == 1 || self.tab == 2 {
-            "Tab pages · ↑/↓ move · Enter edit · n add · ^S save"
+        } else if self.tab < 3 {
+            "Tab pages · ↑/↓ move · Enter edit · a add · x remove last · ^S save"
         } else {
             "Tab pages · ↑/↓ move · Enter edit · ^S save · Esc close"
         };
@@ -1128,7 +1353,7 @@ impl Settings {
             hint.to_owned()
         };
         let visible_rows = row_count
-            .min(usize::from(area.height.saturating_sub(8)))
+            .min(usize::from(area.height.saturating_sub(10)))
             .max(1);
         let label_width = if herdr {
             24
@@ -1155,18 +1380,29 @@ impl Settings {
                 .unwrap_or(12)
                 .min(36)
         };
+        let description_width = if herdr {
+            72
+        } else {
+            self.fields[self.tab]
+                .iter()
+                .map(|field| field.description.chars().count())
+                .max()
+                .unwrap_or(0)
+                .min(72)
+        };
         let natural_width = label_width
             .saturating_add(value_width)
             .saturating_add(8)
+            .max(description_width + 4)
             .max(TABS.iter().map(|tab| tab.len()).sum::<usize>() + TABS.len() * 2)
             .max(footer.chars().count() + 2)
             .max(46);
         let width = natural_width
-            .min(usize::from(area.width.saturating_sub(4)))
+            .min(usize::from(area.width.saturating_sub(2)))
             .max(16) as u16;
-        let height = (visible_rows + 6)
+        let height = (visible_rows + 8)
             .min(usize::from(area.height.saturating_sub(2)))
-            .max(7) as u16;
+            .max(9) as u16;
         let rect = Rect::new(
             area.x + (area.width - width) / 2,
             area.y + (area.height - height) / 2,
@@ -1176,23 +1412,36 @@ impl Settings {
         frame.render_widget(Clear, rect);
         let block = Block::default()
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::LightCyan))
-            .title(" Settings ");
+            .border_type(BorderType::Double)
+            .border_style(theme.border_focused)
+            .title(Span::styled(
+                if width < 38 {
+                    " SETTINGS "
+                } else {
+                    " ✦ DOCKET SETTINGS ✦ "
+                },
+                theme.widget_title_focused,
+            ));
         let inner = block.inner(rect);
         frame.render_widget(block, rect);
+        let tab_labels = if inner.width < 28 {
+            ["E", "C", "F", "N", "H"]
+        } else if inner.width < 42 {
+            ["Mail", "Cal", "Feed", "Notes", "Herdr"]
+        } else {
+            TABS
+        };
         let tabs = Line::from(
-            TABS.iter()
+            tab_labels
+                .iter()
                 .enumerate()
                 .map(|(i, t)| {
                     Span::styled(
                         format!(" {t} "),
                         if i == self.tab {
-                            Style::default()
-                                .fg(Color::Black)
-                                .bg(Color::LightCyan)
-                                .add_modifier(Modifier::BOLD)
+                            theme.widget_title_focused
                         } else {
-                            Style::default().fg(Color::LightMagenta)
+                            theme.text_brilliant
                         },
                     )
                 })
@@ -1202,7 +1451,7 @@ impl Settings {
             Paragraph::new(tabs),
             Rect::new(inner.x, inner.y, inner.width, 1),
         );
-        let h = inner.height.saturating_sub(4) as usize;
+        let h = inner.height.saturating_sub(6) as usize;
         let top = self.row.saturating_sub(h.saturating_sub(1));
         let lines = if herdr {
             let mut rows: Vec<(String, String)> = self
@@ -1224,11 +1473,20 @@ impl Settings {
                 .skip(top)
                 .take(h)
                 .map(|(i, (label, value))| {
-                    Line::from(format!(" {label:<24} {value}")).style(if i == self.row {
-                        Style::default().fg(Color::Black).bg(Color::LightYellow)
-                    } else {
-                        Style::default()
-                    })
+                    let row = format!(
+                        "{} {label:<24} {value}",
+                        if i == self.row { "▌" } else { " " }
+                    );
+                    Line::from(format!("{row:<width$}", width = inner.width as usize)).style(
+                        if i == self.row {
+                            Style::default()
+                                .fg(Color::Black)
+                                .bg(theme.text_selected.fg.unwrap_or(Color::Yellow))
+                                .add_modifier(Modifier::BOLD)
+                        } else {
+                            Style::default()
+                        },
+                    )
                 })
                 .collect::<Vec<_>>()
         } else {
@@ -1239,21 +1497,27 @@ impl Settings {
                 .take(h)
                 .map(|(i, f)| {
                     let style = if i == self.row {
-                        Style::default().fg(Color::Black).bg(Color::LightYellow)
+                        Style::default()
+                            .fg(Color::Black)
+                            .bg(theme.text_selected.fg.unwrap_or(Color::Yellow))
+                            .add_modifier(Modifier::BOLD)
                     } else {
                         Style::default()
                     };
-                    Line::from(format!(
-                        " {:<width$} {}",
+                    let row = format!(
+                        "{} {:<width$} {}",
+                        if i == self.row { "▌" } else { " " },
                         f.label,
                         if f.secret {
                             "*".repeat(f.value.chars().count())
+                        } else if f.value.is_empty() {
+                            "‹ empty ›".into()
                         } else {
                             f.value.clone()
                         },
                         width = label_width,
-                    ))
-                    .style(style)
+                    );
+                    Line::from(format!("{row:<width$}", width = inner.width as usize)).style(style)
                 })
                 .collect::<Vec<_>>()
         };
@@ -1268,9 +1532,9 @@ impl Settings {
             .map(|s| s.clone())
             .unwrap_or_default();
         let herdr_desc = if self.row < self.herdr_bindings.len() {
-            "Herdr shortcut that toggles the docket dashboard. Press x to remove."
+            "Herdr toggle key. Use the full sequence, e.g. prefix+i; Herdr's prefix key is configured separately. Press x to remove."
         } else if self.row == self.herdr_bindings.len() {
-            "Add a shortcut such as prefix+d; save to write Herdr config."
+            "Type the full Herdr sequence, e.g. prefix+i (the prefix key is set in Herdr config); save to apply."
         } else if herdr_status.is_empty() {
             "Update the installed plugin in the background; reopen after it finishes."
         } else {
@@ -1286,16 +1550,24 @@ impl Settings {
                     .unwrap_or("")
             }
         });
+        let description = if self.error.is_some() {
+            format!("! {desc}")
+        } else {
+            format!("↳ {desc}")
+        };
+        let desc_y = inner.y + inner.height.saturating_sub(4);
         frame.render_widget(
-            Paragraph::new(desc).style(Style::default().fg(if self.error.is_some() {
-                Color::LightRed
-            } else {
-                Color::LightCyan
-            })),
-            Rect::new(inner.x, inner.y + inner.height - 3, inner.width, 1),
+            Paragraph::new(description)
+                .wrap(Wrap { trim: true })
+                .style(if self.error.is_some() {
+                    theme.text_shortcut
+                } else {
+                    theme.text_focused
+                }),
+            Rect::new(inner.x, desc_y, inner.width, 2),
         );
         frame.render_widget(
-            Paragraph::new(footer).style(Style::default().fg(Color::LightYellow)),
+            Paragraph::new(footer).style(theme.text_selected),
             Rect::new(inner.x, inner.y + inner.height - 1, inner.width, 1),
         );
     }

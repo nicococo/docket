@@ -7,7 +7,7 @@ import sys
 import tempfile
 import tomllib
 
-KEY = "prefix+d"
+KEY = "prefix+i"
 ACTION = "nicococo.docket.toggle"
 
 
@@ -30,7 +30,7 @@ def register(path, defaults):
         return "Docket shortcut already configured."
     if KEY in set(values(config.get("keys", {}))) or KEY in defaults.lower():
         return f"{KEY} is already in use; add a different shortcut manually (see README)."
-    addition = ('\n[[keys.command]]\nkey = "prefix+d"\ntype = "plugin_action"\n'
+    addition = ('\n[[keys.command]]\nkey = "prefix+i"\ntype = "plugin_action"\n'
                 'command = "nicococo.docket.toggle"\ndescription = "Toggle docket"\n')
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(prefix=".docket-", dir=path.parent)
@@ -46,11 +46,13 @@ def register(path, defaults):
     finally:
         if os.path.exists(tmp):
             os.unlink(tmp)
-    return "Added prefix+d. Run 'herdr server reload-config' in Herdr."
+    return f"Added {KEY}. Run 'herdr server reload-config' in Herdr."
 
 
 def main():
-    subprocess.run(["herdr", "plugin", "install", "nicococo/docket"], check=True)
+    register_only = "--register-shortcut-only" in sys.argv[1:]
+    if not register_only:
+        subprocess.run(["herdr", "plugin", "install", "nicococo/docket"], check=True)
     default = subprocess.check_output(["herdr", "--default-config"], text=True)
     config_home = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
     path = Path(os.environ.get("HERDR_CONFIG_PATH", config_home / "herdr/config.toml"))

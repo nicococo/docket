@@ -8,6 +8,9 @@ platforms = ["linux", "macos"]
 [[build]]
 command = ["cargo", "build", "--release", "--locked"]
 
+[[build]]
+command = ["python3", "scripts/install-herdr.py", "--register-shortcut-only"]
+
 [[panes]]
 id = "dashboard"
 title = "docket"

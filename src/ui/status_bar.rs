@@ -13,8 +13,7 @@ use ratatui::{
 
 use crate::theme::Theme;
 
-/// Bottom-of-screen status bar:
-/// `docket vX.Y.Z │ HH:MM:SS │ Focus: <id> │ Scheme: <name> │ Tab: switch · ? help · q quit`
+/// Bottom chrome keeps focus and global keys visible at narrow widths.
 pub fn render(
     frame: &mut Frame,
     area: Rect,
@@ -29,31 +28,54 @@ pub fn render(
 
     let dim = Style::default().add_modifier(Modifier::DIM);
     let sep = Span::styled("│", dim);
-
-    let mut spans: Vec<Span> = vec![
-        Span::styled(" Ctrl+G settings ", theme.text_selected),
-        sep.clone(),
-        Span::styled(format!(" docket v{version} "), dim),
-    ];
-
+    let key = theme.widget_title_focused;
+    let mut spans: Vec<Span> = vec![Span::styled(" DOCKET ", key)];
+    if area.width >= 104 {
+        spans.extend([
+            Span::styled(format!(" v{version} "), dim),
+            sep.clone(),
+            Span::styled(format!(" {clock} "), dim),
+        ]);
+    } else if area.width >= 72 {
+        spans.push(Span::styled(format!(" {clock} "), dim));
+    }
     spans.extend([
         sep.clone(),
-        Span::styled(format!(" {clock} "), dim),
-        sep.clone(),
-        Span::styled(" Focus: ", dim),
+        Span::styled(" focus ", dim),
         Span::styled(focus.to_string(), theme.text_focused),
-        Span::styled(" ", dim),
         sep.clone(),
-        Span::styled(" Tab: switch · ? help · q quit ", dim),
     ]);
-    if !mouse_capture {
+    if area.width >= 96 {
         spans.extend([
-            sep,
-            Span::styled(
-                " Mouse released: drag to select · Ctrl+T ",
-                theme.text_selected,
-            ),
+            Span::styled(" Tab ", key),
+            Span::styled(" panes  ", dim),
+            Span::styled(" z ", key),
+            Span::styled(" zoom  ", dim),
+            Span::styled(" s ", key),
+            Span::styled(" settings  ", dim),
+            Span::styled(" ? ", key),
+            Span::styled(" help  ", dim),
+            Span::styled(" q ", key),
+            Span::styled(" quit", dim),
         ]);
+    } else if area.width >= 82 {
+        spans.extend([
+            Span::styled("Tab", theme.text_shortcut),
+            Span::styled(" · z zoom · s settings · ? help · q", theme.text_selected),
+        ]);
+    } else {
+        spans.extend([
+            Span::styled("z", theme.text_shortcut),
+            Span::styled(" · ", dim),
+            Span::styled("s", theme.text_shortcut),
+            Span::styled(" settings · ", theme.text_selected),
+            Span::styled("?", theme.text_shortcut),
+            Span::styled(" · ", dim),
+            Span::styled("q", theme.text_shortcut),
+        ]);
+    }
+    if !mouse_capture && area.width >= 120 {
+        spans.extend([sep, Span::styled(" Ctrl+T mouse ", theme.text_shortcut)]);
     }
 
     let line = Line::from(spans).alignment(Alignment::Left);

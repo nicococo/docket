@@ -22,7 +22,7 @@ class InstallerTests(unittest.TestCase):
     def test_conflicting_key_is_not_overwritten(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "config.toml"
-            path.write_text('[[keys.command]]\nkey = "prefix+d"\ncommand = "other"\n')
+            path.write_text('[[keys.command]]\nkey = "prefix+i"\ncommand = "other"\n')
             before = path.read_text()
             self.assertIn('already in use', installer.register(path, ""))
             self.assertEqual(before, path.read_text())

@@ -27,41 +27,35 @@ impl Default for Theme {
 }
 
 impl Theme {
-    /// Hardcoded fallback palette — matches the colors docket shipped with
-    /// before the theme system existed. Used to fill in any roles a scheme
-    /// omits.
+    /// High-contrast fallback palette shared by panes and app chrome.
     pub fn builtin_defaults() -> Self {
         Self {
             border_focused: Style::default()
-                .fg(Color::LightCyan)
+                .fg(Color::Rgb(255, 112, 74))
                 .add_modifier(Modifier::BOLD),
-            border_unfocused: Style::default().fg(Color::Magenta),
-            // Focus on the title is conveyed by the `┤ ├` bracket pad
-            // (painted in border_focused) — the title text itself stays
-            // the same bold across states. Schemes can still override
-            // either side to add a fg shift if they want.
+            border_unfocused: Style::default().fg(Color::Rgb(111, 78, 122)),
             widget_title_focused: Style::default()
                 .fg(Color::Black)
-                .bg(Color::LightCyan)
+                .bg(Color::Rgb(255, 190, 87))
                 .add_modifier(Modifier::BOLD),
             widget_title_unfocused: Style::default()
-                .fg(Color::LightMagenta)
+                .fg(Color::Rgb(223, 166, 255))
                 .add_modifier(Modifier::BOLD),
-            metadata_focused: Style::default().fg(Color::LightGreen),
+            metadata_focused: Style::default().fg(Color::Rgb(190, 255, 116)),
             metadata_unfocused: Style::default().add_modifier(Modifier::DIM),
             text_plain: Style::default(),
             text_brilliant: Style::default()
-                .fg(Color::LightMagenta)
+                .fg(Color::Rgb(255, 103, 182))
                 .add_modifier(Modifier::BOLD),
             text_dim: Style::default().add_modifier(Modifier::DIM),
             text_selected: Style::default()
-                .fg(Color::LightYellow)
+                .fg(Color::Rgb(255, 224, 102))
                 .add_modifier(Modifier::BOLD),
             text_focused: Style::default()
-                .fg(Color::LightCyan)
+                .fg(Color::Rgb(89, 231, 255))
                 .add_modifier(Modifier::BOLD),
             text_shortcut: Style::default()
-                .fg(Color::LightRed)
+                .fg(Color::Rgb(255, 127, 86))
                 .add_modifier(Modifier::BOLD),
         }
     }

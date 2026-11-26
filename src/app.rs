@@ -1054,9 +1054,9 @@ pub async fn run(config_path_override: Option<PathBuf>) -> Result<()> {
                 // — typing into it routes nowhere else.
                 if app.route_help_key(key) {
                     // The help overlay owns input until it closes.
-                } else if key.modifiers == KeyModifiers::CONTROL
-                    && key.code == KeyCode::Char('g')
-                    && app.command_buffer.is_none()
+                } else if app.command_buffer.is_none()
+                    && ((key.modifiers == KeyModifiers::CONTROL && key.code == KeyCode::Char('g'))
+                        || (key.modifiers == KeyModifiers::NONE && key.code == KeyCode::Char('s')))
                 {
                     app.execute_command("settings");
                 } else if app.command_buffer.is_some() {
@@ -1362,7 +1362,7 @@ pub async fn run(config_path_override: Option<PathBuf>) -> Result<()> {
                     &mut cache,
                 );
                 if let Some(settings) = app.settings.as_ref() {
-                    settings.render(frame);
+                    settings.render(frame, &app.theme);
                 }
             })?;
             app.partial_draw = cache;
