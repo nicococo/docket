@@ -80,11 +80,22 @@ Agents: when asked to connect email and calendars, guide the user through the
 following steps, one account at a time. Ask for missing details and help resolve
 errors before continuing. Never request passwords or secret calendar URLs in chat.
 
-1. Find the active `docket` executable (`command -v docket`, or the active plugin
-   root in Herdr's `~/.config/herdr/plugins.json`). Check `docket setup --help` and
-   its email/calendar subcommands. If this build lacks setup commands, explain
-   that it needs a newer build; do not invent commands. Inspect configured source
-   names without printing credentials, and preserve existing sources.
+1. Find the active `docket` executable. A standalone install may be on `PATH`;
+   Herdr keeps plugin binaries in a private install directory. Resolve its active
+   plugin root from Herdr's registry, then use the bundled binary directly:
+
+   ```sh
+   plugin_root=$(python3 -c 'import json,os,pathlib; p=pathlib.Path(os.environ.get("XDG_CONFIG_HOME",pathlib.Path.home()/".config"))/"herdr/plugins.json"; d=json.loads(p.read_text()); print(next(x["plugin_root"] for x in d if x["plugin_id"]=="nicococo.docket" and x["enabled"]))')
+   docket="$plugin_root/target/release/docket"
+   "$docket" setup --help
+   ```
+
+   Herdr does not currently provide a manifest option to add plugin binaries to
+   every agent's PATH or inject plugin-specific instructions into every agent.
+   The registry lookup above works across agents and Herdr sessions. If this
+   build lacks setup commands, explain that it needs a newer build; do not invent
+   commands. Inspect configured source names without printing credentials, and
+   preserve existing sources.
 2. Ask for each email address and desired account name, such as `personal` or
    `work`. Use that name for both email and calendar; names allow letters, digits,
    `_` and `-`. Confirm whether the user wants the primary calendar or additional
