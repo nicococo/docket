@@ -47,7 +47,21 @@ pub struct CalDavCredentials {
 
 impl CalDavCredentials {
     pub fn load() -> Result<Option<Self>> {
-        let path = credentials::dir()?.join("caldav.toml");
+        Self::load_from("caldav.toml")
+    }
+
+    pub fn load_for(account: Option<&str>) -> Result<Option<Self>> {
+        if let Some(account) = account.filter(|name| *name != "default") {
+            let named = format!("caldav_{account}.toml");
+            if credentials::path(&named)?.exists() {
+                return Self::load_from(&named);
+            }
+        }
+        Self::load()
+    }
+
+    fn load_from(filename: &str) -> Result<Option<Self>> {
+        let path = credentials::dir()?.join(filename);
         if !path.exists() {
             return Ok(None);
         }

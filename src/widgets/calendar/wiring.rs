@@ -109,14 +109,17 @@ fn build_entry(
             } else {
                 entry.calendar_ids.clone()
             };
-            build_caldav_entry(urls).map(|p| (p, source))
+            build_caldav_entry(urls, entry.account.as_deref()).map(|p| (p, source))
         }
         ProviderKind::Ics => build_ics_entry(entry).map(|p| (p, source)),
     }
 }
 
-fn build_caldav_entry(urls: Vec<String>) -> Result<Arc<dyn CalendarProvider>, String> {
-    let creds = match CalDavCredentials::load() {
+fn build_caldav_entry(
+    urls: Vec<String>,
+    account: Option<&str>,
+) -> Result<Arc<dyn CalendarProvider>, String> {
+    let creds = match CalDavCredentials::load_for(account) {
         Ok(Some(c)) => c,
         Ok(None) => {
             return Err(

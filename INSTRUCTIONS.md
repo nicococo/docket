@@ -56,3 +56,20 @@ Set `provider = "imap"` under `[email]` in `config.toml`. For multiple accounts,
 Each `[[feeds.feeds]]` entry in `config.toml` has a `topic` and `url`. Notes are Markdown; set `[notes] notes_dir` to use a different folder.
 
 Docket reloads configuration changes automatically. If a connection fails, check the error in the pane, the credentials and `~/.config/docket/docket.log`.
+
+## Agent and CLI setup
+
+Named sources can be managed without opening the TUI:
+
+```sh
+docket setup feed add work https://example.com/rss.xml
+docket setup feed remove work
+printf '%s' "$APP_PASSWORD" | docket setup email add work --host imap.example.com --username you@example.com
+docket setup email remove work
+docket setup calendar add personal --kind local
+printf '%s' "$PRIVATE_ICS_URL" | docket setup calendar add work --kind ics
+docket setup calendar add work --kind caldav --server https://caldav.example.com --username you@example.com
+docket setup calendar remove work
+```
+
+Email and CalDAV app passwords and private ICS URLs are read from stdin and saved under `credentials/` with private file permissions. Add `--calendar-id URL` (repeatable) to restrict a CalDAV source. Names contain only letters, digits, `_` or `-`; remove commands require a unique exact name. Use `docket --config PATH setup …` to target another config directory.

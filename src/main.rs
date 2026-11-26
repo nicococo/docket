@@ -24,6 +24,7 @@ mod pane_layout;
 mod polling;
 mod runtime_state;
 mod settings;
+mod setup_cli;
 mod text;
 mod theme;
 mod ui;
@@ -65,6 +66,11 @@ enum Command {
     Agent {
         #[command(subcommand)]
         command: AgentCommand,
+    },
+    /// Add or remove named feeds, email accounts, and calendar sources.
+    Setup {
+        #[command(subcommand)]
+        command: setup_cli::Command,
     },
 }
 
@@ -163,7 +169,10 @@ fn main() -> Result<()> {
         }
 
         if let Some(command) = cli.command {
-            return run_agent_command(command, cli.config.as_deref());
+            return match command {
+                Command::Agent { .. } => run_agent_command(command, cli.config.as_deref()),
+                Command::Setup { command } => setup_cli::run(command, cli.config.as_deref()),
+            };
         }
 
         app::run(cli.config).await
@@ -171,7 +180,9 @@ fn main() -> Result<()> {
 }
 
 fn run_agent_command(command: Command, config_path: Option<&std::path::Path>) -> Result<()> {
-    let Command::Agent { command } = command;
+    let Command::Agent { command } = command else {
+        anyhow::bail!("expected an agent command");
+    };
     match command {
         AgentCommand::Notes { command } => run_agent_notes(command, config_path),
         AgentCommand::Calendar { command } => {
