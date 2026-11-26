@@ -65,6 +65,8 @@ Docket creates its default configuration on first run. Press `?` for keys, `Tab`
 
 Settings live in `~/.config/docket/config.toml`; notes are Obsidian-compatible Markdown files under `~/.config/docket/notes/` by default, with the folder configurable in Settings. Calendar, feed and email connections are optional. Credentials are stored separately in `~/.config/docket/credentials/`. See [setup instructions](INSTRUCTIONS.md).
 
+Agents can share context through docket's notes: `docket agent notes list`, `docket agent notes read <id>`, and `cat note.md | docket agent notes add`. They can also read the cached dashboard data with `docket agent calendar list`, `docket agent feeds list`, and `docket agent email list`; `docket agent email read <id>` prints a message body. These commands read the latest successful widget cache and include its update time; reading email does not change its read state.
+
 There is no telemetry or docket-hosted service. Docket contacts the feeds, calendars and mail servers you configure.
 
 ## Development
