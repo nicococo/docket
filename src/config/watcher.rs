@@ -57,3 +57,39 @@ pub fn spawn(dir: PathBuf) -> Result<mpsc::Receiver<PathBuf>> {
 
     Ok(rx)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn reports_file_creation_in_watched_directory() {
+        let dir = std::env::temp_dir().join(format!(
+            "docket-watcher-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut events = spawn(dir.clone()).unwrap();
+        let file = dir.join("config.toml");
+        std::fs::write(&file, "[global]\n").unwrap();
+
+        let event = tokio::time::timeout(std::time::Duration::from_secs(3), events.recv())
+            .await
+            .expect("watcher should report the file change")
+            .expect("watcher channel should remain open");
+        assert_eq!(event, file);
+        drop(events);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn rejects_a_missing_directory() {
+        let dir = std::env::temp_dir().join(format!("docket-missing-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(spawn(dir).is_err());
+    }
+}

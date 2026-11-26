@@ -220,3 +220,58 @@ fn init_tracing() {
         .with_writer(std::sync::Mutex::new(file))
         .try_init();
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cli_accepts_each_cache_clear_form() {
+        let all = Cli::try_parse_from(["docket", "--clear-cache"]).unwrap();
+        assert_eq!(all.clear_cache.as_deref(), Some("*"));
+
+        let kind = Cli::try_parse_from(["docket", "--clear-cache", "email"]).unwrap();
+        assert_eq!(kind.clear_cache.as_deref(), Some("email"));
+
+        let instance =
+            Cli::try_parse_from(["docket", "--clear-cache-forced", "feeds@work"]).unwrap();
+        assert_eq!(instance.clear_cache_forced.as_deref(), Some("feeds@work"));
+    }
+
+    #[test]
+    fn cli_accepts_config_and_init_together() {
+        let cli =
+            Cli::try_parse_from(["docket", "--init", "--config", "/tmp/docket.toml"]).unwrap();
+        assert!(cli.init);
+        assert_eq!(
+            cli.config.as_deref(),
+            Some(std::path::Path::new("/tmp/docket.toml"))
+        );
+    }
+
+    #[test]
+    fn cache_clear_targets_resolve_to_the_right_scope() {
+        assert!(matches!(ClearAction::parse("*"), ClearAction::All));
+        assert!(matches!(ClearAction::parse(""), ClearAction::All));
+        assert!(matches!(ClearAction::parse("email"), ClearAction::Kind(k) if k == "email"));
+        assert!(
+            matches!(ClearAction::parse("feeds@work"), ClearAction::Instance { kind, instance } if kind == "feeds" && instance == "work")
+        );
+        assert_eq!(
+            ClearAction::All.confirm_message(),
+            "Clear ALL cached docket data?"
+        );
+        assert_eq!(
+            ClearAction::Kind("email".into()).confirm_message(),
+            "Clear all cached data for widget \"email\"?"
+        );
+        assert_eq!(
+            ClearAction::Instance {
+                kind: "feeds".into(),
+                instance: "work".into()
+            }
+            .confirm_message(),
+            "Clear cached data for feeds@work?"
+        );
+    }
+}

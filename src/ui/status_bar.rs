@@ -81,3 +81,46 @@ pub fn render(
     let line = Line::from(spans).alignment(Alignment::Left);
     frame.render_widget(Paragraph::new(line), area);
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ratatui::{backend::TestBackend, Terminal};
+
+    fn rendered_line(width: u16, mouse_capture: bool, focus: Option<&str>) -> String {
+        let backend = TestBackend::new(width, 1);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let theme = Theme::builtin_defaults();
+        terminal
+            .draw(|frame| render(frame, frame.area(), focus, mouse_capture, &theme))
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        (0..width).map(|x| buffer[(x, 0)].symbol()).collect()
+    }
+
+    #[test]
+    fn responsive_shortcuts_fit_the_three_width_bands() {
+        let wide = rendered_line(120, false, Some("email"));
+        assert!(wide.contains("v"));
+        assert!(wide.contains("Ctrl+T mouse"));
+        assert!(wide.contains("settings"));
+
+        let medium = rendered_line(90, true, Some("email"));
+        assert!(medium.contains("Tab"));
+        assert!(medium.contains("? help"));
+        assert!(!medium.contains("Ctrl+T"));
+
+        let narrow = rendered_line(60, true, Some("email"));
+        assert!(narrow.contains("settings"));
+        assert!(narrow.contains("q"));
+    }
+
+    #[test]
+    fn focus_fallback_and_mouse_release_hint_are_rendered() {
+        let no_focus = rendered_line(124, false, None);
+        assert!(no_focus.contains("—"));
+        assert!(no_focus.contains("Ctrl+T mouse"));
+        let captured = rendered_line(124, true, None);
+        assert!(!captured.contains("Ctrl+T mouse"));
+    }
+}

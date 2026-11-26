@@ -100,3 +100,41 @@ pub fn render(
         inner,
     );
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ratatui::{backend::TestBackend, Terminal};
+
+    #[test]
+    fn render_reports_scroll_bounds_and_clamps_overscroll() {
+        let backend = TestBackend::new(36, 12);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let theme = Theme::builtin_defaults();
+        let sections = [Section {
+            title: "Global".into(),
+            bindings: (0..20)
+                .map(|i| (format!("{i}"), format!("action {i}")))
+                .collect(),
+        }];
+        let max = Cell::new(0);
+        terminal
+            .draw(|frame| render(frame, frame.area(), &sections, &theme, u16::MAX, &max))
+            .unwrap();
+        assert!(max.get() > 0);
+        let buffer = terminal.backend().buffer();
+        assert!(buffer.content.iter().any(|cell| cell.symbol() == "?"));
+    }
+
+    #[test]
+    fn empty_help_sections_render_without_scroll() {
+        let backend = TestBackend::new(40, 16);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let theme = Theme::builtin_defaults();
+        let max = Cell::new(u16::MAX);
+        terminal
+            .draw(|frame| render(frame, frame.area(), &[], &theme, 0, &max))
+            .unwrap();
+        assert_eq!(max.get(), 0);
+    }
+}
