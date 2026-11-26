@@ -922,14 +922,15 @@ impl Settings {
         }
         thread::spawn(move || {
             let result = Command::new("herdr")
-                .args(["plugin", "update", "nicococo.docket"])
+                .args(["plugin", "update", "nicococo.docket", "--yes"])
                 .stdin(std::process::Stdio::null())
                 .output();
             let message = match result {
                 Ok(output) if output.status.success() => "Plugin updated. Reopen docket.".into(),
                 Ok(output) => format!(
-                    "Plugin update failed: {}",
-                    String::from_utf8_lossy(&output.stderr).trim()
+                    "Plugin update failed ({}): {}",
+                    output.status,
+                    Self::command_output(&output.stdout, &output.stderr)
                 ),
                 Err(error) => format!("Could not run Herdr: {error}"),
             };
@@ -937,6 +938,17 @@ impl Settings {
                 *text = message;
             }
         });
+    }
+
+    fn command_output(stdout: &[u8], stderr: &[u8]) -> String {
+        let stdout = String::from_utf8_lossy(stdout).trim().to_owned();
+        let stderr = String::from_utf8_lossy(stderr).trim().to_owned();
+        match (stdout.is_empty(), stderr.is_empty()) {
+            (false, false) => format!("{stdout}\n{stderr}"),
+            (false, true) => stdout,
+            (true, false) => stderr,
+            (true, true) => "no output captured".into(),
+        }
     }
 
     pub fn handle_key(&mut self, key: KeyEvent) -> bool {
@@ -1632,6 +1644,17 @@ fn write_config_atomic(path: &std::path::Path, text: &str) -> Result<()> {
 mod tests {
     use super::*;
     use std::sync::atomic::{AtomicU64, Ordering};
+
+    #[test]
+    fn command_output_includes_both_streams_and_handles_empty_output() {
+        assert_eq!(
+            Settings::command_output(b" summary \n", b" details \n"),
+            "summary\ndetails"
+        );
+        assert_eq!(Settings::command_output(b" summary \n", b""), "summary");
+        assert_eq!(Settings::command_output(b"", b" details \n"), "details");
+        assert_eq!(Settings::command_output(b"", b""), "no output captured");
+    }
 
     fn fixture() -> PathBuf {
         static NEXT: AtomicU64 = AtomicU64::new(0);
