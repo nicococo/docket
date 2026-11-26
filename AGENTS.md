@@ -12,6 +12,8 @@ Origins); shipping under GPL v3-or-later (see `LICENSE` +
 `CONTRIBUTING.md`).
 
 For user-facing setup, see `README.md` and `INSTRUCTIONS.md`.
+When helping a user connect Gmail and Google Calendar, follow
+[Agent-guided Gmail and Google Calendar setup](INSTRUCTIONS.md#agent-guided-gmail-and-google-calendar-setup).
 
 ## Tech Stack
 
