@@ -670,8 +670,9 @@ fn selected_message_has_a_full_width_highlight_bar() {
     let st = widget.state.lock().unwrap();
     let area = st.last_list_area.unwrap();
     let row = area.y + st.row_layout[0].1;
+    let selected_bg = widget.theme.text_selected.fg.unwrap_or(Color::LightYellow);
     let buffer = terminal.backend().buffer();
     for x in area.x..area.x + area.width {
-        assert_eq!(buffer[(x, row)].bg, Color::LightYellow, "column {x}");
+        assert_eq!(buffer[(x, row)].bg, selected_bg, "column {x}");
     }
 }
