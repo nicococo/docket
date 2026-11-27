@@ -56,6 +56,16 @@ Ask an agent to read the [setup guide](INSTRUCTIONS.md) and help configure the s
 
 Agents can add named sources with `docket setup feed`, `docket setup email`, and `docket setup calendar`. Herdr installs the CLI inside its managed plugin directory rather than on `PATH`; the guide explains how to locate it. Secrets are read from stdin and stored in private credential files.
 
+### Install the agent skill
+
+The Docket skill teaches compatible coding agents how to find the installed CLI, configure sources safely, and use shared notes and scoped memory. Install it once per machine for the harnesses supported by the skills installer:
+
+```sh
+npx skills add nicococo/docket --skill docket -g
+```
+
+This does not install the Herdr plugin or connect accounts. Harnesses not supported by the installer can use [`skills/docket/SKILL.md`](skills/docket/SKILL.md) as project or user instructions. The skill complements [INSTRUCTIONS.md](INSTRUCTIONS.md), which remains the detailed setup guide.
+
 ## Notes for people and agents
 
 Notes are plain Markdown in the folder set under `[notes].notes_dir` (by default `~/.config/docket/notes/`). Docket’s `>` title paths appear as groups in the notes pane; board notes use a marker and Markdown task lists. The files remain editable in Obsidian and other Markdown tools.

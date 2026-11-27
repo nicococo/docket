@@ -49,6 +49,16 @@ Agent procedure:
 
 For other sources, use `docket setup feed add|remove`, `docket setup email add|remove`, and `docket setup calendar add|remove`. Use `--help` for exact options. Email and CalDAV app passwords and ICS URLs are read from stdin. See the relevant provider’s own help page for server details.
 
+## Install the agent skill
+
+For compatible coding agents, install Docket's reusable instructions once per machine:
+
+```sh
+npx skills add nicococo/docket --skill docket -g
+```
+
+The skill helps agents find the installed CLI and use Docket's setup, notes, memory, and read-only data commands. It does not install the Herdr plugin or grant access to accounts. The installer supports only some harnesses; for others, copy [`skills/docket/SKILL.md`](skills/docket/SKILL.md) into the agent's project or user instructions. This guide remains the source for provider setup steps.
+
 ## Notes and agent memory
 
 Notes are plain Markdown under the notes folder configured in Settings (`~/.config/docket/notes/` by default). They work in Obsidian. Docket interprets `>` in a note’s first line as a path, and renders board notes from Markdown headings and task lists. Point `notes_dir` at a folder in a private GitHub repository or Obsidian vault to sync it with Git; Git handles syncing and conflicts, not docket. Avoid editing the same note on two machines at once. Keep credentials out of notes.
