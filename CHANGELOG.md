@@ -95,6 +95,14 @@ the `Cargo.toml` `version` field.
   registrations; every remaining credential file is user-written, so
   `credentials::load` is now the module's only entry point.
 
+## [0.5.1] — 2026-11-27
+
+### Added
+
+- **Reusable Docket agent skill.** Compatible coding agents can install
+  Docket's instructions globally to find its CLI and use source setup,
+  shared notes, scoped memory, and cached data commands.
+
 ## [0.1.0] — docket fork
 
 docket is a hard fork of [glint](https://github.com/ntrospect0/glint)
