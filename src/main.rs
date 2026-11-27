@@ -682,6 +682,7 @@ mod agent_tests {
                 AgentCommand::Feeds { .. } => "feeds",
                 AgentCommand::Email { .. } => "email",
                 AgentCommand::Notes { .. } => "notes",
+                AgentCommand::Memory { .. } => "memory",
             };
             assert_eq!(actual, expected);
         }
