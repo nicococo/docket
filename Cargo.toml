@@ -1,8 +1,8 @@
 [package]
 name = "docket-tui"
-version = "0.3.0"
+version = "0.5.0"
 edition = "2021"
-description = "A fast terminal dashboard that brings calendar, feeds, notes, and email together — forked from glint"
+description = "Quick-glance terminal dashboard and shared Markdown memory for people and coding agents across projects and machines"
 license = "GPL-3.0-or-later"
 repository = "https://github.com/nicococo/docket"
 keywords = ["tui", "dashboard", "terminal", "productivity", "ratatui"]

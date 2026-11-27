@@ -160,10 +160,10 @@ pub fn run(command: Command, config: Option<&Path>) -> Result<()> {
                 }
                 let cred = format!(
                     "host = {}\nport = {}\nuse_tls = true\nusername = {}\napp_password = {}\n",
-                    toml_edit::ser::to_string(&args.host)?,
+                    toml_string(&args.host),
                     args.port,
-                    toml_edit::ser::to_string(&args.username)?,
-                    toml_edit::ser::to_string(&secret)?
+                    toml_string(&args.username),
+                    toml_string(&secret)
                 );
                 secret.clear();
                 credential_write = Some((path, cred));
@@ -244,9 +244,9 @@ pub fn run(command: Command, config: Option<&Path>) -> Result<()> {
                     }
                     let body = format!(
                         "server = {}\nusername = {}\napp_password = {}\n",
-                        toml_edit::ser::to_string(server)?,
-                        toml_edit::ser::to_string(username)?,
-                        toml_edit::ser::to_string(&password)?
+                        toml_string(server),
+                        toml_string(username),
+                        toml_string(&password)
                     );
                     password.clear();
                     credential_write = Some((p, body));
@@ -373,6 +373,11 @@ fn remove_one<F: Fn(&Table) -> bool>(
     rows.remove(ix[0]);
     Ok(())
 }
+
+fn toml_string(text: &str) -> String {
+    toml_edit::Value::from(text).to_string()
+}
+
 fn write_private(path: &Path, body: &str) -> Result<()> {
     let parent = path.parent().context("credential path has no parent")?;
     std::fs::create_dir_all(parent)?;

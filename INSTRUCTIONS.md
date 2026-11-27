@@ -1,144 +1,67 @@
-# Connect your sources
+# Docket quick guide
 
-Start docket once to create `~/.config/docket/`. Press `s` (`Ctrl+G` also works) for settings. `Tab` switches pages, arrows select, `Enter` edits, `Ctrl+U` clears a field, `a` adds a source/account, `x` removes the last one, and `Ctrl+S` saves. Field descriptions explain formats and where to find setup details. Credentials live in `~/.config/docket/credentials/`; keep them private and use app passwords where available.
+Docket is a fixed four-pane terminal cockpit for the working moment: scan unread and recent email, glance at calendars and feeds, and capture next steps. It is for quick catch-up, not long-term email management. People and coding agents share the same notes; Herdr opens and closes the dashboard with a shortcut.
 
-## Calendar
+## Connect sources
 
-The default calendar is local (`calendar.ics`). For CalDAV, edit `credentials/caldav.toml`:
+Start docket and press `s` for settings. `Tab` switches settings pages; arrows select fields; `Enter` edits; `a` adds a source/account; `x` removes one; `Ctrl+S` saves. Credentials belong in docket’s private `credentials/` directory. Use provider app passwords, never primary passwords.
 
-```toml
-server = "https://caldav.icloud.com"
-username = "you@example.com"
-app_password = "your-app-password"
-```
+- **Email:** Gmail uses IMAP at `imap.gmail.com:993` with TLS and a Google app password. Other IMAP providers need their server, username, and app password.
+- **Google Calendar:** add the calendar’s private **Secret address in iCal format** as an ICS source. It is read-only. Keep the URL private. [Google instructions](https://support.google.com/calendar/answer/37648).
+- **CalDAV:** use the server URL, account name, and an app password. Local `calendar.ics` is available by default.
+- **Feeds:** add RSS or Atom URLs in Feeds settings.
 
-Add to `config.toml`:
+## Set up with an agent
 
-```toml
-[[calendar.providers]]
-kind = "caldav"
-```
+Use this prompt:
 
-For an ICS feed, add it to `credentials/ics.toml` and reference its label:
+> Read https://github.com/nicococo/docket/blob/main/INSTRUCTIONS.md. Help me set up Gmail and Google Calendar in docket. Find and verify the installed docket CLI first. Check existing sources and preserve them. Ask for needed details one at a time. Never ask me to share passwords or private calendar URLs in chat; have me enter each secret in a hidden local prompt. Configure one account at a time, then help me verify that email and calendar data load.
 
-```toml
-# credentials/ics.toml
-[[feeds]]
-label = "work"
-url = "https://example.com/calendar.ics"
-```
+Agent procedure:
 
-```toml
-# config.toml
-[[calendar.providers]]
-kind = "ics"
-account = "work"
-```
-
-Repeat both blocks for additional ICS calendars. Treat private feed URLs as secrets.
-
-## Email
-
-Add an account in Email settings, then fill its server, username, and app password fields. For manual setup, create `credentials/imap.toml`:
-
-```toml
-host = "imap.gmail.com"
-port = 993
-use_tls = true
-username = "you@example.com"
-app_password = "your-app-password"
-```
-
-Set `provider = "imap"` under `[email]` in `config.toml`. For multiple accounts, use `[[email.accounts]]` entries with `label` and `folders`, and name the matching credential files `imap_<label>.toml`. App-password setup varies by provider; some services do not support IMAP password authentication.
-
-## Feeds and notes
-
-Each `[[feeds.feeds]]` entry in `config.toml` has a `topic` and `url`. Notes are Markdown; set `[notes] notes_dir` to use a different folder.
-
-Docket reloads configuration changes automatically. If a connection fails, check the error in the pane, the credentials and `~/.config/docket/docket.log`.
-
-## Agent and CLI setup
-
-Named sources can be managed without opening the TUI:
-
-```sh
-docket setup feed add work https://example.com/rss.xml
-docket setup feed remove work
-python3 -c 'import getpass, sys; sys.stdout.write(getpass.getpass("App password: "))' | docket setup email add work --host imap.example.com --username you@example.com
-docket setup email remove work
-docket setup calendar add personal --kind local
-python3 -c 'import getpass, sys; sys.stdout.write(getpass.getpass("Secret ICS URL: ").strip())' | docket setup calendar add work --kind ics
-docket setup calendar add work --kind caldav --server https://caldav.example.com --username you@example.com
-docket setup calendar remove work
-```
-
-Email and CalDAV app passwords and private ICS URLs are read from stdin and saved under `credentials/` with private file permissions. Add `--calendar-id URL` (repeatable) to restrict a CalDAV source. Names contain only letters, digits, `_` or `-`; remove commands require a unique exact name. Use `docket --config PATH setup …` to target another config directory.
-
-## Agent-guided Gmail and Google Calendar setup
-
-Agents: when asked to connect email and calendars, guide the user through the
-following steps, one account at a time. Ask for missing details and help resolve
-errors before continuing. Never request passwords or secret calendar URLs in chat.
-
-1. Find the active `docket` executable. A standalone install may be on `PATH`;
-   Herdr keeps plugin binaries in a private install directory. Resolve its active
-   plugin root from Herdr's registry, then use the bundled binary directly:
+1. Find the CLI. Herdr’s managed plugin keeps the executable under its plugin root rather than on `PATH`; resolve it from Herdr’s registry if no standalone binary is installed:
 
    ```sh
+   docket=$(command -v docket || true)
+   if [ -z "$docket" ]; then
    plugin_root=$(python3 -c 'import json,os,pathlib; p=pathlib.Path(os.environ.get("XDG_CONFIG_HOME",pathlib.Path.home()/".config"))/"herdr/plugins.json"; d=json.loads(p.read_text()); print(next(x["plugin_root"] for x in d if x["plugin_id"]=="nicococo.docket" and x["enabled"]))')
    docket="$plugin_root/target/release/docket"
+   fi
    "$docket" setup --help
    ```
 
-   Herdr does not currently provide a manifest option to add plugin binaries to
-   every agent's PATH or inject plugin-specific instructions into every agent.
-   The registry lookup above works across agents and Herdr sessions. If this
-   build lacks setup commands, explain that it needs a newer build; do not invent
-   commands. Inspect configured source names without printing credentials, and
-   preserve existing sources.
-2. Ask for each email address and desired account name, such as `personal` or
-   `work`. Use that name for both email and calendar; names allow letters, digits,
-   `_` and `-`. Confirm whether the user wants the primary calendar or additional
-   calendars (each ICS feed needs a unique calendar source name).
-3. For Gmail, use `imap.gmail.com`, port `993`, TLS, the full email address as the
-   username, and `INBOX`. Have the user sign into the matching Google account,
-   enable 2-Step Verification if needed, and create an app password named for
-   docket at <https://myaccount.google.com/apppasswords>. Use the app password,
-   not the regular Google password. If the option is missing, consult
-   [Google's app-password help](https://support.google.com/accounts/answer/185833).
-4. Give the user this command with the verified executable path, account name
-   and email address substituted. Run it in their own interactive terminal so
-   they can enter the app password at a hidden prompt. Never place secrets in
-   command arguments, environment variables, scripts, chat, or shell history.
+   Use `"$docket"` for subsequent commands. Do not build a second copy if the installed binary exists.
+2. Ask for an account label and email address. Use the same label for that account’s calendar, unless the user prefers otherwise. Check configured names without displaying credentials.
+3. For Gmail, confirm 2-Step Verification and direct the user to create an app password at <https://myaccount.google.com/apppasswords>. In the user’s terminal, use:
 
    ```sh
-   python3 -c 'import getpass, sys; sys.stdout.write(getpass.getpass("Google app password: ").replace(" ", ""))' |
-     docket setup email add personal --host imap.gmail.com --username you@gmail.com
+   python3 -c 'import getpass,sys; sys.stdout.write(getpass.getpass("Google app password: ").replace(" ", ""))' | "$docket" setup email add personal --host imap.gmail.com --username you@gmail.com
    ```
 
-5. For the calendar, have the user open
-   <https://calendar.google.com/calendar/r/settings> in the matching Google
-   account. Under **Settings for my calendars**, select the calendar, then
-   **Integrate calendar → Secret address in iCal format**. This URL grants
-   read-only access; no app password is needed. Keep it private and do not make
-   the calendar public. If it is missing, consult
-   [Google's calendar help](https://support.google.com/calendar/answer/37648).
-   Have the user paste it at the hidden prompt in this command, again substituting
-   the executable and account name:
+4. Have the user copy **Secret address in iCal format** from Google Calendar settings. Enter it locally, hidden:
 
    ```sh
-   python3 -c 'import getpass, sys; sys.stdout.write(getpass.getpass("Secret ICS URL: ").strip())' |
-     docket setup calendar add personal --kind ics
+   python3 -c 'import getpass,sys; sys.stdout.write(getpass.getpass("Secret ICS URL: ").strip())' | "$docket" setup calendar add personal --kind ics
    ```
 
-6. Repeat for each account using its own app password and calendar URL. Ask for
-   success messages or redacted errors only. `Added …` confirms configuration was
-   saved; open docket and verify that messages and events actually load before
-   claiming the connections work. ICS feeds are read-only and updates may lag.
+   Replace `personal` and `you@gmail.com` with the confirmed values. Never put secrets in chat, command arguments, environment variables, scripts, or shell history.
+5. Check the `Added …` responses, then open docket and verify both sources load. If setup fails, request only the redacted error. Do not claim a connection works from a successful config write alone.
 
-If email setup reports `unsupported rust type`, check for an older setup CLI
-serializing standalone strings with `toml_edit::ser::to_string`. TOML string
-values should use `toml_edit::Value::from(text.as_str()).to_string()` instead.
-Check for partial writes before retrying; use a corrected build tested with dummy
-credentials in a temporary configuration. Never reuse a temporary executable path
-from someone else's session or expose real credentials while debugging.
+For other sources, use `docket setup feed add|remove`, `docket setup email add|remove`, and `docket setup calendar add|remove`. Use `--help` for exact options. Email and CalDAV app passwords and ICS URLs are read from stdin. See the relevant provider’s own help page for server details.
+
+## Notes and agent memory
+
+Notes are plain Markdown under the notes folder configured in Settings (`~/.config/docket/notes/` by default). They work in Obsidian. Docket interprets `>` in a note’s first line as a path, and renders board notes from Markdown headings and task lists. Point `notes_dir` at a folder in a private GitHub repository or Obsidian vault to sync it with Git; Git handles syncing and conflicts, not docket. Avoid editing the same note on two machines at once. Keep credentials out of notes.
+
+Agents can use `docket agent notes list|read|add` for shared notes. Use scoped memory for agent knowledge:
+
+```sh
+docket agent memory id --role implementer --agent omp
+printf 'Release workflow\n\nUse the locked release build.\n' | docket agent memory add --role implementer --agent omp
+docket agent memory list --role implementer --agent omp
+docket agent memory read 'Agents-docket-implementer-omp-Release workflow'
+```
+
+The identity is project/role/agent. Project defaults to the current Git root (or current directory outside Git); `DOCKET_PROJECT`, `DOCKET_AGENT_ROLE`, and `DOCKET_AGENT_ID` or `--project`, `--role`, `--agent` select stable scopes. Role and agent default to `general/shared`, so use explicit stable labels when separating agents. `id` prints the identity and path. `add` and `edit <id>` read Markdown from stdin; `delete <id>` removes only a note in the selected scope. IDs come from `list` output.
+
+Memory titles are stored as `Agents>project>role>agent>title`, using docket’s path grouping. That keeps agent notes apart from human notes and from other projects, roles, and agents while remaining ordinary `.md` files. Docket lists and filters the Markdown files directly; no separate database is needed. Before work, read relevant memories; save durable decisions, constraints, discoveries, and handoff state when useful; edit or delete stale notes. Keep secrets and transient speculation out of memory.

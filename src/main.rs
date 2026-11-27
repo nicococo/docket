@@ -81,6 +81,11 @@ enum AgentCommand {
         #[command(subcommand)]
         command: AgentNotesCommand,
     },
+    /// Read and maintain scoped Markdown memory for agents.
+    Memory {
+        #[command(subcommand)]
+        command: AgentMemoryCommand,
+    },
     /// Read the cached calendar timeline.
     Calendar {
         #[command(subcommand)]
@@ -106,6 +111,48 @@ enum AgentNotesCommand {
     Read { id: String },
     /// Add a Markdown note read from stdin; its first line is the title.
     Add,
+}
+
+#[derive(Debug, Subcommand)]
+enum AgentMemoryCommand {
+    /// Print the resolved project, role, agent ID, and note path.
+    #[command(alias = "identify", alias = "whoami")]
+    Id(MemoryScope),
+    /// List this agent's Markdown memories as JSON.
+    List(MemoryScope),
+    /// Print a memory by its ID from this scope.
+    Read {
+        id: String,
+        #[command(flatten)]
+        scope: MemoryScope,
+    },
+    /// Add Markdown from stdin; its first line is the note title.
+    Add(MemoryScope),
+    /// Replace a memory with Markdown from stdin.
+    Edit {
+        id: String,
+        #[command(flatten)]
+        scope: MemoryScope,
+    },
+    /// Delete a memory from this scope.
+    Delete {
+        id: String,
+        #[command(flatten)]
+        scope: MemoryScope,
+    },
+}
+
+#[derive(Debug, clap::Args, Clone)]
+struct MemoryScope {
+    /// Project scope (defaults to DOCKET_PROJECT or the current Git root).
+    #[arg(long)]
+    project: Option<String>,
+    /// Logical role such as planner, implementer, or reviewer.
+    #[arg(long)]
+    role: Option<String>,
+    /// Stable agent label such as codex, omp, or deepseek.
+    #[arg(long)]
+    agent: Option<String>,
 }
 
 #[derive(Debug, Subcommand)]
@@ -185,6 +232,7 @@ fn run_agent_command(command: Command, config_path: Option<&std::path::Path>) ->
     };
     match command {
         AgentCommand::Notes { command } => run_agent_notes(command, config_path),
+        AgentCommand::Memory { command } => run_agent_memory(command, config_path),
         AgentCommand::Calendar { command } => {
             #[cfg(feature = "widget-calendar")]
             return run_agent_calendar(command);
@@ -204,6 +252,199 @@ fn run_agent_command(command: Command, config_path: Option<&std::path::Path>) ->
             anyhow::bail!("agent email requires building with the widget-email feature")
         }
     }
+}
+
+#[cfg(feature = "widget-notes")]
+fn run_agent_memory(
+    command: AgentMemoryCommand,
+    config_path: Option<&std::path::Path>,
+) -> Result<()> {
+    use widgets::notes::store::{self, Note};
+
+    let config = config::load(config_path)?;
+    let (root, _) = store::resolve_root(config.notes.notes_dir.as_deref())?;
+    let scope = match &command {
+        AgentMemoryCommand::Id(s) | AgentMemoryCommand::List(s) | AgentMemoryCommand::Add(s) => {
+            s.clone()
+        }
+        AgentMemoryCommand::Read { scope, .. }
+        | AgentMemoryCommand::Edit { scope, .. }
+        | AgentMemoryCommand::Delete { scope, .. } => scope.clone(),
+    }
+    .resolve()?;
+    let prefix = scope.prefix();
+    let notes = store::load_all(&root, "main");
+    let in_scope = |note: &&Note| note.display_name().starts_with(&format!("{prefix}>"));
+
+    match command {
+        AgentMemoryCommand::Id(_) => println!(
+            "{}",
+            serde_json::json!({
+                "id": format!("{}/{}/{}", scope.project, scope.role, scope.agent),
+                "project": scope.project,
+                "role": scope.role,
+                "path": prefix,
+                "notes_dir": root,
+            })
+        ),
+        AgentMemoryCommand::List(_) => println!(
+            "{}",
+            serde_json::Value::Array(
+                notes
+                    .iter()
+                    .filter(in_scope)
+                    .map(|note| serde_json::json!({
+                        "id": note.id,
+                        "title": note.display_name().strip_prefix(&format!("{prefix}>" )).unwrap_or(note.display_name()),
+                        "path": note.display_name(),
+                        "modified": note.modified.duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs(),
+                    }))
+                    .collect(),
+            )
+        ),
+        AgentMemoryCommand::Read { id, .. } => {
+            print!("{}", scoped_note_body(&notes, &id, &prefix)?);
+        }
+        AgentMemoryCommand::Add(_) => {
+            let mut body = String::new();
+            io::stdin().read_to_string(&mut body)?;
+            let mut note = Note {
+                id: String::new(),
+                body: memory_body(&body, &prefix)?,
+                modified: std::time::SystemTime::UNIX_EPOCH,
+            };
+            store::save(&root, "main", &mut note)?;
+            println!("{}", serde_json::json!({ "id": note.id, "path": note.display_name() }));
+        }
+        AgentMemoryCommand::Edit { id, .. } => {
+            let old = notes
+                .iter()
+                .find(|note| note.id == id && note.display_name().starts_with(&format!("{prefix}>")))
+                .with_context(|| format!("memory not found in this scope: {id}"))?;
+            let mut body = String::new();
+            io::stdin().read_to_string(&mut body)?;
+            let mut note = Note {
+                id: old.id.clone(),
+                body: memory_body(&body, &prefix)?,
+                modified: old.modified,
+            };
+            store::save(&root, "main", &mut note)?;
+            println!("{}", serde_json::json!({ "id": note.id, "path": note.display_name() }));
+        }
+        AgentMemoryCommand::Delete { id, .. } => {
+            let note = notes
+                .iter()
+                .find(|note| note.id == id && note.display_name().starts_with(&format!("{prefix}>")))
+                .with_context(|| format!("memory not found in this scope: {id}"))?;
+            store::delete(&root, "main", &note.id)?;
+            println!("{}", serde_json::json!({ "deleted": note.id }));
+        }
+    }
+    Ok(())
+}
+
+#[cfg(not(feature = "widget-notes"))]
+fn run_agent_memory(
+    command: AgentMemoryCommand,
+    config_path: Option<&std::path::Path>,
+) -> Result<()> {
+    let _ = (command, config_path);
+    anyhow::bail!("agent memory requires building with the widget-notes feature")
+}
+
+#[derive(Debug, Clone)]
+struct ResolvedMemoryScope {
+    project: String,
+    role: String,
+    agent: String,
+}
+
+impl ResolvedMemoryScope {
+    fn prefix(&self) -> String {
+        format!("Agents>{}>{}>{}", self.project, self.role, self.agent)
+    }
+}
+
+impl MemoryScope {
+    fn resolve(self) -> Result<ResolvedMemoryScope> {
+        let project = self
+            .project
+            .or_else(|| std::env::var("DOCKET_PROJECT").ok())
+            .unwrap_or_else(default_project_name);
+        let role = self
+            .role
+            .or_else(|| std::env::var("DOCKET_AGENT_ROLE").ok())
+            .unwrap_or_else(|| "general".into());
+        let agent = self
+            .agent
+            .or_else(|| std::env::var("DOCKET_AGENT_ID").ok())
+            .unwrap_or_else(|| "shared".into());
+        for (label, value) in [("project", &project), ("role", &role), ("agent", &agent)] {
+            if value.is_empty()
+                || value.len() > 64
+                || !value
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.'))
+            {
+                anyhow::bail!("{label} must be 1–64 letters, digits, dots, underscores or hyphens");
+            }
+        }
+        Ok(ResolvedMemoryScope {
+            project,
+            role,
+            agent,
+        })
+    }
+}
+
+fn default_project_name() -> String {
+    let cwd = std::env::current_dir().unwrap_or_default();
+    let root = cwd
+        .ancestors()
+        .find(|path| path.join(".git").exists())
+        .unwrap_or(&cwd);
+    root.file_name()
+        .and_then(|name| name.to_str())
+        .filter(|name| !name.is_empty())
+        .unwrap_or("default")
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.') {
+                c
+            } else {
+                '_'
+            }
+        })
+        .take(64)
+        .collect()
+}
+
+#[cfg(feature = "widget-notes")]
+fn memory_body(body: &str, prefix: &str) -> Result<String> {
+    let mut lines = body.lines();
+    let title = lines.next().unwrap_or_default().trim();
+    if title.is_empty() {
+        anyhow::bail!("pipe Markdown with a title on the first line to stdin");
+    }
+    let rest = lines.collect::<Vec<_>>().join("\n");
+    Ok(if rest.is_empty() {
+        format!("{prefix}>{title}")
+    } else {
+        format!("{prefix}>{title}\n{rest}")
+    })
+}
+
+#[cfg(feature = "widget-notes")]
+fn scoped_note_body<'a>(
+    notes: &'a [widgets::notes::store::Note],
+    id: &str,
+    prefix: &str,
+) -> Result<&'a str> {
+    notes
+        .iter()
+        .find(|note| note.id == id && note.display_name().starts_with(&format!("{prefix}>")))
+        .map(|note| note.body.as_str())
+        .with_context(|| format!("memory not found in this scope: {id}"))
 }
 
 #[cfg(feature = "widget-notes")]
